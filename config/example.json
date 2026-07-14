@@ -1,0 +1,8 @@
+{
+  "storage_root": "D:/CAN_Research",
+  "channel": 0,
+  "bitrate": 250000,
+  "can_id_format": "extended",
+  "listen_only": true,
+  "transmit_enabled": false
+}
