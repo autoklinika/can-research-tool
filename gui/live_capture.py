@@ -8,6 +8,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -337,65 +338,58 @@ class LiveCaptureWidget(QWidget):
         self.messages_label.setText(
             f"Wiadomości: {status.logical_message_count:,}".replace(",", " ")
         )
-        self.markers_label.setText(f"Znaczniki: {status.marker_count}")
-        self.ids_label.setText(f"CAN ID: {status.unique_can_ids}")
+        self.markers_label.setText(f"Znaczniki: {status.marker_count:,}".replace(",", " "))
+        self.ids_label.setText(f"CAN ID: {status.unique_can_ids:,}".replace(",", " "))
         self.status_text.emit(
             f"{status.state.value.upper()} | {status.frame_count:,} ramek | "
-            f"{status.marker_count} znaczników | bufor {status.live_retained:,}/{status.live_capacity:,}".replace(",", " ")
+            f"{status.live_retained:,}/{status.live_capacity:,} live".replace(",", " ")
         )
+
+    def _set_capture_controls(self, active: bool) -> None:
+        self.start_button.setEnabled(not active and self.channel_combo.currentData() is not None)
+        self.stop_button.setEnabled(active and self._capture.is_active)
+        self.channel_combo.setEnabled(not active)
+        self.refresh_button.setEnabled(not active)
+        self.bitrate_combo.setEnabled(not active)
+        self.mode_combo.setEnabled(not active)
+        self.session_name.setEnabled(not active)
+        self.marker_table.setEnabled(not active)
+        self.add_marker_button.setEnabled(not active)
+        self.edit_marker_button.setEnabled(not active)
+        self.remove_marker_button.setEnabled(not active)
 
     def _finalize_project_session(self, status) -> None:
         path = self._current_session_path
-        if path is None or self._finalized_session_path == path:
+        if path is None or path == self._finalized_session_path:
             return
-        project_status = "ready" if status.state is CaptureState.STOPPED else "error"
         self.project.finalize_session(
             path,
             frame_count=status.frame_count,
             marker_count=status.marker_count,
             duration_s=status.elapsed_s,
-            status=project_status,
+            status="error" if status.state is CaptureState.ERROR else "ready",
         )
         self._finalized_session_path = path
         self.project_changed.emit()
         self.output_message.emit(
-            f"Zakończono sesję {path.name}: {status.frame_count} ramek, "
-            f"{status.marker_count} znaczników"
+            f"Sesja zakończona: {path} | ramki={status.frame_count} | znaczniki={status.marker_count}"
         )
-
-    def _set_capture_controls(self, active: bool) -> None:
-        self.start_button.setEnabled(not active and self.channel_combo.currentData() is not None)
-        self.stop_button.setEnabled(active and self._last_state is not CaptureState.STOPPING)
-        for widget in (
-            self.channel_combo,
-            self.refresh_button,
-            self.bitrate_combo,
-            self.mode_combo,
-            self.session_name,
-            self.add_marker_button,
-            self.edit_marker_button,
-            self.remove_marker_button,
-            self.marker_table,
-        ):
-            widget.setEnabled(not active)
 
     def _install_marker_controls(self, presets: list[MarkerPreset]) -> None:
         self._clear_marker_controls()
         self.runtime_marker_hint.setVisible(not presets)
         for preset in presets:
             shortcut = QShortcut(QKeySequence(preset.shortcut), self)
-            shortcut.setContext(Qt.ApplicationShortcut)
             shortcut.setAutoRepeat(False)
             shortcut.activated.connect(
                 lambda selected=preset: self._trigger_marker(selected, source="keyboard")
             )
             self._shortcuts.append(shortcut)
 
-            button = QPushButton(f"{preset.shortcut}\n{preset.name}")
-            button.setToolTip(f"{preset.name} — {preset.shortcut}")
-            button.setStyleSheet(
-                f"QPushButton {{ border-left: 5px solid {preset.color}; padding: 5px 9px; }}"
-            )
+            button = QPushButton(f"{preset.shortcut}  {preset.name}")
+            button.setMinimumHeight(38)
+            if preset.color:
+                button.setStyleSheet(f"border-left: 6px solid {preset.color}; padding: 6px;")
             button.clicked.connect(
                 lambda checked=False, selected=preset: self._trigger_marker(
                     selected, source="button"
@@ -446,7 +440,7 @@ class LiveCaptureWidget(QWidget):
             areas=[area.name for area in self.project.list_study_areas()],
             parent=self,
         )
-        if dialog.exec() != dialog.Accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         preset = dialog.preset(self.marker_model.rowCount())
         if self._shortcut_conflicts(preset.shortcut):
@@ -469,7 +463,7 @@ class LiveCaptureWidget(QWidget):
             areas=[area.name for area in self.project.list_study_areas()],
             parent=self,
         )
-        if dialog.exec() != dialog.Accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         updated = dialog.preset(row)
         if self._shortcut_conflicts(updated.shortcut, excluding_id=existing.id):
