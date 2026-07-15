@@ -54,8 +54,10 @@ class MarkerManagerDialog(QDialog):
         actions.addStretch(1)
         root.addLayout(actions)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText("Zapisz")
+        save_button = QDialogButtonBox.StandardButton.Save
+        cancel_button = QDialogButtonBox.StandardButton.Cancel
+        buttons = QDialogButtonBox(save_button | cancel_button)
+        buttons.button(save_button).setText("Zapisz")
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -69,7 +71,11 @@ class MarkerManagerDialog(QDialog):
             return
         preset = dialog.preset(self.model.rowCount())
         if self._shortcut_conflicts(preset.shortcut):
-            QMessageBox.warning(self, "CRT", "Ten skrót jest już przypisany do innego znacznika.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Ten skrót jest już przypisany do innego znacznika.",
+            )
             return
         self.model.add_preset(preset)
 
@@ -91,7 +97,11 @@ class MarkerManagerDialog(QDialog):
             return
         updated = dialog.preset(row)
         if self._shortcut_conflicts(updated.shortcut, excluding_id=existing.id):
-            QMessageBox.warning(self, "CRT", "Ten skrót jest już przypisany do innego znacznika.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Ten skrót jest już przypisany do innego znacznika.",
+            )
             return
         self.model.replace_preset(row, updated)
 
@@ -102,9 +112,17 @@ class MarkerManagerDialog(QDialog):
 
     def _save_and_accept(self) -> None:
         presets = self.model.presets()
-        active_shortcuts = [preset.shortcut.strip().lower() for preset in presets if preset.enabled]
+        active_shortcuts = [
+            preset.shortcut.strip().lower()
+            for preset in presets
+            if preset.enabled
+        ]
         if len(active_shortcuts) != len(set(active_shortcuts)):
-            QMessageBox.warning(self, "CRT", "Aktywne znaczniki mają zduplikowane skróty.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Aktywne znaczniki mają zduplikowane skróty.",
+            )
             return
         try:
             self.project.save_marker_presets(presets)
@@ -116,6 +134,7 @@ class MarkerManagerDialog(QDialog):
     def _shortcut_conflicts(self, shortcut: str, *, excluding_id: str = "") -> bool:
         normalized = shortcut.strip().lower()
         return any(
-            preset.id != excluding_id and preset.shortcut.strip().lower() == normalized
+            preset.id != excluding_id
+            and preset.shortcut.strip().lower() == normalized
             for preset in self.model.presets()
         )
