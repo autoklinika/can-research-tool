@@ -57,10 +57,54 @@ jobs:
           from tempfile import TemporaryDirectory
           from unittest.mock import patch
 
+          from PySide6.QtCore import Qt
           from PySide6.QtWidgets import QApplication, QDialog
 
           from app.markers import MarkerPreset
+          from app.project_dbc import import_project_dbc
           from gui.main_window import MainWindow
+          from gui.marker_manager import MarkerManagerDialog
+
+
+          DBC_TEXT = '''VERSION ""
+
+          NS_ :
+              NS_DESC_
+              CM_
+              BA_DEF_
+              BA_
+              VAL_
+              CAT_DEF_
+              CAT_
+              FILTER
+              BA_DEF_DEF_
+              EV_DATA_
+              ENVVAR_DATA_
+              SGTYPE_
+              SGTYPE_VAL_
+              BA_DEF_SGTYPE_
+              BA_SGTYPE_
+              SIG_TYPE_REF_
+              VAL_TABLE_
+              SIG_GROUP_
+              SIG_VALTYPE_
+              SIGTYPE_VALTYPE_
+              BO_TX_BU_
+              BA_DEF_REL_
+              BA_REL_
+              BA_DEF_DEF_REL_
+              BU_SG_REL_
+              BU_EV_REL_
+              BU_BO_REL_
+              SG_MUL_VAL_
+
+          BS_:
+
+          BU_: ECU
+
+          BO_ 291 EGR_Status: 8 ECU
+           SG_ EGR_Position : 0|8@1+ (0.4,0) [0|100] "%" Vector__XXX
+          '''
 
 
           class AcceptedProjectDialog:
@@ -86,24 +130,6 @@ jobs:
                   return "bench"
 
 
-          class AcceptedMarkerDialog:
-              def __init__(self, *, existing=None, areas=None, parent=None) -> None:
-                  self.existing = existing
-                  self.areas = list(areas or [])
-                  self.parent = parent
-
-              def exec(self):
-                  return QDialog.DialogCode.Accepted
-
-              def preset(self, sort_order: int) -> MarkerPreset:
-                  return MarkerPreset.create(
-                      "EGR odłączony",
-                      "F3",
-                      area="EGR",
-                      sort_order=sort_order,
-                  )
-
-
           app = QApplication([])
           with TemporaryDirectory() as temporary:
               PROJECT_ROOT = Path(temporary) / "project"
@@ -117,18 +143,42 @@ jobs:
               assert (PROJECT_ROOT / ".crt" / "project.sqlite").is_file()
 
               window.project.add_study_area("EGR")
+              window.project.save_marker_presets(
+                  [MarkerPreset.create("EGR odłączony", "F3", area="EGR")]
+              )
               window.explorer.refresh()
               window._open_live_capture()
               live = window._tab_keys["live-capture"]
-              before = live.marker_model.rowCount()
-              with patch("gui.live_capture.MarkerPresetDialog", AcceptedMarkerDialog):
-                  live._add_marker_preset()
-              assert live.marker_model.rowCount() == before + 1
-              assert window.project.list_marker_presets()[0].name == "EGR odłączony"
-              assert window.project.list_marker_presets()[0].shortcut == "F3"
+              live._update_marker_tile()
+              assert "1 aktywnych / 1" in live.marker_setup_button.text()
               assert live.message_table.model() is live.message_model
 
-              assert window.tabs.count() >= 2
+              marker_dialog = MarkerManagerDialog(window.project)
+              assert marker_dialog.model.rowCount() == 1
+              marker_dialog.close()
+
+              dbc_source = Path(temporary) / "egr.dbc"
+              dbc_source.write_text(DBC_TEXT, encoding="utf-8")
+              import_project_dbc(window.project, dbc_source)
+              window._open_decoders()
+              decoders = window._tab_keys["decoders"]
+              decoders.model.refresh()
+              assert decoders.model.rowCount() == 1
+              assert decoders.model.active_count == 1
+              assert decoders.model.setData(
+                  decoders.model.index(0, 0),
+                  Qt.Unchecked,
+                  Qt.CheckStateRole,
+              )
+              assert decoders.model.active_count == 0
+              assert decoders.model.setData(
+                  decoders.model.index(0, 0),
+                  Qt.Checked,
+                  Qt.CheckStateRole,
+              )
+              assert decoders.model.active_count == 1
+
+              assert window.tabs.count() >= 3
               assert window.explorer.tree.model().rowCount() == 1
               window.close()
           app.quit()
