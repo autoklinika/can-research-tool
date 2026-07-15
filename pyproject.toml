@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Passive CAN reverse-engineering toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["cantools>=39,<42"]
 
 [project.optional-dependencies]
 kvaser = ["canlib>=1.33,<2"]
