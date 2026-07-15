@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QStatusBar,
+    QTabBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -147,9 +148,7 @@ class MainWindow(QMainWindow):
         self.explorer_dock.setObjectName("projectExplorerDock")
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(260)
-        self.explorer_dock.visibilityChanged.connect(
-            self.toggle_explorer_action.setChecked
-        )
+        self.explorer_dock.visibilityChanged.connect(self.toggle_explorer_action.setChecked)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
 
         self.inspector = QPlainTextEdit()
@@ -262,11 +261,7 @@ class MainWindow(QMainWindow):
 
     def _set_project(self, project: CrtProject) -> None:
         if self._has_active_capture():
-            QMessageBox.warning(
-                self,
-                "CRT",
-                "Zatrzymaj aktywną rejestrację przed zmianą projektu.",
-            )
+            QMessageBox.warning(self, "CRT", "Zatrzymaj aktywną rejestrację przed zmianą projektu.")
             return
         self.project = project
         self.settings.setValue("project/lastPath", str(project.root))
@@ -284,8 +279,7 @@ class MainWindow(QMainWindow):
         if self.project is None:
             return
         key = "project-overview"
-        existing = self._activate_tab(key)
-        if existing:
+        if self._activate_tab(key):
             return
         widget = ProjectOverviewWidget(self.project)
         widget.open_live_requested.connect(self._open_live_capture)
@@ -320,10 +314,7 @@ class MainWindow(QMainWindow):
     def _open_area(self, area_id: str) -> None:
         if self.project is None:
             return
-        area = next(
-            (item for item in self.project.list_study_areas() if item.id == area_id),
-            None,
-        )
+        area = next((item for item in self.project.list_study_areas() if item.id == area_id), None)
         if area is None:
             return
         key = f"area:{area.id}"
@@ -334,11 +325,7 @@ class MainWindow(QMainWindow):
     def _add_study_area(self) -> None:
         if self.project is None:
             return
-        name, accepted = QInputDialog.getText(
-            self,
-            "Nowy obszar badań",
-            "Nazwa, np. EGR, VGT, SCR:",
-        )
+        name, accepted = QInputDialog.getText(self, "Nowy obszar badań", "Nazwa, np. EGR, VGT, SCR:")
         if not accepted or not name.strip():
             return
         try:
@@ -371,16 +358,11 @@ class MainWindow(QMainWindow):
         self._append_output(f"Import zakończony: {source} → {target}")
         self.explorer.refresh()
         self._open_session(target)
-        self._discard_finished_import_tasks()
+        self._import_tasks.clear()
 
     def _import_failed(self, source: str, error: str) -> None:
         self._append_output(f"Błąd importu {source}: {error}")
         QMessageBox.critical(self, "Błąd importu", f"{source}\n\n{error}")
-        self._discard_finished_import_tasks()
-
-    def _discard_finished_import_tasks(self) -> None:
-        self._import_tasks = [task for task in self._import_tasks if not task.autoDelete()]
-        # QRunnable ownership is handled by QThreadPool; keeping no stale references is enough.
         self._import_tasks.clear()
 
     def _open_placeholder(self, key: str, title: str, description: str) -> None:
@@ -408,7 +390,11 @@ class MainWindow(QMainWindow):
         self._tab_keys[key] = widget
         self.tabs.setCurrentIndex(index)
         if not closable:
-            self.tabs.tabBar().setTabButton(index, self.tabs.tabBar().RightSide, None)
+            self.tabs.tabBar().setTabButton(
+                index,
+                QTabBar.ButtonPosition.RightSide,
+                None,
+            )
 
     def _activate_tab(self, key: str) -> bool:
         widget = self._tab_keys.get(key)
@@ -446,11 +432,6 @@ class MainWindow(QMainWindow):
             if widget is None:
                 continue
             key = str(widget.property("crtTabKey") or "")
-            if key == "welcome":
-                self.tabs.removeTab(index)
-                self._tab_keys.pop(key, None)
-                widget.deleteLater()
-                continue
             if isinstance(widget, LiveCaptureWidget):
                 widget.shutdown()
             self.tabs.removeTab(index)
