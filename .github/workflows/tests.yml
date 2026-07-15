@@ -47,6 +47,7 @@ jobs:
 
           from PySide6.QtWidgets import QApplication, QDialog
 
+          from app.markers import MarkerPreset
           from gui.main_window import MainWindow
 
 
@@ -73,6 +74,24 @@ jobs:
                   return "bench"
 
 
+          class AcceptedMarkerDialog:
+              def __init__(self, *, existing=None, areas=None, parent=None) -> None:
+                  self.existing = existing
+                  self.areas = list(areas or [])
+                  self.parent = parent
+
+              def exec(self):
+                  return QDialog.DialogCode.Accepted
+
+              def preset(self, sort_order: int) -> MarkerPreset:
+                  return MarkerPreset.create(
+                      "EGR odłączony",
+                      "F3",
+                      area="EGR",
+                      sort_order=sort_order,
+                  )
+
+
           app = QApplication([])
           with TemporaryDirectory() as temporary:
               PROJECT_ROOT = Path(temporary) / "project"
@@ -88,6 +107,14 @@ jobs:
               window.project.add_study_area("EGR")
               window.explorer.refresh()
               window._open_live_capture()
+              live = window._tab_keys["live-capture"]
+              before = live.marker_model.rowCount()
+              with patch("gui.live_capture.MarkerPresetDialog", AcceptedMarkerDialog):
+                  live._add_marker_preset()
+              assert live.marker_model.rowCount() == before + 1
+              assert window.project.list_marker_presets()[0].name == "EGR odłączony"
+              assert window.project.list_marker_presets()[0].shortcut == "F3"
+
               assert window.tabs.count() >= 2
               assert window.explorer.tree.model().rowCount() == 1
               window.close()
