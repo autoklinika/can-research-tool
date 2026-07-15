@@ -14,6 +14,9 @@ dependencies = []
 kvaser = ["canlib>=1.33,<2"]
 dev = ["pytest>=8.3,<9", "ruff>=0.9,<1"]
 
+[project.scripts]
+crt-capture = "app.capture_cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["app", "kvaser"]
 
