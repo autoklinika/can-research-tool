@@ -20,3 +20,29 @@ jobs:
         run: python -m compileall -q app kvaser gui
       - name: Run tests
         run: pytest -q
+
+  gui-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install GUI
+        run: python -m pip install -e ".[gui]"
+      - name: Create main window offscreen
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from PySide6.QtWidgets import QApplication
+          from gui.main_window import MainWindow
+
+          app = QApplication([])
+          window = MainWindow()
+          assert window.windowTitle() == "CAN Research Tool"
+          window.close()
+          app.quit()
+          PY
