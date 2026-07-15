@@ -1,41 +1,72 @@
-# Architektura CRT — faza 1
+# Architektura CRT — neutralny pipeline CAN
 
 ## Cel
 
-CRT ma wspierać reverse engineering magistrali CAN: przechwytywanie materiału badawczego, porządkowanie go, porównywanie sesji oraz wykrywanie zależności w surowych ramkach.
+CRT wspiera reverse engineering magistrali CAN. Surowa ramka i kompletna sesja są zawsze źródłem prawdy; dekodowanie tworzy dodatkowe widoki i nigdy nie usuwa ani nie zastępuje materiału wejściowego.
 
 ## Granice projektu
 
-CRT nie importuje logiki ECU Platform, ekranów konkretnych ECU ani gotowych procedur UDS. Dane z istniejących projektów mogą być używane jako próbki wejściowe do testów kompatybilności, ale nie definiują modelu domenowego CRT.
+CRT nie importuje logiki ECU Platform, ekranów konkretnych ECU ani gotowych procedur dla określonych sterowników. Znane logi mogą służyć jako materiał regresyjny, ale nie definiują architektury narzędzia.
 
-## Warstwy
+## Przepływ danych
 
-### `kvaser/`
+```text
+CanFrame
+   -> CaptureSession
+   -> TransportPipeline
+   -> TransportMessage
+   -> ProtocolRegistry
+   -> DecodedMessage
+   -> LogicalMessageAnalyzer
+```
 
-Adapter sprzętowy i import plików. Kod tej warstwy zna CANlib, kanały Kvaser, flagi ramek i formaty eksportu.
+## Warstwa sprzętowa `kvaser/`
 
-W fazie 1 adapter online:
+Adapter Kvaser zna CANlib, kanały, flagi i tryb elektryczny odbioru. Nie udostępnia metod `write` ani `send`.
 
-- sprawdza obecność trybu `SILENT`,
-- ustawia `Driver.SILENT` przed `busOn()`,
-- udostępnia tylko operacje odczytu,
-- nie zawiera metody `write`, `send` ani odpowiednika.
+- `BENCH` — aplikacja nie nadaje ramek, a kontroler potwierdza poprawny odbiór bitem ACK; tryb do pracy z pojedynczym ECU na stole.
+- `LISTEN_ONLY` — sprzętowy `SILENT`, bez ramek TX i bez ACK; tryb do kompletnej, aktywnej sieci.
 
-### `app/`
+## Neutralny model
 
-Warstwa niezależna od producenta interfejsu:
+- `CanFrame` — surowa ramka zależna wyłącznie od CAN.
+- `TransportMessage` — pojedyncza lub zrekonstruowana wiadomość wraz z listą ramek źródłowych, kompletnością i błędami.
+- `DecodedMessage` — interpretacja protokołu nałożona na wiadomość transportową.
 
-- model ramki i sesji,
-- serializacja sesji,
-- statystyki po CAN ID,
-- analiza okresowości,
-- analiza zmienności bajtów,
-- później porównywanie sesji i hipotezy sygnałów.
+## Wtyczki transportowe
 
-### Dekodery
+`TransportReassembler` jest neutralnym interfejsem składacza. Pierwsze implementacje:
 
-ISO-TP, UDS, J1939 i profile własne nie należą do rdzenia. Zostaną dołączone później przez neutralny interfejs dekodera, który konsumuje ramki lub kompletne sesje.
+- `RAW` — jedna ramka pozostaje jedną wiadomością;
+- `J1939 BAM`;
+- `J1939 RTS/CTS`;
+- `ISO-TP` dla typowych 11-bitowych identyfikatorów diagnostycznych;
+- `ISO-TP` dla 29-bitowego normal-fixed addressing z PF `0xDA` i `0xDB`.
 
-## Zasada bezpieczeństwa
+Klasyfikacja ISO-TP jest celowo konserwatywna, aby autorska ramka rozpoczynająca się bajtem podobnym do PCI nie została automatycznie uznana za transport diagnostyczny.
 
-Faza 1 jest pasywna również na poziomie magistrali: urządzenie pracuje w trybie silent/listen-only i nie potwierdza ramek bitem ACK. Jeżeli kanał lub sprzęt nie zgłasza obsługi silent mode, CRT odmawia rozpoczęcia nasłuchu.
+## Wtyczki protokołów
+
+`ProtocolDecoder` otrzymuje gotową `TransportMessage`. Rejestr dekoderów działa w określonej kolejności:
+
+1. UDS — tylko po rozpoznanym ISO-TP i tylko dla znanych identyfikatorów usług;
+2. J1939 — dla wiadomości zrekonstruowanych przez J1939 TP;
+3. reguły użytkownika dla protokołów autorskich;
+4. `UNKNOWN` jako bezpieczny fallback.
+
+Rozłożenie 29-bitowego CAN ID na pola przypominające J1939 nie jest dowodem, że protokół jest J1939. Dla nierozpoznanych ramek pola te są zapisywane wyłącznie jako kandydat pomocniczy.
+
+## Protokoły autorskie
+
+`MessageRule` pozwala opisać rodzinę identyfikatorów przez ID i maskę, typ ramki, transport oraz zakres długości payloadu. Reguła może oznaczyć wiadomość jako `PROPRIETARY` bez zmiany rdzenia i bez wymuszania interpretacji J1939 lub UDS.
+
+Późniejsze warstwy reguł będą obejmować sygnały, endian, skalowanie, liczniki i checksumy.
+
+## Pliki wynikowe
+
+Rejestracja tworzy dwa niezależne poziomy danych:
+
+- `*.crt.jsonl`, `*.frames.csv`, `*.summary.csv` — surowe ramki i statystyki CAN ID;
+- `*.messages.csv`, `*.messages.summary.csv` — wiadomości po rekonstrukcji transportu i ich rzeczywista okresowość.
+
+Istniejącą sesję można ponownie przeanalizować bez dostępu do interfejsu CAN przez `analyze_session.py`.
