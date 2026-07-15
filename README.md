@@ -2,79 +2,78 @@
 
 CRT to niezależne narzędzie do **reverse engineeringu komunikacji CAN**. Nie jest kopią ECU Platform i nie zawiera procedur diagnostycznych konkretnych sterowników.
 
-## Faza 1 — odbiór bez ramek aplikacyjnych TX
+## Aktualny zakres
 
 - wykrywanie interfejsów i kanałów Kvaser,
-- odbiór surowych ramek CAN bez udostępniania metod `write` / `send`,
-- dwa tryby elektryczne odbioru:
-  - `BENCH` — kontroler potwierdza poprawne ramki bitem ACK; wymagany na stole, gdy obserwowane ECU jest jedynym nadajnikiem,
-  - `LISTEN_ONLY` — sprzętowy `SILENT`, bez TX i bez ACK; do kompletnej sieci, w której inne aktywne węzły zapewniają ACK,
-- wyłączenie lokalnego echa transmisji innych uchwytów CANlib,
-- zapis kompletnej sesji z metadanymi,
-- import istniejących logów Kvaser CSV,
-- neutralna analiza ramek: ID, częstotliwość, okresowość, DLC i zmienność bajtów,
-- filtrowanie, oznaczanie i porównywanie sesji,
-- opcjonalne dekodery protokołów dodawane później jako osobne moduły.
+- odbiór bez udostępniania metod `write` / `send`,
+- `BENCH` z aktywnym ACK do pojedynczego ECU na stole,
+- `LISTEN_ONLY` bez TX i bez ACK do kompletnej aktywnej sieci,
+- zapis surowej sesji CRT i eksport CSV,
+- statystyki CAN ID, okresowości, DLC i zmienności bajtów,
+- neutralny model `CanFrame -> TransportMessage -> DecodedMessage`,
+- rekonstrukcja J1939 TP: BAM oraz RTS/CTS,
+- rekonstrukcja ISO-TP dla typowych 11- i 29-bitowych adresów diagnostycznych,
+- konserwatywna klasyfikacja UDS po ISO-TP,
+- bezpieczny fallback `UNKNOWN` dla ramek nierozpoznanych,
+- reguły użytkownika do oznaczania protokołów autorskich,
+- statystyki rzeczywistych wiadomości po rekonstrukcji transportu.
 
-Znane logi z SAC służą wyłącznie jako materiał testowy do sprawdzania kompatybilności importu i zapisu Kvaser.
+Surowe ramki pozostają źródłem prawdy. Dekodery tworzą dodatkowy widok i nie usuwają danych nierozpoznanych. Znane logi z SAC służą wyłącznie jako materiał testowy do sprawdzania kompatybilności.
 
 ## Struktura
 
-- `app/` — modele sesji, rejestrator i neutralny silnik analizy,
+- `app/` — modele, zapis sesji, transporty, dekodery i analiza,
 - `kvaser/` — izolowana integracja z Kvaser CANlib oraz import logów,
 - `sessions/` — lokalne sesje badawcze, pomijane przez Git,
 - `docs/` — architektura i decyzje projektowe,
-- `tests/` — testy parserów i analizy.
+- `tests/` — testy parserów, transportów i analizy.
 
 ## Rejestracja sesji Kvaser
 
 Domyślny zapis 10 sekund na kanale 0, 250 kbit/s, w trybie stanowiskowym `BENCH`:
 
 ```powershell
-python .\capture_session.py
-```
-
-Sesja o własnej nazwie i czasie 30 sekund:
-
-```powershell
-python .\capture_session.py --duration 30 --name ecu_startup
+.\.venv\Scripts\python.exe .\capture_session.py --duration 10 --name pierwszy_test
 ```
 
 Nasłuch bez limitu czasu, kończony przez `Ctrl+C`:
 
 ```powershell
-python .\capture_session.py --duration 0 --name long_capture
+.\.venv\Scripts\python.exe .\capture_session.py --duration 0 --name long_capture
 ```
 
 Podgląd każdej ramki w terminalu:
 
 ```powershell
-python .\capture_session.py --duration 10 --live
+.\.venv\Scripts\python.exe .\capture_session.py --duration 10 --live
 ```
 
 Tryb pełnego listen-only dla kompletnej sieci:
 
 ```powershell
-python .\capture_session.py --mode listen-only
+.\.venv\Scripts\python.exe .\capture_session.py --mode listen-only
 ```
 
-Po zakończeniu w katalogu `sessions/` powstają trzy pliki:
+Po zakończeniu powstaje pięć plików:
 
 - `*.crt.jsonl` — pełna sesja CRT z metadanymi,
-- `*.frames.csv` — surowe ramki w czytelnym formacie CSV,
-- `*.summary.csv` — statystyka według CAN ID.
+- `*.frames.csv` — surowe ramki,
+- `*.summary.csv` — statystyka według CAN ID,
+- `*.messages.csv` — wiadomości po rekonstrukcji transportu i dekodowaniu,
+- `*.messages.summary.csv` — statystyka rzeczywistych wiadomości logicznych.
 
-Po ponownej instalacji projektu dostępna jest również komenda:
+## Ponowna analiza istniejącej sesji
 
-```powershell
-crt-capture --duration 10 --name bench_test
-```
-
-## Uruchomienie testów
+Nie trzeba ponownie podłączać Kvasera:
 
 ```powershell
-python -m pip install -e ".[dev,kvaser]"
-python -m pytest -q
+.\.venv\Scripts\python.exe .\analyze_session.py sessions\pierwszy_test.crt.jsonl
 ```
 
-Sterownik Kvaser i pakiet `canlib` są zależnościami opcjonalnymi wymaganymi dopiero do nasłuchu online.
+## Testy
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Szczegóły architektury: `docs/architecture.md`.
