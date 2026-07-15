@@ -44,7 +44,10 @@ def test_live_message_buffer_is_bounded() -> None:
 
 def test_load_recent_messages_from_csv(tmp_path: Path) -> None:
     session_path = tmp_path / "capture.crt.jsonl"
-    with SessionStreamWriter(CaptureSession(name="capture"), session_path) as writer:
+    with SessionStreamWriter(
+        CaptureSession(name="capture", source="test"),
+        session_path,
+    ) as writer:
         writer.append(
             CanFrame(
                 sequence=0,
@@ -88,7 +91,10 @@ def test_load_recent_messages_from_csv(tmp_path: Path) -> None:
 
 def test_reconstruct_messages_when_csv_is_missing(tmp_path: Path) -> None:
     session_path = tmp_path / "raw.crt.jsonl"
-    with SessionStreamWriter(CaptureSession(name="raw"), session_path) as writer:
+    with SessionStreamWriter(
+        CaptureSession(name="raw", source="test"),
+        session_path,
+    ) as writer:
         writer.append(
             CanFrame(
                 sequence=0,
