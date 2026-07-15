@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from queue import Empty, Queue
 from threading import Event, RLock, Thread
 from time import monotonic, perf_counter_ns
 from typing import Callable, ContextManager, Protocol
@@ -17,6 +18,8 @@ from kvaser.backend import (
 )
 
 from .live_buffer import LiveFrameBuffer, LiveFrameSnapshot
+from .marker_stream import MarkerStreamWriter
+from .markers import CaptureMarker, MarkerPreset
 from .models import CanFrame, CaptureSession
 from .protocols import ProtocolRegistry
 from .session_stream import SessionStreamWriter
@@ -52,6 +55,7 @@ class CaptureConfig:
     live_buffer_capacity: int = 20_000
     read_timeout_ms: int = 50
     writer_flush_every: int = 256
+    marker_presets: tuple[MarkerPreset, ...] = ()
 
     def __post_init__(self) -> None:
         if self.channel_number < 0:
@@ -66,6 +70,13 @@ class CaptureConfig:
             raise ValueError("read_timeout_ms cannot be negative")
         if self.writer_flush_every <= 0:
             raise ValueError("writer_flush_every must be greater than zero")
+        shortcuts = [
+            preset.shortcut.strip().lower()
+            for preset in self.marker_presets
+            if preset.enabled
+        ]
+        if len(shortcuts) != len(set(shortcuts)):
+            raise ValueError("active marker shortcuts must be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +84,7 @@ class CapturePaths:
     session: Path
     raw_frames_csv: Path
     logical_messages_csv: Path
+    markers: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +94,7 @@ class CaptureStatus:
     frame_count: int
     logical_message_count: int
     incomplete_message_count: int
+    marker_count: int
     unique_can_ids: int
     adapter_name: str
     error: str
@@ -89,15 +102,11 @@ class CaptureStatus:
     live_capacity: int
     live_retained: int
     live_dropped_from_view: int
+    last_marker: CaptureMarker | None
 
 
 class CaptureService:
-    """Background Kvaser capture with constant-size live GUI state.
-
-    The worker owns CANlib, transport reassembly and disk writers. The GUI only
-    polls status and ``LiveFrameBuffer`` snapshots, so no per-frame Qt signal is
-    ever emitted.
-    """
+    """Background Kvaser capture with bounded GUI state and precise markers."""
 
     def __init__(
         self,
@@ -111,16 +120,20 @@ class CaptureService:
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._live_buffer = LiveFrameBuffer()
+        self._marker_queue: Queue[CaptureMarker] = Queue()
         self._state = CaptureState.IDLE
         self._started_monotonic: float | None = None
+        self._capture_origin_ns: int | None = None
         self._completed_elapsed_s = 0.0
         self._frame_count = 0
         self._logical_message_count = 0
         self._incomplete_message_count = 0
+        self._marker_count = 0
         self._unique_can_ids = 0
         self._adapter_name = ""
         self._error = ""
         self._paths: CapturePaths | None = None
+        self._last_marker: CaptureMarker | None = None
 
     def start(self, config: CaptureConfig) -> CapturePaths:
         with self._lock:
@@ -135,20 +148,25 @@ class CaptureService:
                 session=output_dir / f"{safe_name}.crt.jsonl",
                 raw_frames_csv=output_dir / f"{safe_name}.frames.csv",
                 logical_messages_csv=output_dir / f"{safe_name}.messages.csv",
+                markers=output_dir / f"{safe_name}.markers.jsonl",
             )
 
             self._stop_event = Event()
             self._live_buffer = LiveFrameBuffer(config.live_buffer_capacity)
+            self._marker_queue = Queue()
             self._state = CaptureState.STARTING
             self._started_monotonic = None
+            self._capture_origin_ns = None
             self._completed_elapsed_s = 0.0
             self._frame_count = 0
             self._logical_message_count = 0
             self._incomplete_message_count = 0
+            self._marker_count = 0
             self._unique_can_ids = 0
             self._adapter_name = ""
             self._error = ""
             self._paths = paths
+            self._last_marker = None
             self._thread = Thread(
                 target=self._run,
                 args=(config, requested_name, paths),
@@ -171,6 +189,30 @@ class CaptureService:
         thread.join(timeout)
         return not thread.is_alive()
 
+    def add_marker(
+        self,
+        preset: MarkerPreset,
+        *,
+        source: str = "keyboard",
+        note: str = "",
+    ) -> CaptureMarker:
+        """Timestamp a marker immediately and queue its disk write."""
+
+        with self._lock:
+            if self._state is not CaptureState.RUNNING or self._capture_origin_ns is None:
+                raise RuntimeError("markers can be added only while capture is running")
+            timestamp_ns = max(0, perf_counter_ns() - self._capture_origin_ns)
+        marker = CaptureMarker.from_preset(
+            preset,
+            timestamp_ns,
+            source=source,
+            note=note,
+        )
+        self._marker_queue.put(marker)
+        with self._lock:
+            self._last_marker = marker
+        return marker
+
     def status(self) -> CaptureStatus:
         live = self._live_buffer.snapshot_since(None)
         with self._lock:
@@ -187,6 +229,7 @@ class CaptureService:
                 frame_count=self._frame_count,
                 logical_message_count=self._logical_message_count,
                 incomplete_message_count=self._incomplete_message_count,
+                marker_count=self._marker_count,
                 unique_can_ids=self._unique_can_ids,
                 adapter_name=self._adapter_name,
                 error=self._error,
@@ -198,6 +241,7 @@ class CaptureService:
                     else live.total_received - live.dropped_from_view
                 ),
                 live_dropped_from_view=live.dropped_from_view,
+                last_marker=self._last_marker,
             )
 
     def live_snapshot_since(self, after_sequence: int | None) -> LiveFrameSnapshot:
@@ -221,10 +265,12 @@ class CaptureService:
         session_writer: SessionStreamWriter | None = None
         frame_writer: FrameCsvStreamWriter | None = None
         message_writer: MessageCsvStreamWriter | None = None
+        marker_writer: MarkerStreamWriter | None = None
         started = monotonic()
         local_frame_count = 0
         local_message_count = 0
         local_incomplete_count = 0
+        local_marker_count = 0
         unique_ids: set[tuple[int, bool]] = set()
         pending_live: list[CanFrame] = []
 
@@ -253,6 +299,8 @@ class CaptureService:
                     "streaming_capture": True,
                     "live_buffer_capacity": config.live_buffer_capacity,
                     "requested_duration_s": config.duration_s,
+                    "marker_presets": [preset.to_dict() for preset in config.marker_presets],
+                    "marker_stream": paths.markers.name,
                 },
             )
             session_writer = SessionStreamWriter(
@@ -265,9 +313,15 @@ class CaptureService:
                 flush_every=config.writer_flush_every,
             )
             message_writer = MessageCsvStreamWriter(paths.logical_messages_csv)
+            marker_writer = MarkerStreamWriter(
+                paths.markers,
+                presets=config.marker_presets,
+                flush_every=1,
+            )
             session_writer.open()
             frame_writer.open()
             message_writer.open()
+            marker_writer.open()
 
             pipeline = StreamingTransportPipeline()
             protocols = ProtocolRegistry()
@@ -288,6 +342,7 @@ class CaptureService:
                 with self._lock:
                     self._state = CaptureState.RUNNING
                     self._started_monotonic = started
+                    self._capture_origin_ns = capture_origin_ns
                     self._adapter_name = channel_info.name
 
                 while not self._stop_event.is_set() and (
@@ -315,6 +370,8 @@ class CaptureService:
                             if not message.complete:
                                 local_incomplete_count += 1
 
+                    local_marker_count += self._drain_markers(marker_writer)
+
                     if len(pending_live) >= 256 or now >= next_publish:
                         if pending_live:
                             self._live_buffer.append_many(pending_live)
@@ -323,10 +380,12 @@ class CaptureService:
                             local_frame_count,
                             local_message_count,
                             local_incomplete_count,
+                            local_marker_count,
                             len(unique_ids),
                         )
                         next_publish = now + 0.1
 
+            local_marker_count += self._drain_markers(marker_writer)
             for message in pipeline.flush():
                 decoded = protocols.decode(message)
                 message_writer.append(decoded)
@@ -344,6 +403,7 @@ class CaptureService:
                 "frame_count": local_frame_count,
                 "logical_message_count": local_message_count,
                 "incomplete_message_count": local_incomplete_count,
+                "marker_count": local_marker_count,
                 "unique_can_ids": len(unique_ids),
                 "clean_close": True,
             }
@@ -353,21 +413,30 @@ class CaptureService:
             frame_writer = None
             message_writer.close()
             message_writer = None
+            marker_writer.close()
+            marker_writer = None
 
             self._publish_progress(
                 local_frame_count,
                 local_message_count,
                 local_incomplete_count,
+                local_marker_count,
                 len(unique_ids),
             )
             with self._lock:
                 self._state = CaptureState.STOPPED
                 self._completed_elapsed_s = elapsed
                 self._started_monotonic = None
+                self._capture_origin_ns = None
         except Exception as exc:
             if pending_live:
                 self._live_buffer.append_many(pending_live)
             elapsed = monotonic() - started
+            if marker_writer is not None:
+                try:
+                    local_marker_count += self._drain_markers(marker_writer)
+                finally:
+                    marker_writer.close()
             if session_writer is not None:
                 session_writer.close(
                     {
@@ -375,6 +444,7 @@ class CaptureService:
                         "frame_count": local_frame_count,
                         "logical_message_count": local_message_count,
                         "incomplete_message_count": local_incomplete_count,
+                        "marker_count": local_marker_count,
                         "unique_can_ids": len(unique_ids),
                         "clean_close": False,
                         "capture_error": str(exc),
@@ -388,6 +458,7 @@ class CaptureService:
                 local_frame_count,
                 local_message_count,
                 local_incomplete_count,
+                local_marker_count,
                 len(unique_ids),
             )
             with self._lock:
@@ -395,18 +466,32 @@ class CaptureService:
                 self._error = str(exc)
                 self._completed_elapsed_s = elapsed
                 self._started_monotonic = None
+                self._capture_origin_ns = None
+
+    def _drain_markers(self, writer: MarkerStreamWriter) -> int:
+        count = 0
+        while True:
+            try:
+                marker = self._marker_queue.get_nowait()
+            except Empty:
+                break
+            writer.append(marker)
+            count += 1
+        return count
 
     def _publish_progress(
         self,
         frame_count: int,
         message_count: int,
         incomplete_count: int,
+        marker_count: int,
         unique_can_ids: int,
     ) -> None:
         with self._lock:
             self._frame_count = frame_count
             self._logical_message_count = message_count
             self._incomplete_message_count = incomplete_count
+            self._marker_count = marker_count
             self._unique_can_ids = unique_can_ids
 
 
