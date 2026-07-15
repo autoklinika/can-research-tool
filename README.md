@@ -13,12 +13,13 @@ CRT to niezależne środowisko do **reverse engineeringu komunikacji CAN**. Nie 
 - import sesji CRT oraz dotychczasowych logów Kvaser CSV,
 - rekonstrukcja J1939 TP i ISO-TP,
 - klasyfikacja UDS oraz bezpieczny fallback `UNKNOWN`,
+- projektowe dekodery DBC z możliwością włączenia i wyłączenia,
 - reguły dla protokołów autorskich,
 - przenośne projekty badawcze,
 - obszary badań, np. EGR, VGT i SCR,
 - konfigurowalne znaczniki czasowe z nazwą i skrótem klawiszowym.
 
-Surowe ramki i oryginalne pliki pozostają źródłem prawdy. Dekodery tworzą dodatkowy widok i nie modyfikują materiału wejściowego.
+Surowe ramki i oryginalne pliki pozostają źródłem prawdy. DBC oraz inne dekodery tworzą odwracalny widok i nie modyfikują materiału wejściowego.
 
 ## Instalacja
 
@@ -40,7 +41,7 @@ crt-gui
 
 ## Projekt CRT
 
-Każdy projekt jest samodzielnym folderem na dysku. Można go przenieść, skopiować lub spakować bez utraty relacji między sesjami, znacznikami i obszarami badań.
+Każdy projekt jest samodzielnym folderem na dysku. Można go przenieść, skopiować lub spakować bez utraty relacji między sesjami, znacznikami, dekoderami i obszarami badań.
 
 Przykładowa struktura:
 
@@ -58,6 +59,7 @@ DAF_MX13_EGR/
 ├─ notes/
 ├─ attachments/
 ├─ decoders/
+│  └─ dbc/
 ├─ exports/
 └─ reports/
 ```
@@ -86,10 +88,11 @@ Projekt
 ├─ Sesje CAN
 │  ├─ Live
 │  └─ Importowane
+├─ Dekodery
+│  └─ DBC — aktywne n/m
 ├─ Porównania
 ├─ Sygnały
 ├─ Hipotezy
-├─ Dekodery
 ├─ Notatki
 ├─ Załączniki
 └─ Raporty
@@ -99,7 +102,14 @@ Podwójne kliknięcie zapisanej sesji otwiera ją w osobnej zakładce. Import du
 
 ## Znaczniki podczas logowania
 
-Przed naciśnięciem `Start` można zdefiniować dowolny zestaw znaczników:
+Konfiguracja znaczników nie zajmuje już miejsca w głównym widoku. W sekcji `Połączenie i sesja` znajduje się kafelek:
+
+```text
+Znaczniki
+4 aktywnych / 6
+```
+
+Kliknięcie kafelka otwiera osobne okno, w którym można dodać, edytować, usuwać oraz włączać i wyłączać definicje:
 
 ```text
 Nazwa             Skrót   Obszar
@@ -117,7 +127,7 @@ Każdy znacznik ma:
 - opcjonalny obszar projektu,
 - stan aktywny/nieaktywny.
 
-Po rozpoczęciu rejestracji aktywne znaczniki są dostępne jednocześnie jako skróty i duże przyciski. Naciśnięcie nie otwiera żadnego okna dialogowego. Timestamp jest pobierany natychmiast z tego samego monotonicznego zegara co ramki CAN.
+Po rozpoczęciu rejestracji pod konfiguracją połączenia pojawiają się tylko szybkie przyciski aktywnych znaczników. Skróty działają równolegle. Naciśnięcie nie otwiera żadnego okna dialogowego, a timestamp jest pobierany natychmiast z tego samego monotonicznego zegara co ramki CAN.
 
 Znaczniki są zapisywane w:
 
@@ -127,6 +137,39 @@ Znaczniki są zapisywane w:
 
 oraz indeksowane w bazie projektu. Zapis zachowuje kopię nazwy, skrótu, koloru i obszaru użytych w chwili eksperymentu.
 
+## Dekodery DBC
+
+Zakładkę `Dekodery` można otworzyć z pionowego paska aktywności albo z Explorera projektu. Widok umożliwia:
+
+- import jednego lub wielu plików `*.dbc`,
+- kopiowanie plików do `decoders/dbc` projektu,
+- sprawdzenie liczby wiadomości zdefiniowanych w pliku,
+- włączanie i wyłączanie każdego DBC checkboxem,
+- usuwanie DBC z projektu,
+- podgląd ścieżki i SHA-256 w Inspektorze.
+
+Pierwszy aktywny DBC ma pierwszeństwo, gdy kilka plików definiuje ten sam CAN ID i typ ramki. Aktywne DBC są używane przy rozpoczęciu następnego `Live Capture`. Zmiana stanu powoduje również ponowne zinterpretowanie otwartych zapisanych sesji.
+
+DBC jest nakładką na surowe dane:
+
+```text
+DBC aktywny    → DBC EGR_Status + wartości sygnałów
+DBC wyłączony  → UNKNOWN / bazowa interpretacja
+```
+
+Wyłączenie DBC nie usuwa pliku ani nie modyfikuje sesji. Trwająca rejestracja zachowuje zestaw dekoderów wybrany przy `Start`, aby interpretacja nie zmieniała się w środku eksperymentu.
+
+## Wiadomości logiczne
+
+`Live Capture` oraz zapisane sesje mają osobne widoki:
+
+```text
+Surowe ramki
+Wiadomości logiczne
+```
+
+Tabela wiadomości pokazuje protokół, transport, PGN lub CAN ID, źródło, cel, długość, liczbę ramek, kompletność, nazwę i payload. Inspektor zawiera pełny payload, ramki źródłowe i pola protokołu. Dla wiadomości DBC pola obejmują nazwę wiadomości, plik DBC, wartości sygnałów oraz jednostki.
+
 ## Wydajność GUI
 
 GUI używa dwóch torów danych:
@@ -134,15 +177,16 @@ GUI używa dwóch torów danych:
 ```text
 Kvaser
   ├─ pełny strumień → sesja i pliki wynikowe na dysku
-  └─ ostatnie 20 000 ramek → bufor live → QAbstractTableModel → QTableView
+  └─ ograniczony podgląd → QAbstractTableModel → QTableView
 ```
 
 - odbiór, zapis i transport działają poza wątkiem Qt,
-- tabela jest odświeżana paczkami co 100 ms,
+- tabele są odświeżane paczkami co 100 ms,
 - `Pauza widoku` nie zatrzymuje rejestracji,
+- bufor live przechowuje maksymalnie 20 000 ramek i 5 000 wiadomości,
 - pamięć podglądu nie rośnie wraz z czasem logowania,
 - duże sesje są indeksowane i otwierane fragmentami,
-- import logów odbywa się asynchronicznie.
+- import logów i rekonstrukcja wiadomości odbywają się asynchronicznie.
 
 ## Pliki sesji GUI
 
@@ -180,4 +224,4 @@ python .\analyze_session.py .\sessions\pierwszy_test.crt.jsonl
 python -m pytest -q
 ```
 
-GitHub Actions uruchamia dodatkowo kompilację wszystkich modułów oraz headless Qt smoke test otwierający projekt i zakładkę `Live Capture`.
+GitHub Actions uruchamia dodatkowo kompilację modułów oraz headless Qt smoke test tworzący projekt, kafelek znaczników, zakładkę `Live Capture` i zakładkę `Dekodery` z przełączanym plikiem DBC.
