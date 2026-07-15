@@ -19,7 +19,19 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q app kvaser gui
       - name: Run tests
-        run: pytest -q
+        run: |
+          set +e
+          pytest -q > pytest-output.txt 2>&1
+          result=$?
+          cat pytest-output.txt
+          exit $result
+      - name: Upload pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: pytest-output.txt
+          retention-days: 3
 
   gui-smoke:
     runs-on: ubuntu-latest
@@ -114,6 +126,7 @@ jobs:
               assert live.marker_model.rowCount() == before + 1
               assert window.project.list_marker_presets()[0].name == "EGR odłączony"
               assert window.project.list_marker_presets()[0].shortcut == "F3"
+              assert live.message_table.model() is live.message_model
 
               assert window.tabs.count() >= 2
               assert window.explorer.tree.model().rowCount() == 1
