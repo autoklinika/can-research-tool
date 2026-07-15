@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -24,8 +25,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.capture_service import CaptureConfig, CaptureService, CaptureState
+from app.dbc import DbcDecoder
+from app.logical_records import reinterpret_raw_record
 from app.markers import MarkerPreset
 from app.project import CrtProject
+from app.project_dbc import active_project_dbc_paths
+from app.protocols import ProtocolRegistry
 from kvaser.backend import KvaserReceiveMode, list_channels
 
 from .frame_model import FrameTableModel
@@ -33,8 +38,7 @@ from .logical_message_model import (
     LogicalMessageTableModel,
     format_logical_message_inspector,
 )
-from .marker_dialog import MarkerPresetDialog
-from .marker_model import MarkerPresetTableModel
+from .marker_manager import MarkerManagerDialog
 
 
 class LiveCaptureWidget(QWidget):
@@ -59,14 +63,16 @@ class LiveCaptureWidget(QWidget):
         self._shortcuts: list[QShortcut] = []
         self._marker_buttons: list[QPushButton] = []
         self._error_shown = ""
+        self._base_registry = ProtocolRegistry()
+        self._dbc_decoder: DbcDecoder | None = None
 
         self.frame_model = FrameTableModel(capacity=self.LIVE_CAPACITY, parent=self)
         self.message_model = LogicalMessageTableModel(
             capacity=self.LIVE_MESSAGE_CAPACITY,
             parent=self,
         )
-        self.marker_model = MarkerPresetTableModel(project.list_marker_presets(), self)
         self._build_ui()
+        self._update_marker_tile()
         self._refresh_channels()
 
         self.timer = QTimer(self)
@@ -89,75 +95,71 @@ class LiveCaptureWidget(QWidget):
         root.setSpacing(6)
 
         connection_group = QGroupBox("Połączenie i sesja")
-        controls = QHBoxLayout(connection_group)
-        controls.addWidget(QLabel("Adapter:"))
+        connection_root = QVBoxLayout(connection_group)
+        connection_root.setSpacing(6)
+
+        can_row = QHBoxLayout()
+        can_row.addWidget(QLabel("Adapter:"))
         self.channel_combo = QComboBox()
-        self.channel_combo.setMinimumWidth(280)
-        controls.addWidget(self.channel_combo)
+        self.channel_combo.setMinimumWidth(330)
+        can_row.addWidget(self.channel_combo, 1)
         self.refresh_button = QPushButton("Odśwież")
         self.refresh_button.clicked.connect(self._refresh_channels)
-        controls.addWidget(self.refresh_button)
-        controls.addWidget(QLabel("Bitrate:"))
+        can_row.addWidget(self.refresh_button)
+        can_row.addWidget(QLabel("Bitrate:"))
         self.bitrate_combo = QComboBox()
         for bitrate in (125_000, 250_000, 500_000, 1_000_000):
             self.bitrate_combo.addItem(f"{bitrate:,}".replace(",", " "), bitrate)
         bitrate_index = self.bitrate_combo.findData(self.project.manifest.default_bitrate)
         self.bitrate_combo.setCurrentIndex(max(0, bitrate_index))
-        controls.addWidget(self.bitrate_combo)
-        controls.addWidget(QLabel("Tryb:"))
+        can_row.addWidget(self.bitrate_combo)
+        can_row.addWidget(QLabel("Tryb:"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("BENCH — ACK aktywny", KvaserReceiveMode.BENCH.value)
         self.mode_combo.addItem("LISTEN ONLY — bez ACK", KvaserReceiveMode.LISTEN_ONLY.value)
         mode_index = self.mode_combo.findData(self.project.manifest.default_receive_mode)
         self.mode_combo.setCurrentIndex(max(0, mode_index))
-        controls.addWidget(self.mode_combo)
-        controls.addWidget(QLabel("Sesja:"))
+        can_row.addWidget(self.mode_combo)
+        connection_root.addLayout(can_row)
+
+        session_row = QHBoxLayout()
+        session_row.addWidget(QLabel("Nazwa sesji:"))
         self.session_name = QLineEdit()
         self.session_name.setPlaceholderText("np. egr_disconnect")
-        self.session_name.setMinimumWidth(180)
-        controls.addWidget(self.session_name, 1)
+        self.session_name.setMinimumWidth(260)
+        session_row.addWidget(self.session_name, 1)
+
+        self.marker_setup_button = QPushButton()
+        self.marker_setup_button.setMinimumSize(190, 48)
+        self.marker_setup_button.setToolTip(
+            "Otwórz konfigurację nazw, skrótów, kolorów i aktywności znaczników."
+        )
+        self.marker_setup_button.clicked.connect(self._open_marker_manager)
+        self.marker_setup_button.setStyleSheet(
+            "QPushButton { text-align: left; padding: 6px 12px; font-weight: 600; }"
+        )
+        session_row.addWidget(self.marker_setup_button)
+
         self.start_button = QPushButton("Start")
+        self.start_button.setMinimumSize(90, 48)
         self.start_button.clicked.connect(self._start_capture)
-        controls.addWidget(self.start_button)
+        session_row.addWidget(self.start_button)
         self.stop_button = QPushButton("Stop")
+        self.stop_button.setMinimumSize(90, 48)
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self._stop_capture)
-        controls.addWidget(self.stop_button)
-        root.addWidget(connection_group)
+        session_row.addWidget(self.stop_button)
+        connection_root.addLayout(session_row)
 
-        self.marker_group = QGroupBox("Znaczniki przygotowane przed logowaniem")
-        marker_root = QVBoxLayout(self.marker_group)
-        marker_top = QHBoxLayout()
-        self.marker_table = QTableView()
-        self.marker_table.setModel(self.marker_model)
-        self.marker_table.setSelectionBehavior(QTableView.SelectRows)
-        self.marker_table.setSelectionMode(QTableView.SingleSelection)
-        self.marker_table.setMaximumHeight(155)
-        self.marker_table.verticalHeader().setDefaultSectionSize(22)
-        self.marker_table.horizontalHeader().setStretchLastSection(True)
-        marker_top.addWidget(self.marker_table, 1)
-        marker_actions = QVBoxLayout()
-        self.add_marker_button = QPushButton("Dodaj")
-        self.add_marker_button.clicked.connect(self._add_marker_preset)
-        marker_actions.addWidget(self.add_marker_button)
-        self.edit_marker_button = QPushButton("Edytuj")
-        self.edit_marker_button.clicked.connect(self._edit_marker_preset)
-        marker_actions.addWidget(self.edit_marker_button)
-        self.remove_marker_button = QPushButton("Usuń")
-        self.remove_marker_button.clicked.connect(self._remove_marker_preset)
-        marker_actions.addWidget(self.remove_marker_button)
-        marker_actions.addStretch(1)
-        marker_top.addLayout(marker_actions)
-        marker_root.addLayout(marker_top)
-
-        self.runtime_marker_row = QHBoxLayout()
-        self.runtime_marker_hint = QLabel(
-            "Po uruchomieniu aktywne znaczniki pojawią się tutaj jako przyciski."
-        )
-        self.runtime_marker_row.addWidget(self.runtime_marker_hint)
+        self.runtime_marker_widget = QFrame()
+        self.runtime_marker_widget.setFrameShape(QFrame.StyledPanel)
+        self.runtime_marker_row = QHBoxLayout(self.runtime_marker_widget)
+        self.runtime_marker_row.setContentsMargins(7, 5, 7, 5)
+        self.runtime_marker_row.addWidget(QLabel("Znaczniki aktywnej sesji:"))
         self.runtime_marker_row.addStretch(1)
-        marker_root.addLayout(self.runtime_marker_row)
-        root.addWidget(self.marker_group)
+        self.runtime_marker_widget.setVisible(False)
+        connection_root.addWidget(self.runtime_marker_widget)
+        root.addWidget(connection_group)
 
         view_controls = QHBoxLayout()
         self.pause_view = QCheckBox("Pauza widoku")
@@ -289,6 +291,27 @@ class LiveCaptureWidget(QWidget):
                 break
         self.start_button.setEnabled(self.channel_combo.currentData() is not None)
 
+    def _open_marker_manager(self) -> None:
+        if self._capture.is_active:
+            QMessageBox.information(
+                self,
+                "CRT",
+                "Konfigurację znaczników można zmienić po zatrzymaniu rejestracji.",
+            )
+            return
+        dialog = MarkerManagerDialog(self.project, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._update_marker_tile()
+            self.output_message.emit("Zapisano konfigurację znaczników projektu")
+            self.project_changed.emit()
+
+    def _update_marker_tile(self) -> None:
+        presets = self.project.list_marker_presets()
+        active = sum(preset.enabled for preset in presets)
+        self.marker_setup_button.setText(
+            f"Znaczniki\n{active} aktywnych / {len(presets)}"
+        )
+
     def _start_capture(self) -> None:
         channel_number = self.channel_combo.currentData()
         if channel_number is None:
@@ -299,14 +322,16 @@ class LiveCaptureWidget(QWidget):
             name = datetime.now().strftime("capture_%Y%m%d_%H%M%S")
             self.session_name.setText(name)
 
-        presets = self.marker_model.presets()
+        presets = self.project.list_marker_presets()
         active = [preset for preset in presets if preset.enabled]
         shortcuts = [preset.shortcut.lower() for preset in active]
         if len(shortcuts) != len(set(shortcuts)):
             QMessageBox.warning(self, "CRT", "Aktywne znaczniki mają zduplikowane skróty.")
             return
+
+        dbc_paths = active_project_dbc_paths(self.project)
         try:
-            self.project.save_marker_presets(presets)
+            self._dbc_decoder = DbcDecoder(dbc_paths) if dbc_paths else None
             paths = self._capture.start(
                 CaptureConfig(
                     channel_number=int(channel_number),
@@ -341,7 +366,9 @@ class LiveCaptureWidget(QWidget):
         self.path_label.setText(f"Sesja: {paths.session}")
         self._install_marker_controls(active)
         self._set_capture_controls(True)
-        self.output_message.emit(f"Rozpoczęto rejestrację: {paths.session}")
+        self.output_message.emit(
+            f"Rozpoczęto rejestrację: {paths.session} | aktywne DBC={len(dbc_paths)}"
+        )
         self.project_changed.emit()
 
     def _stop_capture(self) -> None:
@@ -373,15 +400,21 @@ class LiveCaptureWidget(QWidget):
                 self._last_message_sequence
             )
             if message_snapshot.messages:
+                displayed = tuple(
+                    reinterpret_raw_record(
+                        message,
+                        base_registry=self._base_registry,
+                        dbc_decoder=self._dbc_decoder,
+                    )
+                    for message in message_snapshot.messages
+                )
                 scrollbar = self.message_table.verticalScrollBar()
                 was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
                 if message_snapshot.truncated:
-                    self.message_model.replace_messages(message_snapshot.messages)
+                    self.message_model.replace_messages(displayed)
                 else:
-                    self.message_model.append_messages(message_snapshot.messages)
-                self._last_message_sequence = (
-                    message_snapshot.last_available_sequence
-                )
+                    self.message_model.append_messages(displayed)
+                self._last_message_sequence = message_snapshot.last_available_sequence
                 if self.auto_scroll.isChecked() and was_at_bottom:
                     self.message_table.scrollToBottom()
 
@@ -453,10 +486,7 @@ class LiveCaptureWidget(QWidget):
         self.bitrate_combo.setEnabled(not active)
         self.mode_combo.setEnabled(not active)
         self.session_name.setEnabled(not active)
-        self.marker_table.setEnabled(not active)
-        self.add_marker_button.setEnabled(not active)
-        self.edit_marker_button.setEnabled(not active)
-        self.remove_marker_button.setEnabled(not active)
+        self.marker_setup_button.setEnabled(not active)
 
     def _finalize_project_session(self, status) -> None:
         path = self._current_session_path
@@ -478,7 +508,9 @@ class LiveCaptureWidget(QWidget):
 
     def _install_marker_controls(self, presets: list[MarkerPreset]) -> None:
         self._clear_marker_controls()
-        self.runtime_marker_hint.setVisible(not presets)
+        if not presets:
+            return
+        self.runtime_marker_widget.setVisible(True)
         for preset in presets:
             shortcut = QShortcut(QKeySequence(preset.shortcut), self)
             shortcut.setAutoRepeat(False)
@@ -503,7 +535,7 @@ class LiveCaptureWidget(QWidget):
                 )
             )
             self.runtime_marker_row.insertWidget(
-                max(0, self.runtime_marker_row.count() - 1),
+                max(1, self.runtime_marker_row.count() - 1),
                 button,
             )
             self._marker_buttons.append(button)
@@ -514,9 +546,10 @@ class LiveCaptureWidget(QWidget):
             shortcut.deleteLater()
         self._shortcuts.clear()
         for button in self._marker_buttons:
+            self.runtime_marker_row.removeWidget(button)
             button.deleteLater()
         self._marker_buttons.clear()
-        self.runtime_marker_hint.setVisible(True)
+        self.runtime_marker_widget.setVisible(False)
 
     def _trigger_marker(self, preset: MarkerPreset, *, source: str) -> None:
         try:
@@ -544,72 +577,6 @@ class LiveCaptureWidget(QWidget):
                     f"Źródło: {marker.source}",
                 )
             )
-        )
-
-    def _add_marker_preset(self) -> None:
-        dialog = MarkerPresetDialog(
-            areas=[area.name for area in self.project.list_study_areas()],
-            parent=self,
-        )
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        preset = dialog.preset(self.marker_model.rowCount())
-        if self._shortcut_conflicts(preset.shortcut):
-            QMessageBox.warning(
-                self,
-                "CRT",
-                "Ten skrót jest już przypisany do innego znacznika.",
-            )
-            return
-        self.marker_model.add_preset(preset)
-        self._save_marker_presets()
-
-    def _edit_marker_preset(self) -> None:
-        rows = self.marker_table.selectionModel().selectedRows()
-        if not rows:
-            QMessageBox.information(self, "CRT", "Zaznacz znacznik do edycji.")
-            return
-        row = rows[0].row()
-        existing = self.marker_model.preset_at(row)
-        if existing is None:
-            return
-        dialog = MarkerPresetDialog(
-            existing=existing,
-            areas=[area.name for area in self.project.list_study_areas()],
-            parent=self,
-        )
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        updated = dialog.preset(row)
-        if self._shortcut_conflicts(updated.shortcut, excluding_id=existing.id):
-            QMessageBox.warning(
-                self,
-                "CRT",
-                "Ten skrót jest już przypisany do innego znacznika.",
-            )
-            return
-        self.marker_model.replace_preset(row, updated)
-        self._save_marker_presets()
-
-    def _remove_marker_preset(self) -> None:
-        rows = self.marker_table.selectionModel().selectedRows()
-        if not rows:
-            return
-        self.marker_model.remove_row(rows[0].row())
-        self._save_marker_presets()
-
-    def _save_marker_presets(self) -> None:
-        try:
-            self.project.save_marker_presets(self.marker_model.presets())
-        except Exception as exc:
-            QMessageBox.critical(self, "Błąd zapisu znaczników", str(exc))
-
-    def _shortcut_conflicts(self, shortcut: str, *, excluding_id: str = "") -> bool:
-        normalized = shortcut.strip().lower()
-        return any(
-            preset.id != excluding_id
-            and preset.shortcut.strip().lower() == normalized
-            for preset in self.marker_model.presets()
         )
 
     def _frame_selected(self) -> None:
