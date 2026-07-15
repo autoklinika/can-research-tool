@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from time import perf_counter_ns
 from typing import Any
 
@@ -18,6 +19,21 @@ class KvaserUnavailableError(RuntimeError):
 
 class SilentModeRequiredError(RuntimeError):
     pass
+
+
+class KvaserReceiveMode(StrEnum):
+    """Electrical receive behaviour of the Kvaser controller.
+
+    BENCH keeps the application read-only but allows the CAN controller to
+    acknowledge correctly received frames. This is required when the observed
+    ECU is otherwise alone on a bench bus.
+
+    LISTEN_ONLY uses hardware silent mode and therefore does not acknowledge
+    frames. Use it only when another active node on the bus provides ACK.
+    """
+
+    BENCH = "bench"
+    LISTEN_ONLY = "listen-only"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,14 +88,22 @@ def list_channels() -> list[KvaserChannelInfo]:
 
 
 class KvaserPassiveChannel:
-    """Read-only Kvaser channel that refuses to run without hardware silent mode.
+    """Read-only Kvaser capture channel with no application TX API.
 
-    This class intentionally exposes no write/send operation.
+    The default BENCH mode acknowledges valid CAN frames but still exposes no
+    write/send operation. LISTEN_ONLY selects hardware silent mode and emits no
+    ACK, which requires another active node on the observed network.
     """
 
-    def __init__(self, channel_number: int, bitrate: int) -> None:
+    def __init__(
+        self,
+        channel_number: int,
+        bitrate: int,
+        mode: KvaserReceiveMode = KvaserReceiveMode.BENCH,
+    ) -> None:
         self.channel_number = channel_number
         self.bitrate = bitrate
+        self.mode = KvaserReceiveMode(mode)
         self._channel: Any | None = None
         self._sequence = 0
 
@@ -93,7 +117,9 @@ class KvaserPassiveChannel:
 
         api = _require_canlib()
         channel_data = api.ChannelData(self.channel_number)
-        if not bool(channel_data.channel_cap & api.ChannelCap.SILENT_MODE):
+        if self.mode is KvaserReceiveMode.LISTEN_ONLY and not bool(
+            channel_data.channel_cap & api.ChannelCap.SILENT_MODE
+        ):
             raise SilentModeRequiredError(
                 f"Kvaser channel {self.channel_number} does not report SILENT_MODE capability"
             )
@@ -105,8 +131,15 @@ class KvaserPassiveChannel:
 
         channel = api.openChannel(self.channel_number, bitrate=bitrate_value)
         try:
-            channel.setBusOutputControl(api.Driver.SILENT)
+            channel.iocontrol.local_txecho = False
+            driver = (
+                api.Driver.SILENT
+                if self.mode is KvaserReceiveMode.LISTEN_ONLY
+                else api.Driver.NORMAL
+            )
+            channel.setBusOutputControl(driver)
             channel.busOn()
+            channel.iocontrol.flush_rx_buffer()
         except Exception:
             channel.close()
             raise
