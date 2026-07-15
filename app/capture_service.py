@@ -18,6 +18,8 @@ from kvaser.backend import (
 )
 
 from .live_buffer import LiveFrameBuffer, LiveFrameSnapshot
+from .live_message_buffer import LiveMessageBuffer, LiveMessageSnapshot
+from .logical_records import LogicalMessageRecord
 from .marker_stream import MarkerStreamWriter
 from .markers import CaptureMarker, MarkerPreset
 from .models import CanFrame, CaptureSession
@@ -53,6 +55,7 @@ class CaptureConfig:
     output_dir: Path = Path("sessions")
     duration_s: float | None = None
     live_buffer_capacity: int = 20_000
+    live_message_capacity: int = 5_000
     read_timeout_ms: int = 50
     writer_flush_every: int = 256
     marker_presets: tuple[MarkerPreset, ...] = ()
@@ -66,6 +69,8 @@ class CaptureConfig:
             raise ValueError("duration_s must be greater than zero or None")
         if self.live_buffer_capacity <= 0:
             raise ValueError("live_buffer_capacity must be greater than zero")
+        if self.live_message_capacity <= 0:
+            raise ValueError("live_message_capacity must be greater than zero")
         if self.read_timeout_ms < 0:
             raise ValueError("read_timeout_ms cannot be negative")
         if self.writer_flush_every <= 0:
@@ -102,6 +107,9 @@ class CaptureStatus:
     live_capacity: int
     live_retained: int
     live_dropped_from_view: int
+    live_message_capacity: int
+    live_messages_retained: int
+    live_messages_dropped_from_view: int
     last_marker: CaptureMarker | None
 
 
@@ -120,6 +128,7 @@ class CaptureService:
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._live_buffer = LiveFrameBuffer()
+        self._live_messages = LiveMessageBuffer()
         self._marker_queue: Queue[CaptureMarker] = Queue()
         self._state = CaptureState.IDLE
         self._started_monotonic: float | None = None
@@ -153,6 +162,7 @@ class CaptureService:
 
             self._stop_event = Event()
             self._live_buffer = LiveFrameBuffer(config.live_buffer_capacity)
+            self._live_messages = LiveMessageBuffer(config.live_message_capacity)
             self._marker_queue = Queue()
             self._state = CaptureState.STARTING
             self._started_monotonic = None
@@ -215,6 +225,7 @@ class CaptureService:
 
     def status(self) -> CaptureStatus:
         live = self._live_buffer.snapshot_since(None)
+        live_messages = self._live_messages.snapshot_since(None)
         with self._lock:
             if self._started_monotonic is not None and self._state in (
                 CaptureState.RUNNING,
@@ -241,11 +252,23 @@ class CaptureService:
                     else live.total_received - live.dropped_from_view
                 ),
                 live_dropped_from_view=live.dropped_from_view,
+                live_message_capacity=live_messages.capacity,
+                live_messages_retained=(
+                    0
+                    if live_messages.first_available_sequence is None
+                    else live_messages.total_received - live_messages.dropped_from_view
+                ),
+                live_messages_dropped_from_view=live_messages.dropped_from_view,
                 last_marker=self._last_marker,
             )
 
     def live_snapshot_since(self, after_sequence: int | None) -> LiveFrameSnapshot:
         return self._live_buffer.snapshot_since(after_sequence)
+
+    def live_messages_snapshot_since(
+        self, after_sequence: int | None
+    ) -> LiveMessageSnapshot:
+        return self._live_messages.snapshot_since(after_sequence)
 
     @property
     def is_active(self) -> bool:
@@ -273,6 +296,7 @@ class CaptureService:
         local_marker_count = 0
         unique_ids: set[tuple[int, bool]] = set()
         pending_live: list[CanFrame] = []
+        pending_messages: list[LogicalMessageRecord] = []
 
         try:
             channels = self._channel_provider()
@@ -298,6 +322,7 @@ class CaptureService:
                     "product_number": channel_info.product_number,
                     "streaming_capture": True,
                     "live_buffer_capacity": config.live_buffer_capacity,
+                    "live_message_capacity": config.live_message_capacity,
                     "requested_duration_s": config.duration_s,
                     "marker_presets": [preset.to_dict() for preset in config.marker_presets],
                     "marker_stream": paths.markers.name,
@@ -366,6 +391,9 @@ class CaptureService:
                         for message in pipeline.feed(normalized):
                             decoded = protocols.decode(message)
                             message_writer.append(decoded)
+                            pending_messages.append(
+                                LogicalMessageRecord.from_decoded(decoded)
+                            )
                             local_message_count += 1
                             if not message.complete:
                                 local_incomplete_count += 1
@@ -376,6 +404,9 @@ class CaptureService:
                         if pending_live:
                             self._live_buffer.append_many(pending_live)
                             pending_live.clear()
+                        if pending_messages:
+                            self._live_messages.append_many(pending_messages)
+                            pending_messages.clear()
                         self._publish_progress(
                             local_frame_count,
                             local_message_count,
@@ -389,6 +420,7 @@ class CaptureService:
             for message in pipeline.flush():
                 decoded = protocols.decode(message)
                 message_writer.append(decoded)
+                pending_messages.append(LogicalMessageRecord.from_decoded(decoded))
                 local_message_count += 1
                 if not message.complete:
                     local_incomplete_count += 1
@@ -396,6 +428,9 @@ class CaptureService:
             if pending_live:
                 self._live_buffer.append_many(pending_live)
                 pending_live.clear()
+            if pending_messages:
+                self._live_messages.append_many(pending_messages)
+                pending_messages.clear()
 
             elapsed = monotonic() - started
             final_metadata = {
@@ -431,6 +466,8 @@ class CaptureService:
         except Exception as exc:
             if pending_live:
                 self._live_buffer.append_many(pending_live)
+            if pending_messages:
+                self._live_messages.append_many(pending_messages)
             elapsed = monotonic() - started
             if marker_writer is not None:
                 try:
