@@ -30,6 +30,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
       - name: Install GUI
         run: python -m pip install -q -e ".[gui]"
       - name: Create main window offscreen
