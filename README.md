@@ -20,17 +20,61 @@ Znane logi z SAC służą wyłącznie jako materiał testowy do sprawdzania komp
 
 ## Struktura
 
-- `app/` — modele sesji i neutralny silnik analizy,
+- `app/` — modele sesji, rejestrator i neutralny silnik analizy,
 - `kvaser/` — izolowana integracja z Kvaser CANlib oraz import logów,
 - `sessions/` — lokalne sesje badawcze, pomijane przez Git,
 - `docs/` — architektura i decyzje projektowe,
 - `tests/` — testy parserów i analizy.
 
+## Rejestracja sesji Kvaser
+
+Domyślny zapis 10 sekund na kanale 0, 250 kbit/s, w trybie stanowiskowym `BENCH`:
+
+```powershell
+python .\capture_session.py
+```
+
+Sesja o własnej nazwie i czasie 30 sekund:
+
+```powershell
+python .\capture_session.py --duration 30 --name ecu_startup
+```
+
+Nasłuch bez limitu czasu, kończony przez `Ctrl+C`:
+
+```powershell
+python .\capture_session.py --duration 0 --name long_capture
+```
+
+Podgląd każdej ramki w terminalu:
+
+```powershell
+python .\capture_session.py --duration 10 --live
+```
+
+Tryb pełnego listen-only dla kompletnej sieci:
+
+```powershell
+python .\capture_session.py --mode listen-only
+```
+
+Po zakończeniu w katalogu `sessions/` powstają trzy pliki:
+
+- `*.crt.jsonl` — pełna sesja CRT z metadanymi,
+- `*.frames.csv` — surowe ramki w czytelnym formacie CSV,
+- `*.summary.csv` — statystyka według CAN ID.
+
+Po ponownej instalacji projektu dostępna jest również komenda:
+
+```powershell
+crt-capture --duration 10 --name bench_test
+```
+
 ## Uruchomienie testów
 
 ```powershell
-py -m pip install -e ".[dev]"
-pytest
+python -m pip install -e ".[dev,kvaser]"
+python -m pytest -q
 ```
 
 Sterownik Kvaser i pakiet `canlib` są zależnościami opcjonalnymi wymaganymi dopiero do nasłuchu online.
