@@ -40,8 +40,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          set +e
-          python - <<'PY' > gui-smoke.log 2>&1
+          python - <<'PY'
           from PySide6.QtWidgets import QApplication
           from gui.main_window import MainWindow
 
@@ -51,16 +50,3 @@ jobs:
           window.close()
           app.quit()
           PY
-          echo "$?" > gui-smoke.status
-          cat gui-smoke.log
-          exit 0
-      - name: Upload GUI smoke diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gui-smoke-diagnostics
-          path: |
-            gui-smoke.log
-            gui-smoke.status
-      - name: Verify GUI smoke result
-        run: test "$(cat gui-smoke.status)" = "0"
