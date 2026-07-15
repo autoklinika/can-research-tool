@@ -8,9 +8,17 @@ from pathlib import Path
 from time import monotonic, perf_counter_ns
 
 from app.analysis import CanIdStatistics, SessionAnalyzer
-from app.exports import save_frames_csv, save_summary_csv
+from app.exports import (
+    save_frames_csv,
+    save_message_summary_csv,
+    save_messages_csv,
+    save_summary_csv,
+)
+from app.message_analysis import LogicalMessageAnalyzer, LogicalMessageStatistics
 from app.models import CaptureSession
+from app.protocols import ProtocolRegistry
 from app.session_io import save_session
+from app.transport import TransportPipeline
 from kvaser.backend import (
     KvaserPassiveChannel,
     KvaserReceiveMode,
@@ -18,7 +26,17 @@ from kvaser.backend import (
 )
 
 
-_BITRATES = (10_000, 50_000, 62_000, 83_000, 100_000, 125_000, 250_000, 500_000, 1_000_000)
+_BITRATES = (
+    10_000,
+    50_000,
+    62_000,
+    83_000,
+    100_000,
+    125_000,
+    250_000,
+    500_000,
+    1_000_000,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=Path("sessions"),
-        help="directory for CRT, raw CSV and summary files",
+        help="directory for CRT and CSV output files",
     )
     parser.add_argument(
         "--live",
@@ -69,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     channel_info = next((item for item in channels if item.number == args.channel), None)
     if channel_info is None:
         available = ", ".join(str(item.number) for item in channels) or "none"
-        raise SystemExit(f"Kvaser channel {args.channel} was not found; available: {available}")
+        raise SystemExit(
+            f"Kvaser channel {args.channel} was not found; available: {available}"
+        )
 
     mode = KvaserReceiveMode(args.mode)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -123,7 +143,9 @@ def main(argv: list[str] | None = None) -> int:
                         timestamp_ns=max(0, frame.timestamp_ns - capture_origin_ns),
                     )
                     session.append(normalized)
-                    unique_ids.add((normalized.arbitration_id, normalized.is_extended_id))
+                    unique_ids.add(
+                        (normalized.arbitration_id, normalized.is_extended_id)
+                    )
                     if args.live:
                         _print_frame(normalized)
 
@@ -146,25 +168,53 @@ def main(argv: list[str] | None = None) -> int:
         }
     )
 
-    statistics = SessionAnalyzer().summarize(session.frames)
+    frame_statistics = SessionAnalyzer().summarize(session.frames)
+    transport_messages = TransportPipeline().process(session.frames)
+    decoded_messages = ProtocolRegistry().decode_all(transport_messages)
+    message_statistics = LogicalMessageAnalyzer().summarize(decoded_messages)
+
+    session.metadata.update(
+        {
+            "logical_message_count": len(decoded_messages),
+            "complete_logical_messages": sum(
+                item.message.complete for item in decoded_messages
+            ),
+            "incomplete_logical_messages": sum(
+                not item.message.complete for item in decoded_messages
+            ),
+        }
+    )
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     session_path = args.output_dir / f"{safe_name}.crt.jsonl"
     frames_path = args.output_dir / f"{safe_name}.frames.csv"
     summary_path = args.output_dir / f"{safe_name}.summary.csv"
+    messages_path = args.output_dir / f"{safe_name}.messages.csv"
+    message_summary_path = args.output_dir / f"{safe_name}.messages.summary.csv"
 
     save_session(session, session_path)
     save_frames_csv(session.frames, frames_path)
-    save_summary_csv(statistics, summary_path)
+    save_summary_csv(frame_statistics, summary_path)
+    save_messages_csv(decoded_messages, messages_path)
+    save_message_summary_csv(message_statistics, message_summary_path)
 
     print()
     print("Rejestracja zakończona.")
     print(f"Czas: {elapsed_s:.3f} s")
     print(f"Ramki: {len(session.frames)}")
-    print(f"Unikalne CAN ID: {len(statistics)}")
+    print(f"Unikalne CAN ID: {len(frame_statistics)}")
+    print(f"Wiadomości logiczne: {len(decoded_messages)}")
+    print(
+        "Wiadomości niekompletne: "
+        f"{sum(not item.message.complete for item in decoded_messages)}"
+    )
     print(f"Sesja CRT: {session_path}")
     print(f"Surowe CSV: {frames_path}")
-    print(f"Podsumowanie: {summary_path}")
-    _print_summary(statistics)
+    print(f"Podsumowanie ramek: {summary_path}")
+    print(f"Wiadomości: {messages_path}")
+    print(f"Podsumowanie wiadomości: {message_summary_path}")
+    _print_summary(frame_statistics)
+    _print_message_summary(message_statistics)
     return 0
 
 
@@ -192,15 +242,54 @@ def _print_summary(statistics: list[CanIdStatistics]) -> None:
         frame_type = "EXT" if item.is_extended_id else "STD"
         period = "-" if item.mean_period_ms is None else f"{item.mean_period_ms:.3f}"
         frequency = (
-            "-" if item.estimated_frequency_hz is None else f"{item.estimated_frequency_hz:.3f}"
+            "-"
+            if item.estimated_frequency_hz is None
+            else f"{item.estimated_frequency_hz:.3f}"
         )
         changing = ",".join(
-            str(index) for index, value in enumerate(item.changing_byte_mask) if value
+            str(index)
+            for index, value in enumerate(item.changing_byte_mask)
+            if value
         ) or "-"
         print(
             f"{can_id:<11}  {frame_type:<4}  {item.frame_count:>6}  "
             f"{period:>15}  {frequency:>12}  {changing}"
         )
+
+
+def _print_message_summary(
+    statistics: list[LogicalMessageStatistics],
+) -> None:
+    if not statistics:
+        print("\nBrak wiadomości logicznych do podsumowania.")
+        return
+
+    print()
+    print(
+        "Protokół  Transport        Identyfikator       Wiad.  Kompl.  "
+        "Okres śr. [ms]  Nazwa"
+    )
+    print(
+        "---------  ---------------  ------------------  -----  ------  "
+        "--------------  ------------------------------"
+    )
+    for item in statistics:
+        identifier = _logical_identifier(item)
+        period = "-" if item.mean_period_ms is None else f"{item.mean_period_ms:.3f}"
+        print(
+            f"{item.protocol.value:<9}  {item.transport.value:<15}  "
+            f"{identifier:<18}  {item.message_count:>5}  "
+            f"{item.complete_count:>6}  {period:>14}  {item.name}"
+        )
+
+
+def _logical_identifier(item: LogicalMessageStatistics) -> str:
+    if item.pgn is not None and item.transport.value.startswith("j1939"):
+        return f"PGN 0x{item.pgn:05X}"
+    if item.arbitration_id is not None:
+        width = 8 if item.is_extended_id else 3
+        return f"CAN 0x{item.arbitration_id:0{width}X}"
+    return "-"
 
 
 def _safe_filename(value: str) -> str:
