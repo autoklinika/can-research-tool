@@ -13,9 +13,10 @@ from uuid import uuid4
 
 from kvaser.csv_import import iter_monitor_csv
 
+from .marker_stream import iter_markers, marker_path_for_session
 from .markers import CaptureMarker, MarkerPreset
 from .models import CaptureSession
-from .session_stream import SessionStreamWriter, read_session_header
+from .session_stream import SessionPagedReader, SessionStreamWriter, read_session_header
 
 
 PROJECT_FORMAT = "crt-project"
@@ -90,8 +91,11 @@ class CrtProject:
         default_receive_mode: str = "bench",
     ) -> "CrtProject":
         project_root = Path(root).resolve()
-        if project_root.exists() and any(project_root.iterdir()):
-            raise ValueError("project directory must be empty")
+        if project_root.exists():
+            if not project_root.is_dir():
+                raise ValueError("project path is not a directory")
+            if any(project_root.iterdir()):
+                raise ValueError("project directory must be empty")
         project_root.mkdir(parents=True, exist_ok=True)
         now = datetime.now(timezone.utc).isoformat()
         manifest = ProjectManifest(
@@ -147,10 +151,9 @@ class CrtProject:
     def relative_path(self, path: str | Path) -> str:
         candidate = Path(path).resolve()
         try:
-            relative = candidate.relative_to(self.root)
+            return candidate.relative_to(self.root).as_posix()
         except ValueError as exc:
             raise ValueError("path is outside the CRT project") from exc
-        return relative.as_posix()
 
     def absolute_path(self, relative_path: str) -> Path:
         candidate = (self.root / relative_path).resolve()
@@ -171,15 +174,11 @@ class CrtProject:
         self.manifest = ProjectManifest(
             id=self.manifest.id,
             name=self.manifest.name if name is None else name.strip(),
-            description=(
-                self.manifest.description if description is None else description.strip()
-            ),
+            description=self.manifest.description if description is None else description.strip(),
             created_at_utc=self.manifest.created_at_utc,
             updated_at_utc=datetime.now(timezone.utc).isoformat(),
             default_bitrate=(
-                self.manifest.default_bitrate
-                if default_bitrate is None
-                else int(default_bitrate)
+                self.manifest.default_bitrate if default_bitrate is None else int(default_bitrate)
             ),
             default_receive_mode=(
                 self.manifest.default_receive_mode
@@ -231,10 +230,7 @@ class CrtProject:
             else:
                 session_id, created_at = str(existing[0]), str(existing[1])
                 connection.execute(
-                    """
-                    UPDATE sessions SET name = ?, source = ?, status = ?
-                    WHERE id = ?
-                    """,
+                    "UPDATE sessions SET name = ?, source = ?, status = ? WHERE id = ?",
                     (name, source, status, session_id),
                 )
             connection.commit()
@@ -416,10 +412,13 @@ class CrtProject:
         if not source.is_file():
             raise FileNotFoundError(source)
 
-        lower_name = source.name.lower()
-        if lower_name.endswith(".crt.jsonl"):
+        if source.name.lower().endswith(".crt.jsonl"):
             target = _unique_path(self.imported_sessions_dir / source.name)
             shutil.copy2(source, target)
+            source_markers = marker_path_for_session(source)
+            target_markers = marker_path_for_session(target)
+            if source_markers.is_file():
+                shutil.copy2(source_markers, target_markers)
             header = read_session_header(target)
             record = self.register_session(
                 target,
@@ -427,10 +426,8 @@ class CrtProject:
                 source="imported-crt-session",
                 status="ready",
             )
-            from .session_stream import SessionPagedReader, iter_session_markers
-
             reader = SessionPagedReader(target)
-            marker_count = sum(1 for _ in iter_session_markers(target))
+            marker_count = sum(1 for _ in iter_markers(target_markers))
             self.finalize_session(
                 target,
                 frame_count=reader.frame_count,
@@ -440,12 +437,11 @@ class CrtProject:
             return self.session_by_path(target) or record
 
         if source.suffix.lower() == ".csv":
-            source_copy = _unique_path(
-                self.imported_sessions_dir / "source" / source.name
-            )
+            source_copy = _unique_path(self.imported_sessions_dir / "source" / source.name)
             shutil.copy2(source, source_copy)
-            safe_stem = _safe_filename(source.stem)
-            target = _unique_path(self.imported_sessions_dir / f"{safe_stem}.crt.jsonl")
+            target = _unique_path(
+                self.imported_sessions_dir / f"{_safe_filename(source.stem)}.crt.jsonl"
+            )
             session = CaptureSession(
                 name=source.stem,
                 source="imported-kvaser-csv",
@@ -456,11 +452,23 @@ class CrtProject:
             )
             frame_count = 0
             warning_count = 0
-            with SessionStreamWriter(session, target) as writer:
+            writer = SessionStreamWriter(session, target)
+            writer.open()
+            try:
                 for frame, warnings in iter_monitor_csv(source_copy):
                     writer.append(frame)
                     frame_count += 1
                     warning_count += len(warnings)
+                writer.close(
+                    {
+                        "clean_close": True,
+                        "frame_count": frame_count,
+                        "import_warning_count": warning_count,
+                    }
+                )
+            except Exception:
+                writer.close({"clean_close": False, "frame_count": frame_count})
+                raise
             record = self.register_session(
                 target,
                 name=source.stem,
