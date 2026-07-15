@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from .message_models import DecodedMessage
+from .dbc import DbcDecoder
+from .message_models import DecodedMessage, TransportKind, TransportMessage
 from .protocols import ProtocolRegistry
 from .session_stream import iter_session_frames
 from .stream_pipeline import StreamingTransportPipeline
@@ -88,21 +89,54 @@ def iter_logical_message_csv(path: str | Path) -> Iterator[LogicalMessageRecord]
                 ) from exc
 
 
+def decode_record_with_dbc(
+    record: LogicalMessageRecord,
+    decoder: DbcDecoder | None,
+) -> LogicalMessageRecord:
+    """Apply a DBC overlay without changing the stored raw logical record."""
+
+    if decoder is None or record.transport != TransportKind.RAW.value:
+        return record
+    if record.arbitration_id is None:
+        return record
+    message = TransportMessage(
+        sequence=record.sequence,
+        first_timestamp_ns=record.first_timestamp_ns,
+        last_timestamp_ns=record.last_timestamp_ns,
+        transport=TransportKind.RAW,
+        payload=record.payload,
+        frame_sequences=record.frame_sequences,
+        arbitration_id=record.arbitration_id,
+        is_extended_id=record.is_extended_id,
+        source_address=record.source_address,
+        destination_address=record.destination_address,
+        pgn=record.pgn,
+        complete=record.complete,
+        error=record.error,
+    )
+    if not decoder.matches(message):
+        return record
+    return LogicalMessageRecord.from_decoded(decoder.decode(message))
+
+
 def load_recent_logical_messages(
     session_path: str | Path,
     *,
     max_rows: int = 20_000,
+    dbc_paths: Iterable[str | Path] = (),
 ) -> tuple[list[LogicalMessageRecord], int, str]:
     """Load a bounded recent logical-message window without retaining the full file.
 
-    Existing ``*.messages.csv`` is preferred. When it is unavailable, messages are
-    reconstructed from the raw CRT session in one streaming pass. Both paths keep
-    at most ``max_rows`` records in memory.
+    Existing ``*.messages.csv`` is preferred. Active DBC files are applied as a
+    reversible presentation overlay. When the CSV is unavailable, messages are
+    reconstructed from the raw CRT session in one streaming pass.
     """
 
     if max_rows <= 0:
         raise ValueError("max_rows must be greater than zero")
 
+    active_dbc_paths = tuple(Path(path) for path in dbc_paths)
+    dbc_decoder = DbcDecoder(active_dbc_paths) if active_dbc_paths else None
     session = Path(session_path)
     message_path = logical_message_path_for_session(session)
     retained: deque[LogicalMessageRecord] = deque(maxlen=max_rows)
@@ -110,12 +144,13 @@ def load_recent_logical_messages(
 
     if message_path.is_file():
         for record in iter_logical_message_csv(message_path):
-            retained.append(record)
+            retained.append(decode_record_with_dbc(record, dbc_decoder))
             total += 1
-        return list(retained), total, "messages-csv"
+        source = "messages-csv+dbc" if dbc_decoder is not None else "messages-csv"
+        return list(retained), total, source
 
     pipeline = StreamingTransportPipeline()
-    protocols = ProtocolRegistry()
+    protocols = ProtocolRegistry(dbc_paths=active_dbc_paths)
     for frame in iter_session_frames(session):
         for message in pipeline.feed(frame):
             retained.append(LogicalMessageRecord.from_decoded(protocols.decode(message)))
@@ -123,7 +158,8 @@ def load_recent_logical_messages(
     for message in pipeline.flush():
         retained.append(LogicalMessageRecord.from_decoded(protocols.decode(message)))
         total += 1
-    return list(retained), total, "reconstructed"
+    source = "reconstructed+dbc" if active_dbc_paths else "reconstructed"
+    return list(retained), total, source
 
 
 def _record_from_csv_row(row: dict[str, str | None]) -> LogicalMessageRecord:
