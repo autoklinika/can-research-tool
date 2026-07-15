@@ -3,13 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QThreadPool, Qt, Signal
-from PySide6.QtWidgets import (
-    QLabel,
-    QTableView,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QTableView, QTabWidget, QVBoxLayout, QWidget
 
 from app.marker_stream import iter_markers, marker_path_for_session
 from app.markers import CaptureMarker
@@ -85,7 +79,6 @@ class SessionViewWidget(QWidget):
         raw_layout.setContentsMargins(0, 0, 0, 0)
         self.frame_table = QTableView()
         self.frame_table.setModel(self.frame_model)
-        self.frame_table.setUniformRowHeights(True)
         self.frame_table.setWordWrap(False)
         self.frame_table.setSelectionBehavior(QTableView.SelectRows)
         self.frame_table.setSelectionMode(QTableView.SingleSelection)
@@ -104,7 +97,7 @@ class SessionViewWidget(QWidget):
         self.marker_table.setModel(self.marker_model)
         self.marker_table.setSelectionBehavior(QTableView.SelectRows)
         self.marker_table.setSelectionMode(QTableView.SingleSelection)
-        self.marker_table.setUniformRowHeights(True)
+        self.marker_table.verticalHeader().setDefaultSectionSize(22)
         self.marker_table.horizontalHeader().setStretchLastSection(True)
         self.marker_table.selectionModel().selectionChanged.connect(self._marker_selected)
         marker_layout.addWidget(self.marker_table)
@@ -127,10 +120,11 @@ class SessionViewWidget(QWidget):
             title = session.name
         except Exception:
             title = self.path.name
-        self.header.setText(
+        text = (
             f"{title} — {path} | pokazano {len(loaded):,} z {total_frames:,} ramek "
-            f"(od {start:,})".replace(",", " ")
-        )
+            f"(od {start:,})"
+        ).replace(",", " ")
+        self.header.setText(text)
         if loaded:
             self.frame_table.scrollToBottom()
         self.output_message.emit(f"Otwarto sesję {path}: {total_frames} ramek")
