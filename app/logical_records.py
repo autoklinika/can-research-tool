@@ -89,15 +89,20 @@ def iter_logical_message_csv(path: str | Path) -> Iterator[LogicalMessageRecord]
                 ) from exc
 
 
-def decode_record_with_dbc(
+def reinterpret_raw_record(
     record: LogicalMessageRecord,
-    decoder: DbcDecoder | None,
+    *,
+    base_registry: ProtocolRegistry,
+    dbc_decoder: DbcDecoder | None,
 ) -> LogicalMessageRecord:
-    """Apply a DBC overlay without changing the stored raw logical record."""
+    """Reinterpret a RAW record from its immutable payload and identifier.
 
-    if decoder is None or record.transport != TransportKind.RAW.value:
-        return record
-    if record.arbitration_id is None:
+    This deliberately ignores a previously persisted DBC label. Therefore disabling
+    a project DBC immediately restores UNKNOWN/base interpretation without changing
+    the session file or regenerating its CSV export.
+    """
+
+    if record.transport != TransportKind.RAW.value or record.arbitration_id is None:
         return record
     message = TransportMessage(
         sequence=record.sequence,
@@ -114,9 +119,9 @@ def decode_record_with_dbc(
         complete=record.complete,
         error=record.error,
     )
-    if not decoder.matches(message):
-        return record
-    return LogicalMessageRecord.from_decoded(decoder.decode(message))
+    if dbc_decoder is not None and dbc_decoder.matches(message):
+        return LogicalMessageRecord.from_decoded(dbc_decoder.decode(message))
+    return LogicalMessageRecord.from_decoded(base_registry.decode(message))
 
 
 def load_recent_logical_messages(
@@ -137,6 +142,7 @@ def load_recent_logical_messages(
 
     active_dbc_paths = tuple(Path(path) for path in dbc_paths)
     dbc_decoder = DbcDecoder(active_dbc_paths) if active_dbc_paths else None
+    base_registry = ProtocolRegistry()
     session = Path(session_path)
     message_path = logical_message_path_for_session(session)
     retained: deque[LogicalMessageRecord] = deque(maxlen=max_rows)
@@ -144,7 +150,13 @@ def load_recent_logical_messages(
 
     if message_path.is_file():
         for record in iter_logical_message_csv(message_path):
-            retained.append(decode_record_with_dbc(record, dbc_decoder))
+            retained.append(
+                reinterpret_raw_record(
+                    record,
+                    base_registry=base_registry,
+                    dbc_decoder=dbc_decoder,
+                )
+            )
             total += 1
         source = "messages-csv+dbc" if dbc_decoder is not None else "messages-csv"
         return list(retained), total, source
