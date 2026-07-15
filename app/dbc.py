@@ -81,7 +81,7 @@ class DbcDecoder:
             "senders": list(dbc_message.senders),
         }
         try:
-            decoded = dbc_message.decode_simple(
+            decoded = dbc_message.decode(
                 message.payload,
                 decode_choices=True,
                 scaling=True,
