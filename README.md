@@ -1,110 +1,172 @@
 # CAN Research Tool (CRT)
 
-CRT to niezależne narzędzie do **reverse engineeringu komunikacji CAN**. Nie jest kopią ECU Platform i nie zawiera procedur diagnostycznych konkretnych sterowników.
+CRT to niezależne środowisko do **reverse engineeringu komunikacji CAN**. Nie jest kopią ECU Platform i nie zawiera gotowych procedur serwisowych konkretnych sterowników.
 
 ## Aktualny zakres
 
 - wykrywanie interfejsów i kanałów Kvaser,
-- odbiór surowych ramek CAN bez udostępniania metod `write` / `send`,
-- dwa tryby elektryczne odbioru:
-  - `BENCH` — kontroler potwierdza poprawne ramki bitem ACK; wymagany na stole, gdy obserwowane ECU jest jedynym nadajnikiem,
-  - `LISTEN_ONLY` — sprzętowy `SILENT`, bez TX i bez ACK; do kompletnej sieci, w której inne aktywne węzły zapewniają ACK,
-- zapis kompletnej sesji z metadanymi,
-- import istniejących logów Kvaser CSV,
-- neutralna analiza ramek: ID, częstotliwość, okresowość, DLC i zmienność bajtów,
-- rekonstrukcja J1939 TP oraz ISO-TP,
-- klasyfikacja UDS i zachowanie nierozpoznanych wiadomości jako `UNKNOWN`,
-- opcjonalne reguły dla protokołów autorskich,
-- strumieniowy zapis sesji i ograniczony bufor podglądu GUI.
+- odbiór surowych ramek bez aplikacyjnego API `write` / `send`,
+- dwa tryby elektryczne:
+  - `BENCH` — kontroler wystawia ACK; właściwy dla pojedynczego ECU na stole,
+  - `LISTEN_ONLY` — sprzętowy `SILENT`, bez TX i bez ACK; dla kompletnej aktywnej sieci,
+- strumieniowy zapis pełnej sesji i ograniczony bufor GUI,
+- import sesji CRT oraz dotychczasowych logów Kvaser CSV,
+- rekonstrukcja J1939 TP i ISO-TP,
+- klasyfikacja UDS oraz bezpieczny fallback `UNKNOWN`,
+- reguły dla protokołów autorskich,
+- przenośne projekty badawcze,
+- obszary badań, np. EGR, VGT i SCR,
+- konfigurowalne znaczniki czasowe z nazwą i skrótem klawiszowym.
 
-Znane logi z SAC służą wyłącznie jako materiał testowy do sprawdzania kompatybilności importu, transportu i zapisu Kvaser.
+Surowe ramki i oryginalne pliki pozostają źródłem prawdy. Dekodery tworzą dodatkowy widok i nie modyfikują materiału wejściowego.
 
-## Struktura
-
-- `app/` — modele, rejestrator, strumieniowy zapis, transport i neutralny silnik analizy,
-- `kvaser/` — izolowana integracja z Kvaser CANlib oraz import logów,
-- `gui/` — Qt Widgets; wyłącznie prezentacja i sterowanie usługami rdzenia,
-- `sessions/` — lokalne sesje badawcze, pomijane przez Git,
-- `docs/` — architektura i decyzje projektowe,
-- `tests/` — testy parserów, transportu, zapisu i ograniczonego bufora live.
-
-## Instalacja środowiska developerskiego
+## Instalacja
 
 ```powershell
 python -m pip install -e ".[dev,kvaser,gui]"
 ```
 
-## GUI
-
-Uruchomienie:
+## Uruchomienie GUI
 
 ```powershell
 python .\crt_gui.py
 ```
 
-albo po ponownej instalacji projektu:
+lub:
 
 ```powershell
 crt-gui
 ```
 
-GUI używa dwóch niezależnych torów danych:
+## Projekt CRT
+
+Każdy projekt jest samodzielnym folderem na dysku. Można go przenieść, skopiować lub spakować bez utraty relacji między sesjami, znacznikami i obszarami badań.
+
+Przykładowa struktura:
+
+```text
+DAF_MX13_EGR/
+├─ project.crt.json
+├─ .crt/
+│  ├─ project.sqlite
+│  └─ indexes/
+├─ sessions/
+│  ├─ live/
+│  └─ imported/
+│     └─ source/
+├─ experiments/
+├─ notes/
+├─ attachments/
+├─ decoders/
+├─ exports/
+└─ reports/
+```
+
+`project.crt.json` zawiera podstawowe dane projektu. `.crt/project.sqlite` przechowuje indeks i relacje, ale surowe logi nadal są zwykłymi plikami wewnątrz projektu.
+
+## Układ GUI
+
+Aplikacja korzysta z modelu pracy podobnego do środowiska programistycznego:
+
+- pionowy pasek aktywności,
+- Explorer projektu po lewej,
+- centralne zakładki robocze,
+- Inspektor po prawej,
+- dolny panel `Output / Problemy / Zadania`,
+- pasek statusu połączenia i rejestracji.
+
+W Explorerze znajdują się:
+
+```text
+Projekt
+├─ Przegląd projektu
+├─ Live Capture
+├─ Obszary badań
+├─ Eksperymenty
+├─ Sesje CAN
+│  ├─ Live
+│  └─ Importowane
+├─ Porównania
+├─ Sygnały
+├─ Hipotezy
+├─ Dekodery
+├─ Notatki
+├─ Załączniki
+└─ Raporty
+```
+
+Podwójne kliknięcie zapisanej sesji otwiera ją w osobnej zakładce. Import dużego logu odbywa się w wątku roboczym.
+
+## Znaczniki podczas logowania
+
+Przed naciśnięciem `Start` można zdefiniować dowolny zestaw znaczników:
+
+```text
+Nazwa             Skrót   Obszar
+EGR odłączony     F3      EGR
+EGR podłączony    F4      EGR
+VGT ruch +        F5      VGT
+VGT ruch -        F6      VGT
+```
+
+Każdy znacznik ma:
+
+- nazwę,
+- skrót klawiszowy,
+- kolor,
+- opcjonalny obszar projektu,
+- stan aktywny/nieaktywny.
+
+Po rozpoczęciu rejestracji aktywne znaczniki są dostępne jednocześnie jako skróty i duże przyciski. Naciśnięcie nie otwiera żadnego okna dialogowego. Timestamp jest pobierany natychmiast z tego samego monotonicznego zegara co ramki CAN.
+
+Znaczniki są zapisywane w:
+
+```text
+<nazwa_sesji>.markers.jsonl
+```
+
+oraz indeksowane w bazie projektu. Zapis zachowuje kopię nazwy, skrótu, koloru i obszaru użytych w chwili eksperymentu.
+
+## Wydajność GUI
+
+GUI używa dwóch torów danych:
 
 ```text
 Kvaser
-  ├─ pełny strumień → *.crt.jsonl + indeks + CSV
+  ├─ pełny strumień → sesja i pliki wynikowe na dysku
   └─ ostatnie 20 000 ramek → bufor live → QAbstractTableModel → QTableView
 ```
 
-Właściwości pierwszej wersji GUI:
+- odbiór, zapis i transport działają poza wątkiem Qt,
+- tabela jest odświeżana paczkami co 100 ms,
+- `Pauza widoku` nie zatrzymuje rejestracji,
+- pamięć podglądu nie rośnie wraz z czasem logowania,
+- duże sesje są indeksowane i otwierane fragmentami,
+- import logów odbywa się asynchronicznie.
 
-- odbiór CAN, zapis i składanie transportu działają poza wątkiem interfejsu,
-- tabela jest odświeżana paczkami co 100 ms, nie osobnym sygnałem dla każdej ramki,
-- tabela przechowuje maksymalnie 20 000 najnowszych ramek,
-- `Pauza widoku` nie zatrzymuje odbioru ani zapisu,
-- duże zapisane sesje są indeksowane i otwierane w wątku roboczym,
-- przy otwieraniu sesji ładowany jest tylko ostatni widoczny fragment, a nie cały plik.
+## Pliki sesji GUI
 
-## Rejestracja sesji z terminala
+Rejestracja wewnątrz projektu tworzy:
 
-Domyślny zapis 10 sekund na kanale 0, 250 kbit/s, w trybie stanowiskowym `BENCH`:
-
-```powershell
-python .\capture_session.py
+```text
+*.crt.jsonl
+*.crt.jsonl.idx.json
+*.frames.csv
+*.messages.csv
+*.markers.jsonl
 ```
 
-Sesja o własnej nazwie i czasie 30 sekund:
+## Rejestracja z terminala
 
 ```powershell
-python .\capture_session.py --duration 30 --name ecu_startup
+python .\capture_session.py --duration 10 --name bench_test
 ```
 
-Nasłuch bez limitu czasu, kończony przez `Ctrl+C`:
+Nasłuch bez limitu:
 
 ```powershell
 python .\capture_session.py --duration 0 --name long_capture
 ```
-
-Podgląd każdej ramki w terminalu:
-
-```powershell
-python .\capture_session.py --duration 10 --live
-```
-
-Tryb pełnego listen-only dla kompletnej sieci:
-
-```powershell
-python .\capture_session.py --mode listen-only
-```
-
-Klasyczny rejestrator CLI tworzy:
-
-- `*.crt.jsonl` — pełną sesję CRT,
-- `*.crt.jsonl.idx.json` — rzadki indeks do stronicowania dużej sesji,
-- `*.frames.csv` — surowe ramki,
-- `*.summary.csv` — statystykę według CAN ID,
-- `*.messages.csv` — zrekonstruowane wiadomości logiczne,
-- `*.messages.summary.csv` — statystykę wiadomości logicznych.
 
 ## Analiza zapisanej sesji
 
@@ -112,10 +174,10 @@ Klasyczny rejestrator CLI tworzy:
 python .\analyze_session.py .\sessions\pierwszy_test.crt.jsonl
 ```
 
-## Uruchomienie testów
+## Testy
 
 ```powershell
 python -m pytest -q
 ```
 
-Sterownik Kvaser i pakiet `canlib` są wymagane dopiero do nasłuchu online. PySide6 jest opcjonalną zależnością wymaganą przez GUI.
+GitHub Actions uruchamia dodatkowo kompilację wszystkich modułów oraz headless Qt smoke test otwierający projekt i zakładkę `Live Capture`.
