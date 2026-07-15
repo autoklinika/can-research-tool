@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
@@ -36,7 +36,7 @@ class ProjectOverviewWidget(QWidget):
         root.addWidget(title)
 
         path = QLabel(str(project.root))
-        path.setTextInteractionFlags(path.textInteractionFlags() | path.TextSelectableByMouse)
+        path.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(path)
 
         description = QTextEdit()
@@ -52,7 +52,10 @@ class ProjectOverviewWidget(QWidget):
         areas = project.list_study_areas()
         form.addRow("Sesje CAN:", QLabel(str(len(sessions))))
         form.addRow("Obszary badań:", QLabel(str(len(areas))))
-        form.addRow("Domyślny bitrate:", QLabel(f"{project.manifest.default_bitrate:,} bit/s".replace(",", " ")))
+        form.addRow(
+            "Domyślny bitrate:",
+            QLabel(f"{project.manifest.default_bitrate:,} bit/s".replace(",", " ")),
+        )
         form.addRow("Tryb odbioru:", QLabel(project.manifest.default_receive_mode.upper()))
         form.addRow("Utworzono:", QLabel(project.manifest.created_at_utc))
         root.addWidget(summary)
