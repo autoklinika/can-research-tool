@@ -159,6 +159,8 @@ DBC wyłączony  → UNKNOWN / bazowa interpretacja
 
 Wyłączenie DBC nie usuwa pliku ani nie modyfikuje sesji. Trwająca rejestracja zachowuje zestaw dekoderów wybrany przy `Start`, aby interpretacja nie zmieniała się w środku eksperymentu.
 
+Szczegóły działania znajdują się w `docs/decoder-workspace.md`.
+
 ## Wiadomości logiczne
 
 `Live Capture` oraz zapisane sesje mają osobne widoki:
