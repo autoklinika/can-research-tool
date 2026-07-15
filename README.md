@@ -2,11 +2,14 @@
 
 CRT to niezależne narzędzie do **reverse engineeringu komunikacji CAN**. Nie jest kopią ECU Platform i nie zawiera procedur diagnostycznych konkretnych sterowników.
 
-## Faza 1 — pasywna
+## Faza 1 — odbiór bez ramek aplikacyjnych TX
 
 - wykrywanie interfejsów i kanałów Kvaser,
-- otwieranie kanału wyłącznie w trybie `SILENT`,
-- odbiór surowych ramek CAN bez TX i bez ACK,
+- odbiór surowych ramek CAN bez udostępniania metod `write` / `send`,
+- dwa tryby elektryczne odbioru:
+  - `BENCH` — kontroler potwierdza poprawne ramki bitem ACK; wymagany na stole, gdy obserwowane ECU jest jedynym nadajnikiem,
+  - `LISTEN_ONLY` — sprzętowy `SILENT`, bez TX i bez ACK; do kompletnej sieci, w której inne aktywne węzły zapewniają ACK,
+- wyłączenie lokalnego echa transmisji innych uchwytów CANlib,
 - zapis kompletnej sesji z metadanymi,
 - import istniejących logów Kvaser CSV,
 - neutralna analiza ramek: ID, częstotliwość, okresowość, DLC i zmienność bajtów,
