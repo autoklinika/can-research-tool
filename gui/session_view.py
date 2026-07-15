@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QThreadPool, Qt, Signal
+from PySide6.QtWidgets import (
+    QLabel,
+    QTableView,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.marker_stream import iter_markers, marker_path_for_session
+from app.markers import CaptureMarker
+from app.session_stream import read_session_header
+
+from .frame_model import FrameTableModel
+from .session_loader import SessionLoadTask
+
+
+class MarkerHistoryModel(QAbstractTableModel):
+    _HEADERS = ("Czas [ms]", "Nazwa", "Skrót", "Obszar", "Źródło", "Notatka")
+
+    def __init__(self, markers: list[CaptureMarker], parent=None) -> None:
+        super().__init__(parent)
+        self._markers = markers
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._markers)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._HEADERS)
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # noqa: N802,E501
+        if role != Qt.DisplayRole:
+            return None
+        if orientation == Qt.Horizontal and 0 <= section < len(self._HEADERS):
+            return self._HEADERS[section]
+        return section + 1
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid() or not 0 <= index.row() < len(self._markers):
+            return None
+        if role != Qt.DisplayRole:
+            return None
+        marker = self._markers[index.row()]
+        values = (
+            f"{marker.timestamp_ns / 1_000_000:.3f}",
+            marker.name,
+            marker.shortcut,
+            marker.area or "—",
+            marker.source,
+            marker.note,
+        )
+        return values[index.column()]
+
+    def marker_at(self, row: int) -> CaptureMarker | None:
+        return self._markers[row] if 0 <= row < len(self._markers) else None
+
+
+class SessionViewWidget(QWidget):
+    inspector_text = Signal(str)
+    output_message = Signal(str)
+
+    MAX_ROWS = 20_000
+
+    def __init__(self, path: str | Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.path = Path(path)
+        self._load_task: SessionLoadTask | None = None
+        self.frame_model = FrameTableModel(capacity=self.MAX_ROWS, parent=self)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        self.header = QLabel(f"Otwieranie sesji: {self.path}")
+        self.header.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        root.addWidget(self.header)
+
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs, 1)
+
+        raw_page = QWidget()
+        raw_layout = QVBoxLayout(raw_page)
+        raw_layout.setContentsMargins(0, 0, 0, 0)
+        self.frame_table = QTableView()
+        self.frame_table.setModel(self.frame_model)
+        self.frame_table.setUniformRowHeights(True)
+        self.frame_table.setWordWrap(False)
+        self.frame_table.setSelectionBehavior(QTableView.SelectRows)
+        self.frame_table.setSelectionMode(QTableView.SingleSelection)
+        self.frame_table.verticalHeader().setDefaultSectionSize(22)
+        self.frame_table.horizontalHeader().setStretchLastSection(True)
+        self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
+        raw_layout.addWidget(self.frame_table)
+        self.tabs.addTab(raw_page, "Surowe ramki")
+
+        markers = list(iter_markers(marker_path_for_session(self.path)))
+        self.marker_model = MarkerHistoryModel(markers, self)
+        marker_page = QWidget()
+        marker_layout = QVBoxLayout(marker_page)
+        marker_layout.setContentsMargins(0, 0, 0, 0)
+        self.marker_table = QTableView()
+        self.marker_table.setModel(self.marker_model)
+        self.marker_table.setSelectionBehavior(QTableView.SelectRows)
+        self.marker_table.setSelectionMode(QTableView.SingleSelection)
+        self.marker_table.setUniformRowHeights(True)
+        self.marker_table.horizontalHeader().setStretchLastSection(True)
+        self.marker_table.selectionModel().selectionChanged.connect(self._marker_selected)
+        marker_layout.addWidget(self.marker_table)
+        self.tabs.addTab(marker_page, f"Znaczniki ({len(markers)})")
+
+        self._start_load()
+
+    def _start_load(self) -> None:
+        task = SessionLoadTask(self.path, max_rows=self.MAX_ROWS)
+        task.signals.loaded.connect(self._loaded)
+        task.signals.failed.connect(self._failed)
+        self._load_task = task
+        QThreadPool.globalInstance().start(task)
+
+    def _loaded(self, path: str, frames: object, total_frames: int, start: int) -> None:
+        loaded = list(frames)
+        self.frame_model.replace_frames(loaded)
+        try:
+            session = read_session_header(path)
+            title = session.name
+        except Exception:
+            title = self.path.name
+        self.header.setText(
+            f"{title} — {path} | pokazano {len(loaded):,} z {total_frames:,} ramek "
+            f"(od {start:,})".replace(",", " ")
+        )
+        if loaded:
+            self.frame_table.scrollToBottom()
+        self.output_message.emit(f"Otwarto sesję {path}: {total_frames} ramek")
+        self._load_task = None
+
+    def _failed(self, path: str, error: str) -> None:
+        self.header.setText(f"Nie udało się otworzyć sesji: {path}\n{error}")
+        self.output_message.emit(f"Błąd otwierania sesji {path}: {error}")
+        self._load_task = None
+
+    def _frame_selected(self) -> None:
+        rows = self.frame_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        frame = self.frame_model.frame_at(rows[0].row())
+        if frame is None:
+            return
+        width = 8 if frame.is_extended_id else 3
+        self.inspector_text.emit(
+            "\n".join(
+                (
+                    "SUROWA RAMKA CAN",
+                    "",
+                    f"Czas: {frame.timestamp_ns / 1_000_000:.6f} ms",
+                    f"Sekwencja: {frame.sequence}",
+                    f"CAN ID: 0x{frame.arbitration_id:0{width}X}",
+                    f"Typ: {'EXT' if frame.is_extended_id else 'STD'}",
+                    f"DLC: {frame.dlc}",
+                    f"Dane: {frame.data_hex}",
+                    f"Kanał: {frame.channel}",
+                    f"Flagi źródłowe: 0x{frame.source_flags:X}",
+                )
+            )
+        )
+
+    def _marker_selected(self) -> None:
+        rows = self.marker_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        marker = self.marker_model.marker_at(rows[0].row())
+        if marker is None:
+            return
+        self.inspector_text.emit(
+            "\n".join(
+                (
+                    "ZNACZNIK SESJI",
+                    "",
+                    f"Czas: {marker.timestamp_ns / 1_000_000:.6f} ms",
+                    f"Nazwa: {marker.name}",
+                    f"Skrót: {marker.shortcut}",
+                    f"Obszar: {marker.area or '—'}",
+                    f"Źródło: {marker.source}",
+                    f"Notatka: {marker.note or '—'}",
+                )
+            )
+        )
