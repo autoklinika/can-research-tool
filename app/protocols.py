@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, Protocol
 
 from .custom_rules import MessageRule, RuleBasedDecoder
+from .dbc import DbcDecoder
 from .j1939 import decode_j1939_identifier
 from .message_models import DecodedMessage, ProtocolKind, TransportKind, TransportMessage
 
@@ -66,11 +68,7 @@ class UdsDecoder:
         if message.transport is not TransportKind.ISOTP or not message.payload:
             return False
         sid = message.payload[0]
-        return (
-            sid == 0x7F
-            or sid in _UDS_SERVICES
-            or sid - 0x40 in _UDS_SERVICES
-        )
+        return sid == 0x7F or sid in _UDS_SERVICES or sid - 0x40 in _UDS_SERVICES
 
     def decode(self, message: TransportMessage) -> DecodedMessage:
         payload = message.payload
@@ -201,16 +199,20 @@ class ProtocolRegistry:
         decoders: Iterable[ProtocolDecoder] | None = None,
         *,
         custom_rules: Iterable[MessageRule] = (),
+        dbc_paths: Iterable[str | Path] = (),
     ) -> None:
         if decoders is not None:
             self._decoders = list(decoders)
             return
 
         rules = tuple(custom_rules)
+        active_dbc_paths = tuple(Path(path) for path in dbc_paths)
         self._decoders: list[ProtocolDecoder] = [
             UdsDecoder(),
             J1939TransportDecoder(),
         ]
+        if active_dbc_paths:
+            self._decoders.append(DbcDecoder(active_dbc_paths))
         if rules:
             self._decoders.append(RuleBasedDecoder(rules))
         self._decoders.append(UnknownDecoder())
