@@ -36,17 +36,29 @@ jobs:
           sudo apt-get install -y -qq libegl1
       - name: Install GUI
         run: python -m pip install -q -e ".[gui]"
-      - name: Create main window offscreen
+      - name: Create project workspace offscreen
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
           from PySide6.QtWidgets import QApplication
+
+          from app.project import CrtProject
           from gui.main_window import MainWindow
 
           app = QApplication([])
-          window = MainWindow()
-          assert window.windowTitle() == "CAN Research Tool"
-          window.close()
+          with TemporaryDirectory() as temporary:
+              project = CrtProject.create(Path(temporary) / "project", name="Smoke")
+              project.add_study_area("EGR")
+              window = MainWindow()
+              window._set_project(project)
+              window._open_live_capture()
+              assert window.project is project
+              assert window.tabs.count() >= 2
+              assert window.explorer.tree.model().rowCount() == 1
+              window.close()
           app.quit()
           PY
