@@ -1,72 +1,111 @@
-# Architektura CRT — neutralny pipeline CAN
+# Architektura CAN Research Tool
 
 ## Cel
 
-CRT wspiera reverse engineering magistrali CAN. Surowa ramka i kompletna sesja są zawsze źródłem prawdy; dekodowanie tworzy dodatkowe widoki i nigdy nie usuwa ani nie zastępuje materiału wejściowego.
+CRT wspiera reverse engineering magistrali CAN: bezpieczne przechwytywanie materiału badawczego, rekonstrukcję warstw transportowych, analizę wiadomości oraz porównywanie sesji. Surowe ramki pozostają zawsze źródłem prawdy.
 
 ## Granice projektu
 
-CRT nie importuje logiki ECU Platform, ekranów konkretnych ECU ani gotowych procedur dla określonych sterowników. Znane logi mogą służyć jako materiał regresyjny, ale nie definiują architektury narzędzia.
+CRT nie importuje ekranów ECU Platform, profili konkretnych ECU ani gotowych procedur serwisowych. J1939, ISO-TP, UDS i protokoły autorskie są niezależnymi warstwami nad neutralnym modelem CAN.
 
-## Przepływ danych
+## Przepływ danych podczas rejestracji
 
 ```text
-CanFrame
-   -> CaptureSession
-   -> TransportPipeline
-   -> TransportMessage
-   -> ProtocolRegistry
-   -> DecodedMessage
-   -> LogicalMessageAnalyzer
+KvaserPassiveChannel — wątek roboczy
+        │
+        ├── SessionStreamWriter ──► pełna sesja *.crt.jsonl
+        │                             + rzadki indeks byte-offset
+        │
+        ├── FrameCsvStreamWriter ─► surowe *.frames.csv
+        │
+        ├── StreamingTransportPipeline
+        │       ├── J1939 TP BAM / RTS-CTS
+        │       ├── ISO-TP
+        │       └── RAW fallback
+        │                │
+        │                ▼
+        │          ProtocolRegistry
+        │       ├── UDS
+        │       ├── J1939
+        │       ├── reguły autorskie
+        │       └── UNKNOWN
+        │                │
+        │                ▼
+        │       MessageCsvStreamWriter
+        │
+        └── LiveFrameBuffer ──────► ograniczony podgląd GUI
 ```
 
-## Warstwa sprzętowa `kvaser/`
+## Zasada stałego zużycia pamięci
 
-Adapter Kvaser zna CANlib, kanały, flagi i tryb elektryczny odbioru. Nie udostępnia metod `write` ani `send`.
+Pełna sesja nie jest przechowywana przez GUI. `LiveFrameBuffer` zachowuje jedynie najnowsze ramki, domyślnie 20 000 rekordów. Starsze rekordy są nadal bezpiecznie zapisane w sesji.
 
-- `BENCH` — aplikacja nie nadaje ramek, a kontroler potwierdza poprawny odbiór bitem ACK; tryb do pracy z pojedynczym ECU na stole.
-- `LISTEN_ONLY` — sprzętowy `SILENT`, bez ramek TX i bez ACK; tryb do kompletnej, aktywnej sieci.
+GUI pobiera migawki według numeru sekwencji. Gdy interfejs był zatrzymany zbyt długo i jego kursor wypadł poza bufor, bufor zwraca `truncated=True`. Model tabeli zastępuje wtedy swój widok aktualnym oknem zamiast próbować odtworzyć brakujące rekordy z RAM.
 
-## Neutralny model
+## Warstwy
 
-- `CanFrame` — surowa ramka zależna wyłącznie od CAN.
-- `TransportMessage` — pojedyncza lub zrekonstruowana wiadomość wraz z listą ramek źródłowych, kompletnością i błędami.
-- `DecodedMessage` — interpretacja protokołu nałożona na wiadomość transportową.
+### `kvaser/`
 
-## Wtyczki transportowe
+Adapter sprzętowy zna CANlib, kanały Kvaser i flagi ramek. Adapter nie udostępnia metod transmisji aplikacyjnej.
 
-`TransportReassembler` jest neutralnym interfejsem składacza. Pierwsze implementacje:
+Tryby odbioru:
 
-- `RAW` — jedna ramka pozostaje jedną wiadomością;
-- `J1939 BAM`;
-- `J1939 RTS/CTS`;
-- `ISO-TP` dla typowych 11-bitowych identyfikatorów diagnostycznych;
-- `ISO-TP` dla 29-bitowego normal-fixed addressing z PF `0xDA` i `0xDB`.
+- `BENCH` — `Driver.NORMAL`, brak API TX w CRT, sprzętowy ACK aktywny;
+- `LISTEN_ONLY` — `Driver.SILENT`, brak ACK; wymaga innego aktywnego węzła na magistrali.
 
-Klasyfikacja ISO-TP jest celowo konserwatywna, aby autorska ramka rozpoczynająca się bajtem podobnym do PCI nie została automatycznie uznana za transport diagnostyczny.
+### `app/session_stream.py`
 
-## Wtyczki protokołów
+- zapis JSONL ramka po ramce,
+- okresowe opróżnianie bufora systemowego,
+- stopka czystego zakończenia,
+- rzadki indeks offsetów bajtowych,
+- `SessionPagedReader` do odczytu wybranych zakresów,
+- zgodność z wcześniejszym formatem sesji bez stopki i indeksu.
 
-`ProtocolDecoder` otrzymuje gotową `TransportMessage`. Rejestr dekoderów działa w określonej kolejności:
+### `app/capture_service.py`
 
-1. UDS — tylko po rozpoznanym ISO-TP i tylko dla znanych identyfikatorów usług;
-2. J1939 — dla wiadomości zrekonstruowanych przez J1939 TP;
-3. reguły użytkownika dla protokołów autorskich;
-4. `UNKNOWN` jako bezpieczny fallback.
+- posiada wątek roboczy odbioru,
+- zapisuje dane bezpośrednio na dysk,
+- publikuje postęp maksymalnie około 10 razy na sekundę,
+- przekazuje ramki do bufora GUI paczkami,
+- nie emituje sygnału GUI dla każdej ramki,
+- utrzymuje transport pipeline pomiędzy kolejnymi ramkami.
 
-Rozłożenie 29-bitowego CAN ID na pola przypominające J1939 nie jest dowodem, że protokół jest J1939. Dla nierozpoznanych ramek pola te są zapisywane wyłącznie jako kandydat pomocniczy.
+### `app/transport.py` i `app/stream_pipeline.py`
 
-## Protokoły autorskie
+Transport jest oddzielony od protokołu aplikacyjnego. 29-bitowy identyfikator nie oznacza automatycznie J1939. Rozpoznanie J1939 TP lub ISO-TP wymaga charakterystycznych ramek transportowych. Nierozpoznany ruch pozostaje `RAW`.
 
-`MessageRule` pozwala opisać rodzinę identyfikatorów przez ID i maskę, typ ramki, transport oraz zakres długości payloadu. Reguła może oznaczyć wiadomość jako `PROPRIETARY` bez zmiany rdzenia i bez wymuszania interpretacji J1939 lub UDS.
+### `app/protocols.py`
 
-Późniejsze warstwy reguł będą obejmować sygnały, endian, skalowanie, liczniki i checksumy.
+Dekodery są uruchamiane po rekonstrukcji transportu. Brak dopasowania kończy się `UNKNOWN`, nigdy wymuszoną interpretacją.
 
-## Pliki wynikowe
+### `gui/`
 
-Rejestracja tworzy dwa niezależne poziomy danych:
+GUI używa Qt Widgets:
 
-- `*.crt.jsonl`, `*.frames.csv`, `*.summary.csv` — surowe ramki i statystyki CAN ID;
-- `*.messages.csv`, `*.messages.summary.csv` — wiadomości po rekonstrukcji transportu i ich rzeczywista okresowość.
+- `QTableView` + `QAbstractTableModel`, nigdy `QTableWidget`,
+- aktualizacja tabeli paczkami co 100 ms,
+- ograniczona liczba wierszy,
+- brak sortowania pełnej sesji w głównym wątku,
+- pauza widoku niezależna od rejestracji,
+- indeksowanie i otwieranie sesji przez `QThreadPool`,
+- ładowanie tylko widocznej strony danych.
 
-Istniejącą sesję można ponownie przeanalizować bez dostępu do interfejsu CAN przez `analyze_session.py`.
+## Reguły wydajności
+
+1. Żadnej operacji plikowej, CAN ani analizy dużego zbioru w wątku GUI.
+2. Żadnego sygnału Qt na pojedynczą ramkę.
+3. Żadnej nieograniczonej listy ramek w modelu tabeli.
+4. Surowa sesja jest zapisywana przed prezentacją danych.
+5. Filtry i porównania dużych sesji będą działały na indeksach i stronach danych.
+6. Pauza interfejsu nie może zatrzymać zapisu ani transport pipeline.
+7. Utrata rekordów z bufora widoku nie oznacza utraty danych sesji.
+
+## Następne warstwy
+
+- model tabeli wiadomości logicznych,
+- paginacja wstecz i do przodu dla zapisanych sesji,
+- indeksy po CAN ID, protokole, PGN i czasie,
+- porównywanie dwóch sesji w wątku roboczym,
+- edytor reguł protokołów autorskich,
+- dekodery domenowe J1939 i UDS jako wtyczki.
