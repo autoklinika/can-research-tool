@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QThreadPool, Qt
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
+    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -230,8 +231,18 @@ class MainWindow(QMainWindow):
 
     def _new_project(self) -> None:
         dialog = NewProjectDialog(self)
-        if dialog.exec() != dialog.Accepted:
+        result = dialog.exec()
+        if result != QDialog.DialogCode.Accepted:
             return
+        self._create_project_from_dialog(dialog)
+
+    def _create_project_from_dialog(self, dialog: NewProjectDialog) -> None:
+        """Create and activate a project from an already accepted dialog.
+
+        Kept separate from the modal ``exec()`` call so the full creation path can
+        be exercised by automated GUI tests without interacting with a real dialog.
+        """
+
         try:
             project = CrtProject.create(
                 dialog.project_root(),
@@ -358,11 +369,14 @@ class MainWindow(QMainWindow):
         self._append_output(f"Import zakończony: {source} → {target}")
         self.explorer.refresh()
         self._open_session(target)
-        self._import_tasks.clear()
+        self._discard_finished_import_tasks()
 
     def _import_failed(self, source: str, error: str) -> None:
         self._append_output(f"Błąd importu {source}: {error}")
         QMessageBox.critical(self, "Błąd importu", f"{source}\n\n{error}")
+        self._discard_finished_import_tasks()
+
+    def _discard_finished_import_tasks(self) -> None:
         self._import_tasks.clear()
 
     def _open_placeholder(self, key: str, title: str, description: str) -> None:
@@ -390,11 +404,7 @@ class MainWindow(QMainWindow):
         self._tab_keys[key] = widget
         self.tabs.setCurrentIndex(index)
         if not closable:
-            self.tabs.tabBar().setTabButton(
-                index,
-                QTabBar.ButtonPosition.RightSide,
-                None,
-            )
+            self.tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, None)
 
     def _activate_tab(self, key: str) -> bool:
         widget = self._tab_keys.get(key)
@@ -439,11 +449,10 @@ class MainWindow(QMainWindow):
             widget.deleteLater()
 
     def _has_active_capture(self) -> bool:
-        return any(
-            isinstance(self.tabs.widget(index), LiveCaptureWidget)
-            and self.tabs.widget(index).is_capturing
-            for index in range(self.tabs.count())
-        )
+        for widget in self._tab_keys.values():
+            if isinstance(widget, LiveCaptureWidget) and widget.is_capturing:
+                return True
+        return False
 
     def _toggle_explorer(self, visible: bool) -> None:
         self.explorer_dock.setVisible(visible)
@@ -453,20 +462,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self._has_active_capture():
-            answer = QMessageBox.question(
-                self,
-                "Aktywna rejestracja",
-                "Trwa rejestracja CAN. Zatrzymać ją i zamknąć CRT?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                event.ignore()
-                return
-        for index in range(self.tabs.count()):
-            widget = self.tabs.widget(index)
-            if isinstance(widget, LiveCaptureWidget):
-                widget.shutdown()
-        self.settings.setValue("window/geometry", self.saveGeometry())
-        self.settings.setValue("window/state", self.saveState())
+            QMessageBox.warning(self, "CRT", "Zatrzymaj rejestrację przed zamknięciem programu.")
+            event.ignore()
+            return
         event.accept()
