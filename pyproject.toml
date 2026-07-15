@@ -12,13 +12,15 @@ dependencies = []
 
 [project.optional-dependencies]
 kvaser = ["canlib>=1.33,<2"]
+gui = ["PySide6>=6.7,<7"]
 dev = ["pytest>=8.3,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
 crt-capture = "app.capture_cli:main"
+crt-gui = "gui.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app", "kvaser"]
+packages = ["app", "kvaser", "gui"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
