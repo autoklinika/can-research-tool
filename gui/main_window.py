@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.project import CrtProject
+from app.project_dbc import active_project_dbc_paths, list_project_dbc
 
+from .dbc_manager import DbcManagerWidget
 from .import_task import ProjectImportTask
 from .live_capture import LiveCaptureWidget
 from .project_dialog import NewProjectDialog
@@ -87,23 +89,29 @@ class MainWindow(QMainWindow):
         self.live_action.triggered.connect(self._open_live_capture)
         self.search_action = QAction("Szukaj", self)
         self.search_action.triggered.connect(
-            lambda: self._open_placeholder("search", "Wyszukiwanie", "Wyszukiwanie po całym projekcie")
+            lambda: self._open_placeholder(
+                "search", "Wyszukiwanie", "Wyszukiwanie po całym projekcie"
+            )
         )
         self.compare_action = QAction("Porównaj", self)
         self.compare_action.triggered.connect(
-            lambda: self._open_placeholder("compare", "Porównania", "Porównywanie sesji i zdarzeń")
+            lambda: self._open_placeholder(
+                "compare", "Porównania", "Porównywanie sesji i zdarzeń"
+            )
         )
         self.signals_action = QAction("Sygnały", self)
         self.signals_action.triggered.connect(
-            lambda: self._open_placeholder("signals", "Sygnały", "Katalog sygnałów i hipotez")
+            lambda: self._open_placeholder(
+                "signals", "Sygnały", "Katalog sygnałów i hipotez"
+            )
         )
         self.decoders_action = QAction("Dekodery", self)
-        self.decoders_action.triggered.connect(
-            lambda: self._open_placeholder("decoders", "Dekodery", "Reguły autorskie, J1939 i UDS")
-        )
+        self.decoders_action.triggered.connect(self._open_decoders)
         self.settings_action = QAction("Ustawienia", self)
         self.settings_action.triggered.connect(
-            lambda: self._open_placeholder("settings", "Ustawienia", "Ustawienia projektu i aplikacji")
+            lambda: self._open_placeholder(
+                "settings", "Ustawienia", "Ustawienia projektu i aplikacji"
+            )
         )
 
     def _build_menu(self) -> None:
@@ -143,19 +151,24 @@ class MainWindow(QMainWindow):
         self.explorer.open_live_capture.connect(self._open_live_capture)
         self.explorer.open_session.connect(self._open_session)
         self.explorer.open_area.connect(self._open_area)
+        self.explorer.open_decoders.connect(self._open_decoders)
         self.explorer.import_requested.connect(self._import_log)
         self.explorer.add_area_requested.connect(self._add_study_area)
         self.explorer_dock = QDockWidget("Projekt", self)
         self.explorer_dock.setObjectName("projectExplorerDock")
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(260)
-        self.explorer_dock.visibilityChanged.connect(self.toggle_explorer_action.setChecked)
+        self.explorer_dock.visibilityChanged.connect(
+            self.toggle_explorer_action.setChecked
+        )
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
 
         self.inspector = QPlainTextEdit()
         self.inspector.setReadOnly(True)
         self.inspector.setMaximumBlockCount(1000)
-        self.inspector.setPlaceholderText("Zaznacz ramkę, wiadomość, znacznik lub element projektu.")
+        self.inspector.setPlaceholderText(
+            "Zaznacz ramkę, wiadomość, znacznik lub element projektu."
+        )
         self.inspector_dock = QDockWidget("Inspektor", self)
         self.inspector_dock.setObjectName("inspectorDock")
         self.inspector_dock.setWidget(self.inspector)
@@ -169,7 +182,9 @@ class MainWindow(QMainWindow):
         output_tabs.addTab(self.output, "Output")
         problems = QPlainTextEdit()
         problems.setReadOnly(True)
-        problems.setPlaceholderText("Błędy parserów, niekompletne transporty i konflikty reguł.")
+        problems.setPlaceholderText(
+            "Błędy parserów, niekompletne transporty i konflikty reguł."
+        )
         output_tabs.addTab(problems, "Problemy")
         tasks = QPlainTextEdit()
         tasks.setReadOnly(True)
@@ -237,12 +252,6 @@ class MainWindow(QMainWindow):
         self._create_project_from_dialog(dialog)
 
     def _create_project_from_dialog(self, dialog: NewProjectDialog) -> None:
-        """Create and activate a project from an already accepted dialog.
-
-        Kept separate from the modal ``exec()`` call so the full creation path can
-        be exercised by automated GUI tests without interacting with a real dialog.
-        """
-
         try:
             project = CrtProject.create(
                 dialog.project_root(),
@@ -259,7 +268,9 @@ class MainWindow(QMainWindow):
 
     def _open_project_dialog(self) -> None:
         start = self.settings.value("project/lastParent", str(Path.home()), str)
-        directory = QFileDialog.getExistingDirectory(self, "Otwórz projekt CRT", start)
+        directory = QFileDialog.getExistingDirectory(
+            self, "Otwórz projekt CRT", start
+        )
         if directory:
             try:
                 self._open_project_path(Path(directory))
@@ -272,13 +283,18 @@ class MainWindow(QMainWindow):
 
     def _set_project(self, project: CrtProject) -> None:
         if self._has_active_capture():
-            QMessageBox.warning(self, "CRT", "Zatrzymaj aktywną rejestrację przed zmianą projektu.")
+            QMessageBox.warning(
+                self, "CRT", "Zatrzymaj aktywną rejestrację przed zmianą projektu."
+            )
             return
         self.project = project
+        list_project_dbc(project)
         self.settings.setValue("project/lastPath", str(project.root))
         self.settings.setValue("project/lastParent", str(project.root.parent))
         self.setWindowTitle(f"{project.manifest.name} — CAN Research Tool")
-        self.project_status.setText(f"Projekt: {project.manifest.name} | {project.root}")
+        self.project_status.setText(
+            f"Projekt: {project.manifest.name} | {project.root}"
+        )
         self.import_action.setEnabled(True)
         self.explorer.set_project(project)
         self.explorer_dock.show()
@@ -300,7 +316,9 @@ class MainWindow(QMainWindow):
 
     def _open_live_capture(self) -> None:
         if self.project is None:
-            QMessageBox.information(self, "CRT", "Najpierw otwórz lub utwórz projekt.")
+            QMessageBox.information(
+                self, "CRT", "Najpierw otwórz lub utwórz projekt."
+            )
             return
         key = "live-capture"
         if self._activate_tab(key):
@@ -312,31 +330,82 @@ class MainWindow(QMainWindow):
         widget.project_changed.connect(self.explorer.refresh)
         self._add_tab(key, widget, "Live Capture")
 
+    def _open_decoders(self) -> None:
+        if self.project is None:
+            QMessageBox.information(
+                self, "CRT", "Najpierw otwórz lub utwórz projekt."
+            )
+            return
+        key = "decoders"
+        if self._activate_tab(key):
+            return
+        widget = DbcManagerWidget(self.project)
+        widget.inspector_text.connect(self.inspector.setPlainText)
+        widget.output_message.connect(self._append_output)
+        widget.changed.connect(self._dbc_changed)
+        self._add_tab(key, widget, "Dekodery")
+
+    def _dbc_changed(self) -> None:
+        if self.project is None:
+            return
+        paths = active_project_dbc_paths(self.project)
+        self.explorer.refresh()
+        for widget in tuple(self._tab_keys.values()):
+            if isinstance(widget, SessionViewWidget):
+                widget.reload_logical_messages(paths)
+        if self._has_active_capture():
+            self._append_output(
+                "Zmieniono aktywne DBC. Trwająca rejestracja zachowuje zestaw wybrany przy Start; "
+                "nowy stan będzie użyty w następnej sesji."
+            )
+        else:
+            self._append_output(f"Aktywne dekodery DBC: {len(paths)}")
+
     def _open_session(self, path: str) -> None:
         session_path = Path(path).resolve()
         key = f"session:{session_path}"
         if self._activate_tab(key):
             return
-        widget = SessionViewWidget(session_path)
+        dbc_paths = active_project_dbc_paths(self.project) if self.project else ()
+        widget = SessionViewWidget(session_path, dbc_paths=dbc_paths)
         widget.inspector_text.connect(self.inspector.setPlainText)
         widget.output_message.connect(self._append_output)
-        self._add_tab(key, widget, session_path.name.removesuffix(".crt.jsonl"))
+        self._add_tab(
+            key,
+            widget,
+            session_path.name.removesuffix(".crt.jsonl"),
+        )
 
     def _open_area(self, area_id: str) -> None:
         if self.project is None:
             return
-        area = next((item for item in self.project.list_study_areas() if item.id == area_id), None)
+        area = next(
+            (
+                item
+                for item in self.project.list_study_areas()
+                if item.id == area_id
+            ),
+            None,
+        )
         if area is None:
             return
         key = f"area:{area.id}"
         if self._activate_tab(key):
             return
-        self._add_tab(key, StudyAreaViewWidget(self.project, area.id), area.name)
+        self._add_tab(
+            key,
+            StudyAreaViewWidget(self.project, area.id),
+            area.name,
+        )
 
     def _add_study_area(self) -> None:
         if self.project is None:
             return
-        name, accepted = QInputDialog.getText(self, "Nowy obszar badań", "Nazwa, np. EGR, VGT, SCR:")
+        name, accepted = QInputDialog.getText(
+            self,
+            "Nowy obszar badań",
+            "Nazwa, np. EGR, VGT, SCR:",
+        )
         if not accepted or not name.strip():
             return
         try:
@@ -394,17 +463,32 @@ class MainWindow(QMainWindow):
         heading.setFont(font)
         layout.addWidget(heading)
         layout.addWidget(QLabel(description))
-        layout.addWidget(QLabel("Moduł został przewidziany w architekturze projektu i będzie rozwijany etapami."))
+        layout.addWidget(
+            QLabel(
+                "Moduł został przewidziany w architekturze projektu i będzie rozwijany etapami."
+            )
+        )
         layout.addStretch(1)
         self._add_tab(key, widget, title)
 
-    def _add_tab(self, key: str, widget: QWidget, title: str, *, closable: bool = True) -> None:
+    def _add_tab(
+        self,
+        key: str,
+        widget: QWidget,
+        title: str,
+        *,
+        closable: bool = True,
+    ) -> None:
         widget.setProperty("crtTabKey", key)
         index = self.tabs.addTab(widget, title)
         self._tab_keys[key] = widget
         self.tabs.setCurrentIndex(index)
         if not closable:
-            self.tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, None)
+            self.tabs.tabBar().setTabButton(
+                index,
+                QTabBar.ButtonPosition.RightSide,
+                None,
+            )
 
     def _activate_tab(self, key: str) -> bool:
         widget = self._tab_keys.get(key)
@@ -462,7 +546,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self._has_active_capture():
-            QMessageBox.warning(self, "CRT", "Zatrzymaj rejestrację przed zamknięciem programu.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Zatrzymaj rejestrację przed zamknięciem programu.",
+            )
             event.ignore()
             return
         event.accept()
