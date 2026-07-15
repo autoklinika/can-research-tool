@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.project import CrtProject, SessionRecord, StudyArea
+from app.project import CrtProject, SessionRecord
+from app.project_dbc import list_project_dbc
 
 
 ROLE_NODE_TYPE = Qt.UserRole + 1
@@ -25,6 +26,7 @@ class ProjectExplorer(QWidget):
     open_live_capture = Signal()
     open_session = Signal(str)
     open_area = Signal(str)
+    open_decoders = Signal()
     import_requested = Signal()
     add_area_requested = Signal()
 
@@ -91,8 +93,12 @@ class ProjectExplorer(QWidget):
             area_item = self._item(area.name, "area", area.id)
             linked = project.area_session_ids(area.id)
             if linked:
-                sessions_by_id = {session.id: session for session in project.list_sessions()}
-                linked_root = self._item("Powiązane sesje", "section", "area-sessions")
+                sessions_by_id = {
+                    session.id: session for session in project.list_sessions()
+                }
+                linked_root = self._item(
+                    "Powiązane sesje", "section", "area-sessions"
+                )
                 for session_id in sorted(linked):
                     session = sessions_by_id.get(session_id)
                     if session is not None:
@@ -119,11 +125,12 @@ class ProjectExplorer(QWidget):
         sessions_root.appendRow(imported_root)
         root.appendRow(sessions_root)
 
+        root.appendRow(self._build_decoders(project))
+
         for name, key in (
             ("Porównania", "comparisons"),
             ("Sygnały", "signals"),
             ("Hipotezy", "hypotheses"),
-            ("Dekodery", "decoders"),
             ("Notatki", "notes"),
             ("Załączniki", "attachments"),
             ("Raporty", "reports"),
@@ -132,16 +139,48 @@ class ProjectExplorer(QWidget):
             section.appendRow(self._placeholder("W przygotowaniu"))
             root.appendRow(section)
 
-    def _session_item(self, project: CrtProject, session: SessionRecord) -> QStandardItem:
+    def _build_decoders(self, project: CrtProject) -> QStandardItem:
+        records = list_project_dbc(project)
+        active = sum(record.enabled for record in records)
+        decoders = self._item("Dekodery", "decoders", "")
+        dbc_root = self._item(
+            f"DBC — aktywne {active}/{len(records)}",
+            "decoders",
+            "",
+        )
+        for record in records:
+            state = "●" if record.enabled else "○"
+            item = self._item(f"{state} {record.name}", "dbc", record.id)
+            item.setToolTip(
+                f"{record.relative_path}\nWiadomości: {record.message_count}\n"
+                f"Stan: {'aktywny' if record.enabled else 'wyłączony'}"
+            )
+            dbc_root.appendRow(item)
+        if not records:
+            dbc_root.appendRow(self._placeholder("Brak plików DBC"))
+        decoders.appendRow(dbc_root)
+        return decoders
+
+    def _session_item(
+        self,
+        project: CrtProject,
+        session: SessionRecord,
+    ) -> QStandardItem:
         label = session.name
         if session.status == "recording":
             label += "  ●"
         elif session.status == "error":
             label += "  ⚠"
-        item = self._item(label, "session", str(project.absolute_path(session.relative_path)))
+        item = self._item(
+            label,
+            "session",
+            str(project.absolute_path(session.relative_path)),
+        )
         item.setToolTip(
             f"{session.relative_path}\nRamki: {session.frame_count:,}\n"
-            f"Znaczniki: {session.marker_count:,}\nStatus: {session.status}".replace(",", " ")
+            f"Znaczniki: {session.marker_count:,}\nStatus: {session.status}".replace(
+                ",", " "
+            )
         )
         return item
 
@@ -172,3 +211,5 @@ class ProjectExplorer(QWidget):
             self.open_session.emit(str(Path(value)))
         elif node_type == "area" and value:
             self.open_area.emit(str(value))
+        elif node_type in {"decoders", "dbc"}:
+            self.open_decoders.emit()
