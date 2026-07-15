@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QTableView,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +29,10 @@ from app.project import CrtProject
 from kvaser.backend import KvaserReceiveMode, list_channels
 
 from .frame_model import FrameTableModel
+from .logical_message_model import (
+    LogicalMessageTableModel,
+    format_logical_message_inspector,
+)
 from .marker_dialog import MarkerPresetDialog
 from .marker_model import MarkerPresetTableModel
 
@@ -39,6 +44,7 @@ class LiveCaptureWidget(QWidget):
     project_changed = Signal()
 
     LIVE_CAPACITY = 20_000
+    LIVE_MESSAGE_CAPACITY = 5_000
     GUI_REFRESH_MS = 100
 
     def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
@@ -46,6 +52,7 @@ class LiveCaptureWidget(QWidget):
         self.project = project
         self._capture = CaptureService()
         self._last_sequence: int | None = None
+        self._last_message_sequence: int | None = None
         self._last_state = CaptureState.IDLE
         self._current_session_path: Path | None = None
         self._finalized_session_path: Path | None = None
@@ -54,6 +61,10 @@ class LiveCaptureWidget(QWidget):
         self._error_shown = ""
 
         self.frame_model = FrameTableModel(capacity=self.LIVE_CAPACITY, parent=self)
+        self.message_model = LogicalMessageTableModel(
+            capacity=self.LIVE_MESSAGE_CAPACITY,
+            parent=self,
+        )
         self.marker_model = MarkerPresetTableModel(project.list_marker_presets(), self)
         self._build_ui()
         self._refresh_channels()
@@ -150,17 +161,28 @@ class LiveCaptureWidget(QWidget):
 
         view_controls = QHBoxLayout()
         self.pause_view = QCheckBox("Pauza widoku")
-        self.pause_view.setToolTip("Zatrzymuje tabelę, ale nie odbiór i zapis sesji.")
+        self.pause_view.setToolTip(
+            "Zatrzymuje tabele ramek i wiadomości, ale nie odbiór ani zapis sesji."
+        )
         view_controls.addWidget(self.pause_view)
         self.auto_scroll = QCheckBox("Auto-scroll")
         self.auto_scroll.setChecked(True)
         view_controls.addWidget(self.auto_scroll)
         view_controls.addWidget(
-            QLabel(f"Bufor GUI: maksymalnie {self.LIVE_CAPACITY:,} ramek".replace(",", " "))
+            QLabel(
+                f"Bufory GUI: {self.LIVE_CAPACITY:,} ramek / "
+                f"{self.LIVE_MESSAGE_CAPACITY:,} wiadomości".replace(",", " ")
+            )
         )
         view_controls.addStretch(1)
         root.addLayout(view_controls)
 
+        self.data_tabs = QTabWidget()
+        root.addWidget(self.data_tabs, 1)
+
+        raw_page = QWidget()
+        raw_layout = QVBoxLayout(raw_page)
+        raw_layout.setContentsMargins(0, 0, 0, 0)
         splitter = QSplitter(Qt.Horizontal)
         self.frame_table = QTableView()
         self.frame_table.setModel(self.frame_model)
@@ -186,7 +208,38 @@ class LiveCaptureWidget(QWidget):
         marker_history_group.setMinimumWidth(260)
         splitter.addWidget(marker_history_group)
         splitter.setSizes([1050, 280])
-        root.addWidget(splitter, 1)
+        raw_layout.addWidget(splitter)
+        self.raw_tab_index = self.data_tabs.addTab(raw_page, "Surowe ramki")
+
+        message_page = QWidget()
+        message_layout = QVBoxLayout(message_page)
+        message_layout.setContentsMargins(0, 0, 0, 0)
+        self.message_table = QTableView()
+        self.message_table.setModel(self.message_model)
+        self.message_table.setAlternatingRowColors(True)
+        self.message_table.setWordWrap(False)
+        self.message_table.setSelectionBehavior(QTableView.SelectRows)
+        self.message_table.setSelectionMode(QTableView.SingleSelection)
+        self.message_table.verticalHeader().setDefaultSectionSize(22)
+        self.message_table.horizontalHeader().setStretchLastSection(True)
+        self.message_table.selectionModel().selectionChanged.connect(
+            self._message_selected
+        )
+        self.message_table.setColumnWidth(0, 115)
+        self.message_table.setColumnWidth(1, 90)
+        self.message_table.setColumnWidth(2, 130)
+        self.message_table.setColumnWidth(3, 130)
+        self.message_table.setColumnWidth(4, 75)
+        self.message_table.setColumnWidth(5, 75)
+        self.message_table.setColumnWidth(6, 70)
+        self.message_table.setColumnWidth(7, 65)
+        self.message_table.setColumnWidth(8, 105)
+        self.message_table.setColumnWidth(9, 180)
+        message_layout.addWidget(self.message_table)
+        self.message_tab_index = self.data_tabs.addTab(
+            message_page,
+            "Wiadomości logiczne",
+        )
 
         status_row = QHBoxLayout()
         self.state_label = QLabel("Stan: IDLE")
@@ -226,7 +279,10 @@ class LiveCaptureWidget(QWidget):
         for channel in channels:
             virtual = "Virtual CAN Driver" in channel.name
             suffix = " [virtual]" if virtual else ""
-            self.channel_combo.addItem(f"{channel.number}: {channel.name}{suffix}", channel.number)
+            self.channel_combo.addItem(
+                f"{channel.number}: {channel.name}{suffix}",
+                channel.number,
+            )
         for index in range(self.channel_combo.count()):
             if "[virtual]" not in self.channel_combo.itemText(index):
                 self.channel_combo.setCurrentIndex(index)
@@ -259,6 +315,7 @@ class LiveCaptureWidget(QWidget):
                     session_name=name,
                     output_dir=self.project.live_sessions_dir,
                     live_buffer_capacity=self.LIVE_CAPACITY,
+                    live_message_capacity=self.LIVE_MESSAGE_CAPACITY,
                     marker_presets=tuple(active),
                 )
             )
@@ -275,8 +332,10 @@ class LiveCaptureWidget(QWidget):
         self._current_session_path = paths.session
         self._finalized_session_path = None
         self._last_sequence = None
+        self._last_message_sequence = None
         self._error_shown = ""
         self.frame_model.clear()
+        self.message_model.clear()
         self.marker_history.clear()
         self.pause_view.setChecked(False)
         self.path_label.setText(f"Sesja: {paths.session}")
@@ -310,6 +369,22 @@ class LiveCaptureWidget(QWidget):
                 if self.auto_scroll.isChecked() and was_at_bottom:
                     self.frame_table.scrollToBottom()
 
+            message_snapshot = self._capture.live_messages_snapshot_since(
+                self._last_message_sequence
+            )
+            if message_snapshot.messages:
+                scrollbar = self.message_table.verticalScrollBar()
+                was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
+                if message_snapshot.truncated:
+                    self.message_model.replace_messages(message_snapshot.messages)
+                else:
+                    self.message_model.append_messages(message_snapshot.messages)
+                self._last_message_sequence = (
+                    message_snapshot.last_available_sequence
+                )
+                if self.auto_scroll.isChecked() and was_at_bottom:
+                    self.message_table.scrollToBottom()
+
         active = status.state in (
             CaptureState.STARTING,
             CaptureState.RUNNING,
@@ -321,7 +396,11 @@ class LiveCaptureWidget(QWidget):
             self._finalize_project_session(status)
             self._clear_marker_controls()
 
-        if status.state == CaptureState.ERROR and status.error and status.error != self._error_shown:
+        if (
+            status.state == CaptureState.ERROR
+            and status.error
+            and status.error != self._error_shown
+        ):
             self._error_shown = status.error
             QMessageBox.critical(self, "Błąd rejestracji", status.error)
 
@@ -330,23 +409,44 @@ class LiveCaptureWidget(QWidget):
     def _update_status(self, status) -> None:
         self.state_label.setText(f"Stan: {status.state.value.upper()}")
         self.elapsed_label.setText(f"Czas: {status.elapsed_s:.1f} s")
-        self.received_label.setText(f"Odebrane: {status.frame_count:,}".replace(",", " "))
-        self.visible_label.setText(f"Widoczne: {self.frame_model.frame_count:,}".replace(",", " "))
+        self.received_label.setText(
+            f"Odebrane: {status.frame_count:,}".replace(",", " ")
+        )
+        self.visible_label.setText(
+            f"Widoczne: {self.frame_model.frame_count:,}".replace(",", " ")
+        )
         self.outside_buffer_label.setText(
             f"Poza buforem: {status.live_dropped_from_view:,}".replace(",", " ")
         )
         self.messages_label.setText(
-            f"Wiadomości: {status.logical_message_count:,}".replace(",", " ")
+            (
+                f"Wiadomości: {status.logical_message_count:,} / "
+                f"widoczne {self.message_model.message_count:,}"
+            ).replace(",", " ")
         )
-        self.markers_label.setText(f"Znaczniki: {status.marker_count:,}".replace(",", " "))
-        self.ids_label.setText(f"CAN ID: {status.unique_can_ids:,}".replace(",", " "))
+        self.markers_label.setText(
+            f"Znaczniki: {status.marker_count:,}".replace(",", " ")
+        )
+        self.ids_label.setText(
+            f"CAN ID: {status.unique_can_ids:,}".replace(",", " ")
+        )
+        self.data_tabs.setTabText(
+            self.raw_tab_index,
+            f"Surowe ramki ({status.frame_count:,})".replace(",", " "),
+        )
+        self.data_tabs.setTabText(
+            self.message_tab_index,
+            f"Wiadomości logiczne ({status.logical_message_count:,})".replace(",", " "),
+        )
         self.status_text.emit(
             f"{status.state.value.upper()} | {status.frame_count:,} ramek | "
             f"{status.live_retained:,}/{status.live_capacity:,} live".replace(",", " ")
         )
 
     def _set_capture_controls(self, active: bool) -> None:
-        self.start_button.setEnabled(not active and self.channel_combo.currentData() is not None)
+        self.start_button.setEnabled(
+            not active and self.channel_combo.currentData() is not None
+        )
         self.stop_button.setEnabled(active and self._capture.is_active)
         self.channel_combo.setEnabled(not active)
         self.refresh_button.setEnabled(not active)
@@ -372,7 +472,8 @@ class LiveCaptureWidget(QWidget):
         self._finalized_session_path = path
         self.project_changed.emit()
         self.output_message.emit(
-            f"Sesja zakończona: {path} | ramki={status.frame_count} | znaczniki={status.marker_count}"
+            f"Sesja zakończona: {path} | ramki={status.frame_count} | "
+            f"wiadomości={status.logical_message_count} | znaczniki={status.marker_count}"
         )
 
     def _install_marker_controls(self, presets: list[MarkerPreset]) -> None:
@@ -382,21 +483,28 @@ class LiveCaptureWidget(QWidget):
             shortcut = QShortcut(QKeySequence(preset.shortcut), self)
             shortcut.setAutoRepeat(False)
             shortcut.activated.connect(
-                lambda selected=preset: self._trigger_marker(selected, source="keyboard")
+                lambda selected=preset: self._trigger_marker(
+                    selected,
+                    source="keyboard",
+                )
             )
             self._shortcuts.append(shortcut)
 
             button = QPushButton(f"{preset.shortcut}  {preset.name}")
             button.setMinimumHeight(38)
             if preset.color:
-                button.setStyleSheet(f"border-left: 6px solid {preset.color}; padding: 6px;")
+                button.setStyleSheet(
+                    f"border-left: 6px solid {preset.color}; padding: 6px;"
+                )
             button.clicked.connect(
                 lambda checked=False, selected=preset: self._trigger_marker(
-                    selected, source="button"
+                    selected,
+                    source="button",
                 )
             )
             self.runtime_marker_row.insertWidget(
-                max(0, self.runtime_marker_row.count() - 1), button
+                max(0, self.runtime_marker_row.count() - 1),
+                button,
             )
             self._marker_buttons.append(button)
 
@@ -417,7 +525,10 @@ class LiveCaptureWidget(QWidget):
             return
         if self._current_session_path is not None:
             self.project.record_marker(self._current_session_path, marker)
-        text = f"{marker.timestamp_ns / 1_000_000:10.3f} ms — {marker.name} [{marker.shortcut}]"
+        text = (
+            f"{marker.timestamp_ns / 1_000_000:10.3f} ms — "
+            f"{marker.name} [{marker.shortcut}]"
+        )
         self.marker_history.addItem(text)
         self.marker_history.scrollToBottom()
         self.output_message.emit(f"Znacznik: {text}")
@@ -444,7 +555,11 @@ class LiveCaptureWidget(QWidget):
             return
         preset = dialog.preset(self.marker_model.rowCount())
         if self._shortcut_conflicts(preset.shortcut):
-            QMessageBox.warning(self, "CRT", "Ten skrót jest już przypisany do innego znacznika.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Ten skrót jest już przypisany do innego znacznika.",
+            )
             return
         self.marker_model.add_preset(preset)
         self._save_marker_presets()
@@ -467,7 +582,11 @@ class LiveCaptureWidget(QWidget):
             return
         updated = dialog.preset(row)
         if self._shortcut_conflicts(updated.shortcut, excluding_id=existing.id):
-            QMessageBox.warning(self, "CRT", "Ten skrót jest już przypisany do innego znacznika.")
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Ten skrót jest już przypisany do innego znacznika.",
+            )
             return
         self.marker_model.replace_preset(row, updated)
         self._save_marker_presets()
@@ -488,7 +607,8 @@ class LiveCaptureWidget(QWidget):
     def _shortcut_conflicts(self, shortcut: str, *, excluding_id: str = "") -> bool:
         normalized = shortcut.strip().lower()
         return any(
-            preset.id != excluding_id and preset.shortcut.strip().lower() == normalized
+            preset.id != excluding_id
+            and preset.shortcut.strip().lower() == normalized
             for preset in self.marker_model.presets()
         )
 
@@ -516,3 +636,11 @@ class LiveCaptureWidget(QWidget):
                 )
             )
         )
+
+    def _message_selected(self) -> None:
+        rows = self.message_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        message = self.message_model.message_at(rows[0].row())
+        if message is not None:
+            self.inspector_text.emit(format_logical_message_inspector(message))
