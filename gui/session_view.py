@@ -10,6 +10,11 @@ from app.markers import CaptureMarker
 from app.session_stream import read_session_header
 
 from .frame_model import FrameTableModel
+from .logical_message_loader import LogicalMessageLoadTask
+from .logical_message_model import (
+    LogicalMessageTableModel,
+    format_logical_message_inspector,
+)
 from .session_loader import SessionLoadTask
 
 
@@ -58,12 +63,18 @@ class SessionViewWidget(QWidget):
     output_message = Signal(str)
 
     MAX_ROWS = 20_000
+    MAX_MESSAGES = 20_000
 
     def __init__(self, path: str | Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.path = Path(path)
         self._load_task: SessionLoadTask | None = None
+        self._message_load_task: LogicalMessageLoadTask | None = None
         self.frame_model = FrameTableModel(capacity=self.MAX_ROWS, parent=self)
+        self.message_model = LogicalMessageTableModel(
+            capacity=self.MAX_MESSAGES,
+            parent=self,
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -86,7 +97,36 @@ class SessionViewWidget(QWidget):
         self.frame_table.horizontalHeader().setStretchLastSection(True)
         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
         raw_layout.addWidget(self.frame_table)
-        self.tabs.addTab(raw_page, "Surowe ramki")
+        self.raw_tab_index = self.tabs.addTab(raw_page, "Surowe ramki")
+
+        message_page = QWidget()
+        message_layout = QVBoxLayout(message_page)
+        message_layout.setContentsMargins(0, 0, 0, 0)
+        self.message_table = QTableView()
+        self.message_table.setModel(self.message_model)
+        self.message_table.setWordWrap(False)
+        self.message_table.setSelectionBehavior(QTableView.SelectRows)
+        self.message_table.setSelectionMode(QTableView.SingleSelection)
+        self.message_table.verticalHeader().setDefaultSectionSize(22)
+        self.message_table.horizontalHeader().setStretchLastSection(True)
+        self.message_table.selectionModel().selectionChanged.connect(
+            self._message_selected
+        )
+        self.message_table.setColumnWidth(0, 115)
+        self.message_table.setColumnWidth(1, 90)
+        self.message_table.setColumnWidth(2, 130)
+        self.message_table.setColumnWidth(3, 130)
+        self.message_table.setColumnWidth(4, 75)
+        self.message_table.setColumnWidth(5, 75)
+        self.message_table.setColumnWidth(6, 70)
+        self.message_table.setColumnWidth(7, 65)
+        self.message_table.setColumnWidth(8, 105)
+        self.message_table.setColumnWidth(9, 180)
+        message_layout.addWidget(self.message_table)
+        self.message_tab_index = self.tabs.addTab(
+            message_page,
+            "Wiadomości logiczne — ładowanie…",
+        )
 
         markers = list(iter_markers(marker_path_for_session(self.path)))
         self.marker_model = MarkerHistoryModel(markers, self)
@@ -104,12 +144,20 @@ class SessionViewWidget(QWidget):
         self.tabs.addTab(marker_page, f"Znaczniki ({len(markers)})")
 
         self._start_load()
+        self._start_message_load()
 
     def _start_load(self) -> None:
         task = SessionLoadTask(self.path, max_rows=self.MAX_ROWS)
         task.signals.loaded.connect(self._loaded)
         task.signals.failed.connect(self._failed)
         self._load_task = task
+        QThreadPool.globalInstance().start(task)
+
+    def _start_message_load(self) -> None:
+        task = LogicalMessageLoadTask(self.path, max_rows=self.MAX_MESSAGES)
+        task.signals.loaded.connect(self._messages_loaded)
+        task.signals.failed.connect(self._messages_failed)
+        self._message_load_task = task
         QThreadPool.globalInstance().start(task)
 
     def _loaded(self, path: str, frames: object, total_frames: int, start: int) -> None:
@@ -125,6 +173,7 @@ class SessionViewWidget(QWidget):
             f"(od {start:,})"
         ).replace(",", " ")
         self.header.setText(text)
+        self.tabs.setTabText(self.raw_tab_index, f"Surowe ramki ({total_frames:,})".replace(",", " "))
         if loaded:
             self.frame_table.scrollToBottom()
         self.output_message.emit(f"Otwarto sesję {path}: {total_frames} ramek")
@@ -134,6 +183,34 @@ class SessionViewWidget(QWidget):
         self.header.setText(f"Nie udało się otworzyć sesji: {path}\n{error}")
         self.output_message.emit(f"Błąd otwierania sesji {path}: {error}")
         self._load_task = None
+
+    def _messages_loaded(
+        self,
+        path: str,
+        messages: object,
+        total_messages: int,
+        source: str,
+    ) -> None:
+        loaded = list(messages)
+        self.message_model.replace_messages(loaded)
+        self.tabs.setTabText(
+            self.message_tab_index,
+            f"Wiadomości logiczne ({total_messages:,})".replace(",", " "),
+        )
+        if loaded:
+            self.message_table.scrollToBottom()
+        source_text = "messages.csv" if source == "messages-csv" else "rekonstrukcja z ramek"
+        self.output_message.emit(
+            f"Wiadomości logiczne {path}: {total_messages} ({source_text})"
+        )
+        self._message_load_task = None
+
+    def _messages_failed(self, path: str, error: str) -> None:
+        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — błąd")
+        self.output_message.emit(
+            f"Błąd odczytu wiadomości logicznych {path}: {error}"
+        )
+        self._message_load_task = None
 
     def _frame_selected(self) -> None:
         rows = self.frame_table.selectionModel().selectedRows()
@@ -159,6 +236,14 @@ class SessionViewWidget(QWidget):
                 )
             )
         )
+
+    def _message_selected(self) -> None:
+        rows = self.message_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        message = self.message_model.message_at(rows[0].row())
+        if message is not None:
+            self.inspector_text.emit(format_logical_message_inspector(message))
 
     def _marker_selected(self) -> None:
         rows = self.marker_table.selectionModel().selectedRows()
