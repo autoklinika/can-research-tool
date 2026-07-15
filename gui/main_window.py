@@ -1,378 +1,491 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, QTimer, Qt
+from PySide6.QtCore import QSettings, QThreadPool, Qt
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
+    QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
-    QTableView,
+    QStatusBar,
+    QTabWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
-from app.capture_service import CaptureConfig, CaptureService, CaptureState
-from kvaser.backend import KvaserReceiveMode, list_channels
+from app.project import CrtProject
 
-from .frame_model import FrameTableModel
-from .session_loader import SessionLoadTask
+from .import_task import ProjectImportTask
+from .live_capture import LiveCaptureWidget
+from .project_dialog import NewProjectDialog
+from .project_explorer import ProjectExplorer
+from .project_overview import ProjectOverviewWidget
+from .session_view import SessionViewWidget
+from .study_area_view import StudyAreaViewWidget
 
 
 class MainWindow(QMainWindow):
-    LIVE_CAPACITY = 20_000
-    GUI_REFRESH_MS = 100
-
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("CAN Research Tool")
-        self.resize(1440, 850)
+        self.resize(1580, 920)
+        self.setMinimumSize(1100, 700)
 
-        self._capture = CaptureService()
-        self._last_sequence: int | None = None
-        self._last_state = CaptureState.IDLE
-        self._view_mode = "live"
-        self._load_task: SessionLoadTask | None = None
-        self._error_shown = ""
+        self.settings = QSettings()
+        self.project: CrtProject | None = None
+        self._import_tasks: list[ProjectImportTask] = []
+        self._tab_keys: dict[str, QWidget] = {}
 
-        self._frame_model = FrameTableModel(capacity=self.LIVE_CAPACITY, parent=self)
-        self._build_ui()
-        self._refresh_channels()
+        self._build_actions()
+        self._build_menu()
+        self._build_activity_bar()
+        self._build_docks()
+        self._build_central_tabs()
+        self._build_status_bar()
+        self._show_welcome()
 
-        self._timer = QTimer(self)
-        self._timer.setInterval(self.GUI_REFRESH_MS)
-        self._timer.timeout.connect(self._refresh_view)
-        self._timer.start()
+        last_project = self.settings.value("project/lastPath", "", str)
+        if last_project and (Path(last_project) / "project.crt.json").is_file():
+            try:
+                self._open_project_path(Path(last_project))
+            except Exception as exc:
+                self._append_output(f"Nie udało się automatycznie otworzyć projektu: {exc}")
 
-    def _build_ui(self) -> None:
-        central = QWidget(self)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+    def _build_actions(self) -> None:
+        self.new_project_action = QAction("Nowy projekt…", self)
+        self.new_project_action.setShortcut("Ctrl+Shift+N")
+        self.new_project_action.triggered.connect(self._new_project)
 
-        controls = QHBoxLayout()
-        controls.setSpacing(6)
+        self.open_project_action = QAction("Otwórz projekt…", self)
+        self.open_project_action.setShortcut("Ctrl+Shift+O")
+        self.open_project_action.triggered.connect(self._open_project_dialog)
 
-        controls.addWidget(QLabel("Adapter:"))
-        self.channel_combo = QComboBox()
-        self.channel_combo.setMinimumWidth(300)
-        controls.addWidget(self.channel_combo)
+        self.import_action = QAction("Importuj log…", self)
+        self.import_action.setShortcut("Ctrl+I")
+        self.import_action.triggered.connect(self._import_log)
+        self.import_action.setEnabled(False)
 
-        self.refresh_button = QPushButton("Odśwież")
-        self.refresh_button.clicked.connect(self._refresh_channels)
-        controls.addWidget(self.refresh_button)
+        self.exit_action = QAction("Zakończ", self)
+        self.exit_action.triggered.connect(self.close)
 
-        controls.addWidget(QLabel("Bitrate:"))
-        self.bitrate_combo = QComboBox()
-        for bitrate in (125_000, 250_000, 500_000, 1_000_000):
-            self.bitrate_combo.addItem(f"{bitrate:,}".replace(",", " "), bitrate)
-        self.bitrate_combo.setCurrentIndex(1)
-        controls.addWidget(self.bitrate_combo)
+        self.toggle_explorer_action = QAction("Projekt", self)
+        self.toggle_explorer_action.setCheckable(True)
+        self.toggle_explorer_action.setChecked(True)
+        self.toggle_explorer_action.triggered.connect(self._toggle_explorer)
 
-        controls.addWidget(QLabel("Tryb:"))
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("BENCH — ACK aktywny", KvaserReceiveMode.BENCH.value)
-        self.mode_combo.addItem(
-            "LISTEN ONLY — bez ACK",
-            KvaserReceiveMode.LISTEN_ONLY.value,
+        self.live_action = QAction("Live", self)
+        self.live_action.triggered.connect(self._open_live_capture)
+        self.search_action = QAction("Szukaj", self)
+        self.search_action.triggered.connect(
+            lambda: self._open_placeholder("search", "Wyszukiwanie", "Wyszukiwanie po całym projekcie")
         )
-        controls.addWidget(self.mode_combo)
-
-        controls.addWidget(QLabel("Sesja:"))
-        self.session_name = QLineEdit()
-        self.session_name.setPlaceholderText("np. ecu_idle")
-        self.session_name.setMinimumWidth(150)
-        controls.addWidget(self.session_name)
-
-        self.start_button = QPushButton("Start")
-        self.start_button.clicked.connect(self._start_capture)
-        controls.addWidget(self.start_button)
-
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self._stop_capture)
-        controls.addWidget(self.stop_button)
-
-        self.open_button = QPushButton("Otwórz sesję")
-        self.open_button.clicked.connect(self._open_session)
-        controls.addWidget(self.open_button)
-
-        root.addLayout(controls)
-
-        view_controls = QHBoxLayout()
-        self.pause_view = QCheckBox("Pauza widoku")
-        self.pause_view.setToolTip(
-            "Zatrzymuje tylko tabelę. Odbiór i zapis sesji nadal działają."
+        self.compare_action = QAction("Porównaj", self)
+        self.compare_action.triggered.connect(
+            lambda: self._open_placeholder("compare", "Porównania", "Porównywanie sesji i zdarzeń")
         )
-        view_controls.addWidget(self.pause_view)
-
-        self.auto_scroll = QCheckBox("Auto-scroll")
-        self.auto_scroll.setChecked(True)
-        view_controls.addWidget(self.auto_scroll)
-
-        self.buffer_label = QLabel(
-            f"Bufor widoku: maksymalnie {self.LIVE_CAPACITY:,} ramek".replace(",", " ")
+        self.signals_action = QAction("Sygnały", self)
+        self.signals_action.triggered.connect(
+            lambda: self._open_placeholder("signals", "Sygnały", "Katalog sygnałów i hipotez")
         )
-        view_controls.addWidget(self.buffer_label)
-        view_controls.addStretch(1)
-        root.addLayout(view_controls)
+        self.decoders_action = QAction("Dekodery", self)
+        self.decoders_action.triggered.connect(
+            lambda: self._open_placeholder("decoders", "Dekodery", "Reguły autorskie, J1939 i UDS")
+        )
+        self.settings_action = QAction("Ustawienia", self)
+        self.settings_action.triggered.connect(
+            lambda: self._open_placeholder("settings", "Ustawienia", "Ustawienia projektu i aplikacji")
+        )
 
-        splitter = QSplitter(Qt.Vertical)
-        self.table = QTableView()
-        self.table.setModel(self._frame_model)
-        self.table.setAlternatingRowColors(True)
-        self.table.setWordWrap(False)
-        self.table.setSortingEnabled(False)
-        self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setSelectionMode(QTableView.SingleSelection)
-        self.table.verticalHeader().setDefaultSectionSize(22)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.selectionModel().selectionChanged.connect(self._show_selected_frame)
-        self.table.setColumnWidth(0, 115)
-        self.table.setColumnWidth(1, 90)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 55)
-        self.table.setColumnWidth(4, 45)
-        self.table.setColumnWidth(5, 360)
-        self.table.setColumnWidth(6, 55)
-        splitter.addWidget(self.table)
+    def _build_menu(self) -> None:
+        file_menu = self.menuBar().addMenu("Plik")
+        file_menu.addAction(self.new_project_action)
+        file_menu.addAction(self.open_project_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.import_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.exit_action)
 
-        self.details = QPlainTextEdit()
-        self.details.setReadOnly(True)
-        self.details.setMaximumBlockCount(200)
-        self.details.setPlaceholderText("Zaznacz ramkę, aby zobaczyć szczegóły.")
-        splitter.addWidget(self.details)
-        splitter.setSizes([700, 130])
-        root.addWidget(splitter, 1)
+        view_menu = self.menuBar().addMenu("Widok")
+        view_menu.addAction(self.toggle_explorer_action)
 
-        status_row = QHBoxLayout()
-        self.state_label = QLabel("Stan: IDLE")
-        self.elapsed_label = QLabel("Czas: 0.0 s")
-        self.received_label = QLabel("Odebrane: 0")
-        self.visible_label = QLabel("Widoczne: 0")
-        self.outside_buffer_label = QLabel("Poza buforem widoku: 0")
-        self.messages_label = QLabel("Wiadomości logiczne: 0")
-        self.ids_label = QLabel("CAN ID: 0")
-        for widget in (
-            self.state_label,
-            self.elapsed_label,
-            self.received_label,
-            self.visible_label,
-            self.outside_buffer_label,
-            self.messages_label,
-            self.ids_label,
-        ):
-            status_row.addWidget(widget)
-        status_row.addStretch(1)
-        root.addLayout(status_row)
+    def _build_activity_bar(self) -> None:
+        toolbar = QToolBar("Aktywność", self)
+        toolbar.setObjectName("activityBar")
+        toolbar.setOrientation(Qt.Vertical)
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        toolbar.addAction(self.toggle_explorer_action)
+        toolbar.addAction(self.live_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.search_action)
+        toolbar.addAction(self.compare_action)
+        toolbar.addAction(self.signals_action)
+        toolbar.addAction(self.decoders_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.settings_action)
+        self.addToolBar(Qt.LeftToolBarArea, toolbar)
+        self.activity_bar = toolbar
 
-        self.path_label = QLabel("Brak aktywnej sesji")
-        self.path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        root.addWidget(self.path_label)
+    def _build_docks(self) -> None:
+        self.explorer = ProjectExplorer()
+        self.explorer.open_overview.connect(self._open_overview)
+        self.explorer.open_live_capture.connect(self._open_live_capture)
+        self.explorer.open_session.connect(self._open_session)
+        self.explorer.open_area.connect(self._open_area)
+        self.explorer.import_requested.connect(self._import_log)
+        self.explorer.add_area_requested.connect(self._add_study_area)
+        self.explorer_dock = QDockWidget("Projekt", self)
+        self.explorer_dock.setObjectName("projectExplorerDock")
+        self.explorer_dock.setWidget(self.explorer)
+        self.explorer_dock.setMinimumWidth(260)
+        self.explorer_dock.visibilityChanged.connect(
+            self.toggle_explorer_action.setChecked
+        )
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
 
-        self.setCentralWidget(central)
+        self.inspector = QPlainTextEdit()
+        self.inspector.setReadOnly(True)
+        self.inspector.setMaximumBlockCount(1000)
+        self.inspector.setPlaceholderText("Zaznacz ramkę, wiadomość, znacznik lub element projektu.")
+        self.inspector_dock = QDockWidget("Inspektor", self)
+        self.inspector_dock.setObjectName("inspectorDock")
+        self.inspector_dock.setWidget(self.inspector)
+        self.inspector_dock.setMinimumWidth(300)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.inspector_dock)
 
-    def _refresh_channels(self) -> None:
-        self.channel_combo.clear()
-        try:
-            channels = list_channels()
-        except Exception as exc:
-            self.channel_combo.addItem(f"Błąd Kvaser: {exc}", None)
-            self.start_button.setEnabled(False)
+        output_tabs = QTabWidget()
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        self.output.setMaximumBlockCount(5000)
+        output_tabs.addTab(self.output, "Output")
+        problems = QPlainTextEdit()
+        problems.setReadOnly(True)
+        problems.setPlaceholderText("Błędy parserów, niekompletne transporty i konflikty reguł.")
+        output_tabs.addTab(problems, "Problemy")
+        tasks = QPlainTextEdit()
+        tasks.setReadOnly(True)
+        tasks.setPlaceholderText("Postęp indeksowania, importu i analiz.")
+        output_tabs.addTab(tasks, "Zadania")
+        self.output_dock = QDockWidget("Panel", self)
+        self.output_dock.setObjectName("outputDock")
+        self.output_dock.setWidget(output_tabs)
+        self.output_dock.setMinimumHeight(150)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.output_dock)
+
+    def _build_central_tabs(self) -> None:
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.setMovable(True)
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabCloseRequested.connect(self._close_tab)
+        self.setCentralWidget(self.tabs)
+
+    def _build_status_bar(self) -> None:
+        status = QStatusBar(self)
+        self.setStatusBar(status)
+        self.project_status = QLabel("Brak projektu")
+        self.capture_status = QLabel("STOPPED")
+        status.addWidget(self.project_status, 1)
+        status.addPermanentWidget(self.capture_status)
+
+    def _show_welcome(self) -> None:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(60, 60, 60, 60)
+        layout.addStretch(1)
+        title = QLabel("CAN Research Tool")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 14)
+        font.setBold(True)
+        title.setFont(font)
+        layout.addWidget(title)
+        layout.addWidget(
+            QLabel(
+                "Projektowe środowisko reverse engineeringu CAN.\n"
+                "Każdy projekt jest samodzielnym folderem z sesjami, znacznikami, "
+                "obszarami badań i wiedzą techniczną."
+            )
+        )
+        row = QHBoxLayout()
+        new_button = QPushButton("Nowy projekt")
+        new_button.clicked.connect(self._new_project)
+        row.addWidget(new_button)
+        open_button = QPushButton("Otwórz projekt")
+        open_button.clicked.connect(self._open_project_dialog)
+        row.addWidget(open_button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(2)
+        self._add_tab("welcome", widget, "Start", closable=False)
+        self.explorer_dock.hide()
+        self.inspector_dock.hide()
+
+    def _new_project(self) -> None:
+        dialog = NewProjectDialog(self)
+        if dialog.exec() != dialog.Accepted:
             return
-
-        physical_count = 0
-        for channel in channels:
-            is_virtual = "Virtual CAN Driver" in channel.name
-            suffix = " [virtual]" if is_virtual else ""
-            label = f"{channel.number}: {channel.name}{suffix}"
-            self.channel_combo.addItem(label, channel.number)
-            if not is_virtual:
-                physical_count += 1
-
-        self.start_button.setEnabled(bool(channels) and not self._capture.is_active)
-        if physical_count:
-            for index in range(self.channel_combo.count()):
-                if "[virtual]" not in self.channel_combo.itemText(index):
-                    self.channel_combo.setCurrentIndex(index)
-                    break
-
-    def _start_capture(self) -> None:
-        channel_number = self.channel_combo.currentData()
-        if channel_number is None:
-            QMessageBox.warning(self, "CRT", "Nie wybrano poprawnego kanału Kvaser.")
-            return
-
-        name = self.session_name.text().strip()
-        if not name:
-            name = datetime.now().strftime("capture_%Y%m%d_%H%M%S")
-            self.session_name.setText(name)
-
         try:
-            paths = self._capture.start(
-                CaptureConfig(
-                    channel_number=int(channel_number),
-                    bitrate=int(self.bitrate_combo.currentData()),
-                    mode=KvaserReceiveMode(str(self.mode_combo.currentData())),
-                    session_name=name,
-                    output_dir=Path("sessions"),
-                    live_buffer_capacity=self.LIVE_CAPACITY,
-                )
+            project = CrtProject.create(
+                dialog.project_root(),
+                name=dialog.project_name(),
+                description=dialog.description(),
+                default_bitrate=dialog.bitrate(),
+                default_receive_mode=dialog.receive_mode(),
             )
         except Exception as exc:
-            QMessageBox.critical(self, "Nie można rozpocząć rejestracji", str(exc))
+            QMessageBox.critical(self, "Nie można utworzyć projektu", str(exc))
             return
+        self._set_project(project)
+        self._append_output(f"Utworzono projekt: {project.root}")
 
-        self._view_mode = "live"
-        self._last_sequence = None
-        self._error_shown = ""
-        self._frame_model.clear()
-        self.details.clear()
-        self.pause_view.setChecked(False)
-        self.path_label.setText(f"Sesja: {paths.session}")
-        self._set_capture_controls(True)
+    def _open_project_dialog(self) -> None:
+        start = self.settings.value("project/lastParent", str(Path.home()), str)
+        directory = QFileDialog.getExistingDirectory(self, "Otwórz projekt CRT", start)
+        if directory:
+            try:
+                self._open_project_path(Path(directory))
+            except Exception as exc:
+                QMessageBox.critical(self, "Nie można otworzyć projektu", str(exc))
 
-    def _stop_capture(self) -> None:
-        self._capture.stop()
-        self.stop_button.setEnabled(False)
+    def _open_project_path(self, path: Path) -> None:
+        self._set_project(CrtProject.open(path))
+        self._append_output(f"Otwarto projekt: {path}")
 
-    def _refresh_view(self) -> None:
-        status = self._capture.status()
-        self._update_status_labels(status)
+    def _set_project(self, project: CrtProject) -> None:
+        if self._has_active_capture():
+            QMessageBox.warning(
+                self,
+                "CRT",
+                "Zatrzymaj aktywną rejestrację przed zmianą projektu.",
+            )
+            return
+        self.project = project
+        self.settings.setValue("project/lastPath", str(project.root))
+        self.settings.setValue("project/lastParent", str(project.root.parent))
+        self.setWindowTitle(f"{project.manifest.name} — CAN Research Tool")
+        self.project_status.setText(f"Projekt: {project.manifest.name} | {project.root}")
+        self.import_action.setEnabled(True)
+        self.explorer.set_project(project)
+        self.explorer_dock.show()
+        self.inspector_dock.show()
+        self._close_project_tabs()
+        self._open_overview()
 
-        if self._view_mode == "live" and not self.pause_view.isChecked():
-            snapshot = self._capture.live_snapshot_since(self._last_sequence)
-            if snapshot.frames:
-                scrollbar = self.table.verticalScrollBar()
-                was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
-                if snapshot.truncated:
-                    self._frame_model.replace_frames(snapshot.frames)
-                else:
-                    self._frame_model.append_frames(snapshot.frames)
-                self._last_sequence = snapshot.last_available_sequence
-                if self.auto_scroll.isChecked() and was_at_bottom:
-                    self.table.scrollToBottom()
+    def _open_overview(self) -> None:
+        if self.project is None:
+            return
+        key = "project-overview"
+        existing = self._activate_tab(key)
+        if existing:
+            return
+        widget = ProjectOverviewWidget(self.project)
+        widget.open_live_requested.connect(self._open_live_capture)
+        widget.add_area_requested.connect(self._add_study_area)
+        widget.import_requested.connect(self._import_log)
+        self._add_tab(key, widget, "Przegląd")
 
-        active = status.state in (
-            CaptureState.STARTING,
-            CaptureState.RUNNING,
-            CaptureState.STOPPING,
+    def _open_live_capture(self) -> None:
+        if self.project is None:
+            QMessageBox.information(self, "CRT", "Najpierw otwórz lub utwórz projekt.")
+            return
+        key = "live-capture"
+        if self._activate_tab(key):
+            return
+        widget = LiveCaptureWidget(self.project)
+        widget.inspector_text.connect(self.inspector.setPlainText)
+        widget.output_message.connect(self._append_output)
+        widget.status_text.connect(self.capture_status.setText)
+        widget.project_changed.connect(self.explorer.refresh)
+        self._add_tab(key, widget, "Live Capture")
+
+    def _open_session(self, path: str) -> None:
+        session_path = Path(path).resolve()
+        key = f"session:{session_path}"
+        if self._activate_tab(key):
+            return
+        widget = SessionViewWidget(session_path)
+        widget.inspector_text.connect(self.inspector.setPlainText)
+        widget.output_message.connect(self._append_output)
+        self._add_tab(key, widget, session_path.name.removesuffix(".crt.jsonl"))
+
+    def _open_area(self, area_id: str) -> None:
+        if self.project is None:
+            return
+        area = next(
+            (item for item in self.project.list_study_areas() if item.id == area_id),
+            None,
         )
-        self._set_capture_controls(active)
+        if area is None:
+            return
+        key = f"area:{area.id}"
+        if self._activate_tab(key):
+            return
+        self._add_tab(key, StudyAreaViewWidget(self.project, area.id), area.name)
 
-        if status.state == CaptureState.ERROR and status.error:
-            if status.error != self._error_shown:
-                self._error_shown = status.error
-                QMessageBox.critical(self, "Błąd rejestracji", status.error)
-
-        self._last_state = status.state
-
-    def _update_status_labels(self, status) -> None:
-        self.state_label.setText(f"Stan: {status.state.value.upper()}")
-        self.elapsed_label.setText(f"Czas: {status.elapsed_s:.1f} s")
-        self.received_label.setText(f"Odebrane: {status.frame_count:,}".replace(",", " "))
-        self.visible_label.setText(
-            f"Widoczne: {self._frame_model.frame_count:,}".replace(",", " ")
-        )
-        self.outside_buffer_label.setText(
-            f"Poza buforem widoku: {status.live_dropped_from_view:,}".replace(",", " ")
-        )
-        self.messages_label.setText(
-            f"Wiadomości logiczne: {status.logical_message_count:,}".replace(",", " ")
-        )
-        self.ids_label.setText(f"CAN ID: {status.unique_can_ids}")
-
-    def _set_capture_controls(self, active: bool) -> None:
-        self.start_button.setEnabled(not active and self.channel_combo.currentData() is not None)
-        self.stop_button.setEnabled(active and self._last_state != CaptureState.STOPPING)
-        self.channel_combo.setEnabled(not active)
-        self.refresh_button.setEnabled(not active)
-        self.bitrate_combo.setEnabled(not active)
-        self.mode_combo.setEnabled(not active)
-        self.session_name.setEnabled(not active)
-        self.open_button.setEnabled(not active)
-
-    def _open_session(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
+    def _add_study_area(self) -> None:
+        if self.project is None:
+            return
+        name, accepted = QInputDialog.getText(
             self,
-            "Otwórz sesję CRT",
-            str(Path("sessions").resolve()),
-            "CRT session (*.crt.jsonl);;JSON Lines (*.jsonl);;Wszystkie pliki (*)",
+            "Nowy obszar badań",
+            "Nazwa, np. EGR, VGT, SCR:",
         )
-        if not path:
+        if not accepted or not name.strip():
             return
+        try:
+            area = self.project.add_study_area(name)
+        except Exception as exc:
+            QMessageBox.critical(self, "Nie można dodać obszaru", str(exc))
+            return
+        self.explorer.refresh()
+        self._open_area(area.id)
+        self._append_output(f"Dodano obszar badań: {area.name}")
 
-        self.path_label.setText(f"Indeksowanie i otwieranie: {path}")
-        self.open_button.setEnabled(False)
-        task = SessionLoadTask(path, max_rows=self.LIVE_CAPACITY)
-        task.signals.loaded.connect(self._session_loaded)
-        task.signals.failed.connect(self._session_load_failed)
-        self._load_task = task
-        QThreadPool.globalInstance().start(task)
-
-    def _session_loaded(
-        self,
-        path: str,
-        frames: object,
-        total_frames: int,
-        start: int,
-    ) -> None:
-        loaded_frames = list(frames)
-        self._view_mode = "session"
-        self._frame_model.replace_frames(loaded_frames)
-        self._last_sequence = loaded_frames[-1].sequence if loaded_frames else None
-        self.path_label.setText(
-            f"Sesja: {path} | pokazano {len(loaded_frames):,} z {total_frames:,} "
-            f"ramek, od rekordu {start:,}".replace(",", " ")
+    def _import_log(self) -> None:
+        if self.project is None:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Importuj logi do projektu",
+            str(Path.home()),
+            "Logi CRT/Kvaser (*.crt.jsonl *.csv);;Sesje CRT (*.crt.jsonl);;CSV (*.csv)",
         )
-        self.open_button.setEnabled(True)
-        self._load_task = None
-        if loaded_frames:
-            self.table.scrollToBottom()
+        for path in paths:
+            task = ProjectImportTask(self.project, path)
+            task.signals.completed.connect(self._import_completed)
+            task.signals.failed.connect(self._import_failed)
+            self._import_tasks.append(task)
+            QThreadPool.globalInstance().start(task)
+            self._append_output(f"Import rozpoczęty: {path}")
 
-    def _session_load_failed(self, path: str, error: str) -> None:
-        self.path_label.setText(f"Nie udało się otworzyć: {path}")
-        self.open_button.setEnabled(True)
-        self._load_task = None
-        QMessageBox.critical(self, "Błąd otwierania sesji", error)
+    def _import_completed(self, source: str, target: str) -> None:
+        self._append_output(f"Import zakończony: {source} → {target}")
+        self.explorer.refresh()
+        self._open_session(target)
+        self._discard_finished_import_tasks()
 
-    def _show_selected_frame(self) -> None:
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            self.details.clear()
+    def _import_failed(self, source: str, error: str) -> None:
+        self._append_output(f"Błąd importu {source}: {error}")
+        QMessageBox.critical(self, "Błąd importu", f"{source}\n\n{error}")
+        self._discard_finished_import_tasks()
+
+    def _discard_finished_import_tasks(self) -> None:
+        self._import_tasks = [task for task in self._import_tasks if not task.autoDelete()]
+        # QRunnable ownership is handled by QThreadPool; keeping no stale references is enough.
+        self._import_tasks.clear()
+
+    def _open_placeholder(self, key: str, title: str, description: str) -> None:
+        if self.project is None:
             return
-        frame = self._frame_model.frame_at(rows[0].row())
-        if frame is None:
-            self.details.clear()
+        if self._activate_tab(key):
             return
-        width = 8 if frame.is_extended_id else 3
-        self.details.setPlainText(
-            "\n".join(
-                [
-                    f"Czas: {frame.timestamp_ns / 1_000_000:.6f} ms",
-                    f"Sekwencja: {frame.sequence}",
-                    f"CAN ID: 0x{frame.arbitration_id:0{width}X}",
-                    f"Typ: {'EXT' if frame.is_extended_id else 'STD'}",
-                    f"DLC: {frame.dlc}",
-                    f"DATA: {frame.data_hex}",
-                    f"Kanał: {frame.channel}",
-                    f"Flagi źródłowe: 0x{frame.source_flags:X}",
-                    f"Timestamp adaptera: {frame.source_timestamp}",
-                ]
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(30, 30, 30, 30)
+        heading = QLabel(title)
+        font = heading.font()
+        font.setPointSize(font.pointSize() + 7)
+        font.setBold(True)
+        heading.setFont(font)
+        layout.addWidget(heading)
+        layout.addWidget(QLabel(description))
+        layout.addWidget(QLabel("Moduł został przewidziany w architekturze projektu i będzie rozwijany etapami."))
+        layout.addStretch(1)
+        self._add_tab(key, widget, title)
+
+    def _add_tab(self, key: str, widget: QWidget, title: str, *, closable: bool = True) -> None:
+        widget.setProperty("crtTabKey", key)
+        index = self.tabs.addTab(widget, title)
+        self._tab_keys[key] = widget
+        self.tabs.setCurrentIndex(index)
+        if not closable:
+            self.tabs.tabBar().setTabButton(index, self.tabs.tabBar().RightSide, None)
+
+    def _activate_tab(self, key: str) -> bool:
+        widget = self._tab_keys.get(key)
+        if widget is None:
+            return False
+        index = self.tabs.indexOf(widget)
+        if index < 0:
+            self._tab_keys.pop(key, None)
+            return False
+        self.tabs.setCurrentIndex(index)
+        return True
+
+    def _close_tab(self, index: int) -> None:
+        widget = self.tabs.widget(index)
+        if widget is None:
+            return
+        if isinstance(widget, LiveCaptureWidget) and widget.is_capturing:
+            QMessageBox.information(
+                self,
+                "CRT",
+                "Zatrzymaj rejestrację przed zamknięciem zakładki Live Capture.",
             )
+            return
+        key = str(widget.property("crtTabKey") or "")
+        if isinstance(widget, LiveCaptureWidget):
+            widget.shutdown()
+        self.tabs.removeTab(index)
+        if key:
+            self._tab_keys.pop(key, None)
+        widget.deleteLater()
+
+    def _close_project_tabs(self) -> None:
+        for index in range(self.tabs.count() - 1, -1, -1):
+            widget = self.tabs.widget(index)
+            if widget is None:
+                continue
+            key = str(widget.property("crtTabKey") or "")
+            if key == "welcome":
+                self.tabs.removeTab(index)
+                self._tab_keys.pop(key, None)
+                widget.deleteLater()
+                continue
+            if isinstance(widget, LiveCaptureWidget):
+                widget.shutdown()
+            self.tabs.removeTab(index)
+            self._tab_keys.pop(key, None)
+            widget.deleteLater()
+
+    def _has_active_capture(self) -> bool:
+        return any(
+            isinstance(self.tabs.widget(index), LiveCaptureWidget)
+            and self.tabs.widget(index).is_capturing
+            for index in range(self.tabs.count())
         )
 
-    def closeEvent(self, event) -> None:  # noqa: N802
-        if self._capture.is_active:
-            self._capture.stop()
-            self._capture.wait(2.0)
+    def _toggle_explorer(self, visible: bool) -> None:
+        self.explorer_dock.setVisible(visible)
+
+    def _append_output(self, text: str) -> None:
+        self.output.appendPlainText(text)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self._has_active_capture():
+            answer = QMessageBox.question(
+                self,
+                "Aktywna rejestracja",
+                "Trwa rejestracja CAN. Zatrzymać ją i zamknąć CRT?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                event.ignore()
+                return
+        for index in range(self.tabs.count()):
+            widget = self.tabs.widget(index)
+            if isinstance(widget, LiveCaptureWidget):
+                widget.shutdown()
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue("window/state", self.saveState())
         event.accept()
