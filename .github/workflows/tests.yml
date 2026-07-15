@@ -43,20 +43,51 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from tempfile import TemporaryDirectory
+          from unittest.mock import patch
 
-          from PySide6.QtWidgets import QApplication
+          from PySide6.QtWidgets import QApplication, QDialog
 
-          from app.project import CrtProject
           from gui.main_window import MainWindow
+
+
+          class AcceptedProjectDialog:
+              def __init__(self, parent=None) -> None:
+                  self.parent = parent
+
+              def exec(self):
+                  return QDialog.DialogCode.Accepted
+
+              def project_root(self) -> Path:
+                  return PROJECT_ROOT
+
+              def project_name(self) -> str:
+                  return "Smoke"
+
+              def description(self) -> str:
+                  return "GUI project creation smoke test"
+
+              def bitrate(self) -> int:
+                  return 250_000
+
+              def receive_mode(self) -> str:
+                  return "bench"
+
 
           app = QApplication([])
           with TemporaryDirectory() as temporary:
-              project = CrtProject.create(Path(temporary) / "project", name="Smoke")
-              project.add_study_area("EGR")
+              PROJECT_ROOT = Path(temporary) / "project"
               window = MainWindow()
-              window._set_project(project)
+              with patch("gui.main_window.NewProjectDialog", AcceptedProjectDialog):
+                  window._new_project()
+
+              assert window.project is not None
+              assert window.project.root == PROJECT_ROOT.resolve()
+              assert (PROJECT_ROOT / "project.crt.json").is_file()
+              assert (PROJECT_ROOT / ".crt" / "project.sqlite").is_file()
+
+              window.project.add_study_area("EGR")
+              window.explorer.refresh()
               window._open_live_capture()
-              assert window.project is project
               assert window.tabs.count() >= 2
               assert window.explorer.tree.model().rowCount() == 1
               window.close()
