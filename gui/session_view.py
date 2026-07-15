@@ -65,11 +65,19 @@ class SessionViewWidget(QWidget):
     MAX_ROWS = 20_000
     MAX_MESSAGES = 20_000
 
-    def __init__(self, path: str | Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        dbc_paths: tuple[Path, ...] = (),
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.path = Path(path)
+        self._dbc_paths = tuple(Path(item) for item in dbc_paths)
         self._load_task: SessionLoadTask | None = None
-        self._message_load_task: LogicalMessageLoadTask | None = None
+        self._message_load_tasks: list[LogicalMessageLoadTask] = []
+        self._message_load_generation = 0
         self.frame_model = FrameTableModel(capacity=self.MAX_ROWS, parent=self)
         self.message_model = LogicalMessageTableModel(
             capacity=self.MAX_MESSAGES,
@@ -146,6 +154,12 @@ class SessionViewWidget(QWidget):
         self._start_load()
         self._start_message_load()
 
+    def reload_logical_messages(self, dbc_paths: tuple[Path, ...]) -> None:
+        self._dbc_paths = tuple(Path(item) for item in dbc_paths)
+        self.message_model.clear()
+        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — ładowanie…")
+        self._start_message_load()
+
     def _start_load(self) -> None:
         task = SessionLoadTask(self.path, max_rows=self.MAX_ROWS)
         task.signals.loaded.connect(self._loaded)
@@ -154,10 +168,30 @@ class SessionViewWidget(QWidget):
         QThreadPool.globalInstance().start(task)
 
     def _start_message_load(self) -> None:
-        task = LogicalMessageLoadTask(self.path, max_rows=self.MAX_MESSAGES)
-        task.signals.loaded.connect(self._messages_loaded)
-        task.signals.failed.connect(self._messages_failed)
-        self._message_load_task = task
+        self._message_load_generation += 1
+        generation = self._message_load_generation
+        task = LogicalMessageLoadTask(
+            self.path,
+            max_rows=self.MAX_MESSAGES,
+            dbc_paths=self._dbc_paths,
+        )
+        task.signals.loaded.connect(
+            lambda path, messages, total, source, current=generation: self._messages_loaded(
+                current,
+                path,
+                messages,
+                total,
+                source,
+            )
+        )
+        task.signals.failed.connect(
+            lambda path, error, current=generation: self._messages_failed(
+                current,
+                path,
+                error,
+            )
+        )
+        self._message_load_tasks.append(task)
         QThreadPool.globalInstance().start(task)
 
     def _loaded(self, path: str, frames: object, total_frames: int, start: int) -> None:
@@ -173,7 +207,10 @@ class SessionViewWidget(QWidget):
             f"(od {start:,})"
         ).replace(",", " ")
         self.header.setText(text)
-        self.tabs.setTabText(self.raw_tab_index, f"Surowe ramki ({total_frames:,})".replace(",", " "))
+        self.tabs.setTabText(
+            self.raw_tab_index,
+            f"Surowe ramki ({total_frames:,})".replace(",", " "),
+        )
         if loaded:
             self.frame_table.scrollToBottom()
         self.output_message.emit(f"Otwarto sesję {path}: {total_frames} ramek")
@@ -186,11 +223,15 @@ class SessionViewWidget(QWidget):
 
     def _messages_loaded(
         self,
+        generation: int,
         path: str,
         messages: object,
         total_messages: int,
         source: str,
     ) -> None:
+        if generation != self._message_load_generation:
+            self._discard_finished_message_tasks()
+            return
         loaded = list(messages)
         self.message_model.replace_messages(loaded)
         self.tabs.setTabText(
@@ -199,18 +240,31 @@ class SessionViewWidget(QWidget):
         )
         if loaded:
             self.message_table.scrollToBottom()
-        source_text = "messages.csv" if source == "messages-csv" else "rekonstrukcja z ramek"
+        if source.startswith("messages-csv"):
+            source_text = "messages.csv"
+        else:
+            source_text = "rekonstrukcja z ramek"
+        if source.endswith("+dbc"):
+            source_text += " + aktywne DBC"
         self.output_message.emit(
             f"Wiadomości logiczne {path}: {total_messages} ({source_text})"
         )
-        self._message_load_task = None
+        self._discard_finished_message_tasks()
 
-    def _messages_failed(self, path: str, error: str) -> None:
+    def _messages_failed(self, generation: int, path: str, error: str) -> None:
+        if generation != self._message_load_generation:
+            self._discard_finished_message_tasks()
+            return
         self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — błąd")
         self.output_message.emit(
             f"Błąd odczytu wiadomości logicznych {path}: {error}"
         )
-        self._message_load_task = None
+        self._discard_finished_message_tasks()
+
+    def _discard_finished_message_tasks(self) -> None:
+        self._message_load_tasks = [
+            task for task in self._message_load_tasks if task is not None
+        ][-2:]
 
     def _frame_selected(self) -> None:
         rows = self.frame_table.selectionModel().selectedRows()
