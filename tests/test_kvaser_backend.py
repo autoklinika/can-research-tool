@@ -7,11 +7,21 @@ class FakeFlags(int):
     pass
 
 
+class FakeIoControl:
+    def __init__(self) -> None:
+        self.local_txecho = True
+        self.flushed = False
+
+    def flush_rx_buffer(self) -> None:
+        self.flushed = True
+
+
 class FakeChannel:
     def __init__(self) -> None:
         self.driver = None
         self.bus_on = False
         self.closed = False
+        self.iocontrol = FakeIoControl()
 
     def setBusOutputControl(self, driver) -> None:  # noqa: N802
         self.driver = driver
@@ -48,7 +58,7 @@ class FakeCanNoMsg(Exception):
 
 class FakeApi:
     ChannelCap = SimpleNamespace(SILENT_MODE=1)
-    Driver = SimpleNamespace(SILENT=99)
+    Driver = SimpleNamespace(SILENT=99, NORMAL=44)
     Bitrate = SimpleNamespace(
         BITRATE_10K=10,
         BITRATE_50K=50,
@@ -81,7 +91,7 @@ class FakeApi:
         return self.channel
 
 
-def test_passive_channel_forces_silent_mode_and_has_no_tx_api(monkeypatch) -> None:
+def test_bench_mode_acknowledges_frames_but_has_no_tx_api(monkeypatch) -> None:
     api = FakeApi()
     monkeypatch.setattr(backend, "canlib", api)
 
@@ -89,7 +99,9 @@ def test_passive_channel_forces_silent_mode_and_has_no_tx_api(monkeypatch) -> No
     listener.open()
 
     assert api.opened_with == (0, api.Bitrate.BITRATE_250K)
-    assert api.channel.driver == api.Driver.SILENT
+    assert api.channel.driver == api.Driver.NORMAL
+    assert api.channel.iocontrol.local_txecho is False
+    assert api.channel.iocontrol.flushed is True
     assert api.channel.bus_on is True
     assert not hasattr(listener, "write")
     assert not hasattr(listener, "send")
@@ -103,3 +115,20 @@ def test_passive_channel_forces_silent_mode_and_has_no_tx_api(monkeypatch) -> No
     listener.close()
     assert api.channel.bus_on is False
     assert api.channel.closed is True
+
+
+def test_listen_only_mode_forces_silent_driver(monkeypatch) -> None:
+    api = FakeApi()
+    monkeypatch.setattr(backend, "canlib", api)
+
+    listener = backend.KvaserPassiveChannel(
+        channel_number=0,
+        bitrate=250_000,
+        mode=backend.KvaserReceiveMode.LISTEN_ONLY,
+    )
+    listener.open()
+
+    assert api.channel.driver == api.Driver.SILENT
+    assert api.channel.iocontrol.local_txecho is False
+    assert not hasattr(listener, "write")
+    assert not hasattr(listener, "send")
