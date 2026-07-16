@@ -1,0 +1,46 @@
+name: GUI Regressions
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  filter-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI
+        run: python -m pip install -q -e ".[gui]"
+      - name: Verify DBC activation controls
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/dbc_activation_smoke.py
+      - name: Verify CAN session tree integration
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_management_smoke.py tree
+      - name: Verify Live session actions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_management_smoke.py live
+      - name: Verify imported session actions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_management_smoke.py imported
+      - name: Verify stored-session filters are explicit opt-in
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/stored_session_filter_optin_smoke.py
+      - name: Verify Live filters use the background worker
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_filter_worker_smoke.py
