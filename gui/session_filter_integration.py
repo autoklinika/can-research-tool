@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from app.filters import ProjectFilterRepository
 from app.live_filters import ActiveFilterSet
@@ -28,8 +28,11 @@ def install_session_filter_integration() -> None:
         self._stored_filter_generation = 0
         self._stored_filter_tasks: list[FilteredSessionLoadTask] = []
         self._stored_filter_database = _find_project_database(Path(path))
-        self._stored_filter_set = _load_filter_set(self._stored_filter_database)
-        self._stored_filter_signature = self._stored_filter_set.signature
+        self._stored_available_filter_set = _load_filter_set(self._stored_filter_database)
+        self._stored_available_filter_signature = self._stored_available_filter_set.signature
+        # Saved sessions always open as raw, unfiltered data. Applying project filters
+        # requires an explicit per-tab opt-in by the user.
+        self._stored_filter_set = ActiveFilterSet(())
         self._stored_filter_page: FilteredSessionPage | None = None
         self._stored_page_start = 0
 
@@ -86,6 +89,17 @@ def _install_page_controls(widget: SessionViewWidget) -> None:
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(5)
 
+    widget.stored_apply_filters = QCheckBox("Zastosuj filtry")
+    widget.stored_apply_filters.setObjectName("storedSessionApplyFilters")
+    widget.stored_apply_filters.setChecked(False)
+    widget.stored_apply_filters.setToolTip(
+        "Filtry projektu są stosowane tylko do tej zakładki i tylko po świadomym zaznaczeniu."
+    )
+    widget.stored_apply_filters.toggled.connect(
+        lambda checked: _set_filter_application(widget, checked)
+    )
+    row.addWidget(widget.stored_apply_filters)
+
     widget.stored_filter_label = QLabel()
     widget.stored_filter_label.setObjectName("storedSessionFilterStatus")
     row.addWidget(widget.stored_filter_label)
@@ -131,12 +145,27 @@ def _load_filter_set(database_path: Path | None) -> ActiveFilterSet:
     return ActiveFilterSet(ProjectFilterRepository(database_path).list_presets())
 
 
+def _set_filter_application(widget: SessionViewWidget, checked: bool) -> None:
+    # Incrementing the generation invalidates every worker started for the previous
+    # mode, so a slow filtered scan cannot overwrite the unfiltered page later.
+    widget._stored_filter_generation += 1
+    widget._stored_page_start = 0
+    widget._stored_filter_set = (
+        widget._stored_available_filter_set if checked else ActiveFilterSet(())
+    )
+    widget._start_load()
+
+
 def _reload_filters_if_changed(widget: SessionViewWidget) -> None:
     candidate = _load_filter_set(widget._stored_filter_database)
-    if candidate.signature == widget._stored_filter_signature:
+    if candidate.signature == widget._stored_available_filter_signature:
+        return
+    widget._stored_available_filter_set = candidate
+    widget._stored_available_filter_signature = candidate.signature
+    if not widget.stored_apply_filters.isChecked():
+        _update_filter_label(widget, loading=False)
         return
     widget._stored_filter_set = candidate
-    widget._stored_filter_signature = candidate.signature
     widget._stored_page_start = 0
     widget._start_load()
 
@@ -252,14 +281,20 @@ def _update_filter_label(
         label.setText(f"Filtry: błąd — {error}")
         return
 
-    count = widget._stored_filter_set.active_count
-    if count == 0:
-        text = "Filtry: wyłączone"
+    if not widget.stored_apply_filters.isChecked():
+        available = widget._stored_available_filter_set.active_count
+        text = "Filtry tej sesji: WYŁĄCZONE"
+        if available:
+            text += f" | dostępne presety: {available}"
     else:
-        names = ", ".join(preset.name for preset in widget._stored_filter_set.presets[:2])
-        if count > 2:
-            names += f" +{count - 2}"
-        text = f"Filtry: {names}"
+        count = widget._stored_filter_set.active_count
+        if count == 0:
+            text = "Filtry tej sesji: włączone, brak aktywnych presetów"
+        else:
+            names = ", ".join(preset.name for preset in widget._stored_filter_set.presets[:2])
+            if count > 2:
+                names += f" +{count - 2}"
+            text = f"Filtry tej sesji: {names}"
     if loading:
         text += " | ładowanie…"
     label.setText(text)
