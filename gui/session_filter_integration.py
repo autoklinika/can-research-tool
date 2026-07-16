@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QTimer
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from app.filters import ProjectFilterRepository
 from app.live_filters import ActiveFilterSet
@@ -31,16 +31,12 @@ def install_session_filter_integration() -> None:
         self._stored_filter_set = _load_filter_set(self._stored_filter_database)
         self._stored_filter_signature = self._stored_filter_set.signature
         self._stored_filter_page: FilteredSessionPage | None = None
+        self._stored_page_start = 0
 
         _original_init(self, path, *args, **kwargs)
-
-        self.stored_filter_label = QLabel()
-        self.stored_filter_label.setObjectName("storedSessionFilterStatus")
-        self.stored_filter_label.setStyleSheet(
-            "QLabel { padding: 5px 9px; border: 1px solid palette(mid); font-weight: 600; }"
-        )
-        self.layout().insertWidget(1, self.stored_filter_label)
+        _install_page_controls(self)
         _update_filter_label(self, loading=self._load_task is not None)
+        _update_page_controls(self, loading=self._load_task is not None)
 
         self._stored_filter_timer = QTimer(self)
         self._stored_filter_timer.setInterval(500)
@@ -53,6 +49,7 @@ def install_session_filter_integration() -> None:
         task = FilteredSessionLoadTask(
             self.path,
             max_rows=self.MAX_ROWS,
+            start=self._stored_page_start,
             filter_set=self._stored_filter_set,
         )
         task.signals.loaded.connect(
@@ -74,13 +71,58 @@ def install_session_filter_integration() -> None:
         self._load_task = task
         self._stored_filter_tasks.append(task)
         self._stored_filter_tasks = self._stored_filter_tasks[-3:]
-        label = getattr(self, "stored_filter_label", None)
-        if label is not None:
-            _update_filter_label(self, loading=True)
+        _update_filter_label(self, loading=True)
+        _update_page_controls(self, loading=True)
         QThreadPool.globalInstance().start(task)
 
     SessionViewWidget.__init__ = integrated_init
     SessionViewWidget._start_load = integrated_start_load
+
+
+def _install_page_controls(widget: SessionViewWidget) -> None:
+    row_widget = QWidget(widget)
+    row_widget.setObjectName("storedSessionNavigation")
+    row = QHBoxLayout(row_widget)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(5)
+
+    widget.stored_filter_label = QLabel()
+    widget.stored_filter_label.setObjectName("storedSessionFilterStatus")
+    row.addWidget(widget.stored_filter_label)
+    row.addStretch(1)
+
+    widget.stored_page_label = QLabel("Ramki: ładowanie…")
+    widget.stored_page_label.setObjectName("storedSessionPageStatus")
+    row.addWidget(widget.stored_page_label)
+
+    widget.stored_first_button = QPushButton("⏮")
+    widget.stored_first_button.setToolTip("Pierwsza strona")
+    widget.stored_first_button.setFixedWidth(34)
+    widget.stored_first_button.clicked.connect(lambda: _request_page(widget, 0))
+    row.addWidget(widget.stored_first_button)
+
+    widget.stored_previous_button = QPushButton("◀")
+    widget.stored_previous_button.setToolTip("Poprzednia strona")
+    widget.stored_previous_button.setFixedWidth(34)
+    widget.stored_previous_button.clicked.connect(lambda: _previous_page(widget))
+    row.addWidget(widget.stored_previous_button)
+
+    widget.stored_next_button = QPushButton("▶")
+    widget.stored_next_button.setToolTip("Następna strona")
+    widget.stored_next_button.setFixedWidth(34)
+    widget.stored_next_button.clicked.connect(lambda: _next_page(widget))
+    row.addWidget(widget.stored_next_button)
+
+    widget.stored_last_button = QPushButton("⏭")
+    widget.stored_last_button.setToolTip("Ostatnia strona")
+    widget.stored_last_button.setFixedWidth(34)
+    widget.stored_last_button.clicked.connect(lambda: _last_page(widget))
+    row.addWidget(widget.stored_last_button)
+
+    raw_page = widget.tabs.widget(widget.raw_tab_index)
+    raw_layout = raw_page.layout() if raw_page is not None else None
+    if raw_layout is not None:
+        raw_layout.insertWidget(0, row_widget)
 
 
 def _load_filter_set(database_path: Path | None) -> ActiveFilterSet:
@@ -95,7 +137,39 @@ def _reload_filters_if_changed(widget: SessionViewWidget) -> None:
         return
     widget._stored_filter_set = candidate
     widget._stored_filter_signature = candidate.signature
+    widget._stored_page_start = 0
     widget._start_load()
+
+
+def _request_page(widget: SessionViewWidget, start: int) -> None:
+    requested = max(0, int(start))
+    if (
+        widget._stored_filter_page is not None
+        and requested == widget._stored_page_start
+        and widget._load_task is None
+    ):
+        return
+    widget._stored_page_start = requested
+    widget._start_load()
+
+
+def _previous_page(widget: SessionViewWidget) -> None:
+    _request_page(widget, max(0, widget._stored_page_start - widget.MAX_ROWS))
+
+
+def _next_page(widget: SessionViewWidget) -> None:
+    page = widget._stored_filter_page
+    if page is None:
+        return
+    last_start = _last_page_start(page.visible_frames, widget.MAX_ROWS)
+    _request_page(widget, min(last_start, widget._stored_page_start + widget.MAX_ROWS))
+
+
+def _last_page(widget: SessionViewWidget) -> None:
+    page = widget._stored_filter_page
+    if page is None:
+        return
+    _request_page(widget, _last_page_start(page.visible_frames, widget.MAX_ROWS))
 
 
 def _filtered_loaded(
@@ -108,42 +182,46 @@ def _filtered_loaded(
         return
 
     loaded = list(page.frames)
-    widget.frame_model.replace_frames(loaded)
     widget._stored_filter_page = page
+    widget._stored_page_start = page.loaded_from_visible_index
+    widget.frame_model.replace_frames(loaded)
     try:
         session = read_session_header(path)
         title = session.name
     except Exception:
         title = widget.path.name
 
+    start = page.loaded_from_visible_index
+    end = start + len(loaded)
     if widget._stored_filter_set.affects_visibility:
         text = (
-            f"{title} — {path} | filtr: {page.visible_frames:,} z "
-            f"{page.total_frames:,} ramek | pokazano ostatnie {len(loaded):,} "
-            f"(od wyniku {page.loaded_from_visible_index:,})"
+            f"{title} — {path} | wyniki {start + 1 if loaded else 0:,}–{end:,} "
+            f"z {page.visible_frames:,} | cały log: {page.total_frames:,} ramek"
         ).replace(",", " ")
     else:
         text = (
-            f"{title} — {path} | pokazano {len(loaded):,} z "
-            f"{page.total_frames:,} ramek (od {page.loaded_from_visible_index:,})"
+            f"{title} — {path} | ramki {start + 1 if loaded else 0:,}–{end:,} "
+            f"z {page.total_frames:,}"
         ).replace(",", " ")
 
     widget.header.setText(text)
-    widget.tabs.setTabText(
-        widget.raw_tab_index,
-        (
-            f"Surowe ramki ({len(loaded):,}/{page.visible_frames:,}/"
-            f"{page.total_frames:,})"
-        ).replace(",", " "),
-    )
+    if widget._stored_filter_set.affects_visibility:
+        tab_text = (
+            f"Surowe ramki ({page.visible_frames:,}/{page.total_frames:,})"
+        ).replace(",", " ")
+    else:
+        tab_text = f"Surowe ramki ({page.total_frames:,})".replace(",", " ")
+    widget.tabs.setTabText(widget.raw_tab_index, tab_text)
+
     if loaded:
-        widget.frame_table.scrollToBottom()
+        widget.frame_table.scrollToTop()
     widget.output_message.emit(
-        f"Otwarto sesję {path}: wszystkie={page.total_frames}, "
-        f"widoczne={page.visible_frames}, załadowane={len(loaded)}"
+        f"Otwarto stronę sesji {path}: zakres={start}-{end}, "
+        f"widoczne={page.visible_frames}, wszystkie={page.total_frames}"
     )
     widget._load_task = None
     _update_filter_label(widget, loading=False)
+    _update_page_controls(widget, loading=False)
 
 
 def _filtered_failed(
@@ -158,6 +236,7 @@ def _filtered_failed(
     widget.output_message.emit(f"Błąd filtrowania sesji {path}: {error}")
     widget._load_task = None
     _update_filter_label(widget, loading=False, error=error)
+    _update_page_controls(widget, loading=False)
 
 
 def _update_filter_label(
@@ -169,31 +248,72 @@ def _update_filter_label(
     label = getattr(widget, "stored_filter_label", None)
     if label is None:
         return
-    count = widget._stored_filter_set.active_count
-    invalid = len(widget._stored_filter_set.validation_issues)
     if error:
-        label.setText(f"Filtr zapisanej sesji: błąd — {error}")
+        label.setText(f"Filtry: błąd — {error}")
         return
-    if loading:
-        label.setText(
-            f"Filtr zapisanej sesji: przeliczanie… | aktywne presety: {count}"
-        )
-        return
-    page = widget._stored_filter_page
+
+    count = widget._stored_filter_set.active_count
     if count == 0:
-        label.setText("Filtr zapisanej sesji: wyłączony | Plik źródłowy bez zmian")
+        text = "Filtry: wyłączone"
+    else:
+        names = ", ".join(preset.name for preset in widget._stored_filter_set.presets[:2])
+        if count > 2:
+            names += f" +{count - 2}"
+        text = f"Filtry: {names}"
+    if loading:
+        text += " | ładowanie…"
+    label.setText(text)
+
+
+def _update_page_controls(widget: SessionViewWidget, *, loading: bool) -> None:
+    label = getattr(widget, "stored_page_label", None)
+    if label is None:
         return
-    counts = ""
-    if page is not None:
-        counts = (
-            f" | Widoczne: {page.visible_frames:,} / Wszystkie: "
+
+    buttons = (
+        widget.stored_first_button,
+        widget.stored_previous_button,
+        widget.stored_next_button,
+        widget.stored_last_button,
+    )
+    if loading:
+        label.setText("Ramki: ładowanie strony…")
+        for button in buttons:
+            button.setEnabled(False)
+        return
+
+    page = widget._stored_filter_page
+    if page is None:
+        label.setText("Ramki: —")
+        for button in buttons:
+            button.setEnabled(False)
+        return
+
+    start = page.loaded_from_visible_index
+    end = start + len(page.frames)
+    if widget._stored_filter_set.affects_visibility:
+        text = (
+            f"Wyniki {start + 1 if page.frames else 0:,}–{end:,} z "
+            f"{page.visible_frames:,} | log {page.total_frames:,}"
+        ).replace(",", " ")
+    else:
+        text = (
+            f"Ramki {start + 1 if page.frames else 0:,}–{end:,} z "
             f"{page.total_frames:,}"
         ).replace(",", " ")
-    invalid_text = f" | błędne: {invalid}" if invalid else ""
-    label.setText(
-        f"Filtr zapisanej sesji aktywny: {count}{invalid_text}{counts} "
-        "| Plik źródłowy bez zmian"
-    )
+    label.setText(text)
+
+    last_start = _last_page_start(page.visible_frames, widget.MAX_ROWS)
+    widget.stored_first_button.setEnabled(start > 0)
+    widget.stored_previous_button.setEnabled(start > 0)
+    widget.stored_next_button.setEnabled(start < last_start)
+    widget.stored_last_button.setEnabled(start < last_start)
+
+
+def _last_page_start(total: int, page_size: int) -> int:
+    if total <= 0:
+        return 0
+    return ((total - 1) // page_size) * page_size
 
 
 def _find_project_database(session_path: Path) -> Path | None:
