@@ -4,6 +4,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from .filter_integration import install_filter_integration
 from .main_window import MainWindow
 
 
@@ -11,6 +12,7 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setOrganizationName("Autoklinika")
     app.setApplicationName("CAN Research Tool")
+    install_filter_integration()
     window = MainWindow()
     window.show()
     return app.exec()
