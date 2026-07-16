@@ -14,6 +14,19 @@ from .session_stream import iter_session_frames
 from .stream_pipeline import StreamingTransportPipeline
 
 
+_TRANSPORT_METADATA_KEYS = frozenset(
+    {
+        "addressing",
+        "declared_payload_length",
+        "received_payload_length",
+        "declared_packet_count",
+        "received_packet_count",
+        "packet_number",
+        "j1939_identifier_candidate",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class LogicalMessageRecord:
     sequence: int
@@ -98,9 +111,10 @@ def reinterpret_raw_record(
     """Reinterpret a persisted record using the current decoder versions.
 
     Historical ``messages.csv`` files remain immutable cache/export artifacts. On
-    every open CRT reconstructs a ``TransportMessage`` from their raw identifiers,
-    payload and transport metadata, then applies the current UDS/J1939 decoders.
-    DBC remains a reversible overlay for RAW frames.
+    every open CRT reconstructs a ``TransportMessage`` from raw identifiers,
+    payload and transport-only metadata, then applies the current UDS/J1939
+    decoders. Protocol fields from an older decoder version are deliberately not
+    carried into the new result. DBC remains a reversible overlay for RAW frames.
     """
 
     try:
@@ -125,7 +139,7 @@ def reinterpret_raw_record(
         pgn=record.pgn,
         complete=record.complete,
         error=record.error,
-        metadata=dict(record.fields or {}),
+        metadata=_transport_metadata(record.fields),
     )
     if transport is TransportKind.RAW and dbc_decoder is not None and dbc_decoder.matches(message):
         return LogicalMessageRecord.from_decoded(dbc_decoder.decode(message))
@@ -181,6 +195,16 @@ def load_recent_logical_messages(
         total += 1
     source = "reconstructed+dbc" if active_dbc_paths else "reconstructed"
     return list(retained), total, source
+
+
+def _transport_metadata(fields: dict[str, Any] | None) -> dict[str, Any]:
+    if not fields:
+        return {}
+    return {
+        key: value
+        for key, value in fields.items()
+        if key in _TRANSPORT_METADATA_KEYS
+    }
 
 
 def _record_from_csv_row(row: dict[str, str | None]) -> LogicalMessageRecord:
