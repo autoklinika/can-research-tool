@@ -65,6 +65,8 @@ _BITRATES: dict[int, str] = {
 }
 
 DRIVER_READ_TIMEOUT_MS = 1
+READER_START_TIMEOUT_S = 5.0
+READER_STOP_TIMEOUT_S = 2.0
 
 
 def _require_canlib() -> Any:
@@ -97,17 +99,16 @@ def list_channels() -> list[KvaserChannelInfo]:
 
 
 class KvaserPassiveChannel:
-    """Read-only Kvaser channel with a dedicated CANlib receive thread.
+    """Read-only Kvaser producer with an isolated CANlib receive thread.
 
-    The CANlib channel is owned by a lightweight reader thread after ``open``.
-    That thread performs only ``read(timeout=1)`` and converts the result into a
-    hardware-neutral ``CanFrame`` before placing it in an in-process queue.
-    Disk writes, transport reassembly, protocol decoding and GUI publication are
-    therefore unable to delay reads from the CANlib driver queue.
+    The reader thread owns the complete CANlib handle lifecycle: it opens the
+    channel, configures the driver and bitrate, switches the bus on, continuously
+    executes ``read(timeout=1)``, and finally switches the bus off and closes the
+    handle. No other application thread touches the CANlib channel object.
 
-    The implementation intentionally mirrors the proven receive path used by the
-    standalone Kvaser monitor: explicit ``setBusParams`` before ``busOn`` and a
-    continuously running reader thread.
+    Received frames are copied into an unbounded in-process queue. Disk writes,
+    transport reassembly, protocol decoding, filtering and GUI updates consume
+    that queue later and therefore cannot delay hardware reads.
     """
 
     def __init__(
@@ -124,25 +125,44 @@ class KvaserPassiveChannel:
         self.bitrate = bitrate
         self.mode = KvaserReceiveMode(mode)
         self.driver_read_timeout_ms = int(driver_read_timeout_ms)
-        self._channel: Any | None = None
-        self._sequence = 0
+
         self._frames: Queue[CanFrame] = Queue()
         self._reader_stop = Event()
+        self._reader_ready = Event()
+        self._reader_closed = Event()
         self._reader_thread: Thread | None = None
         self._reader_error: BaseException | None = None
+        self._channel_active = False
+        self._sequence = 0
+        self._received_count = 0
+        self._delivered_count = 0
 
     @property
     def is_open(self) -> bool:
-        return self._channel is not None
+        thread = self._reader_thread
+        return bool(self._channel_active and thread is not None and thread.is_alive())
 
     @property
     def prefetched_count(self) -> int:
-        """Number of frames already removed from CANlib and awaiting processing."""
+        """Frames already removed from CANlib and waiting for analysis."""
 
         return self._frames.qsize()
 
+    @property
+    def received_count(self) -> int:
+        """Frames copied from CANlib into the application buffer."""
+
+        return self._received_count
+
+    @property
+    def delivered_count(self) -> int:
+        """Frames already delivered from the buffer to CaptureService."""
+
+        return self._delivered_count
+
     def open(self) -> None:
-        if self._channel is not None:
+        thread = self._reader_thread
+        if thread is not None and thread.is_alive():
             return
 
         api = _require_canlib()
@@ -159,11 +179,70 @@ class KvaserPassiveChannel:
             raise ValueError(f"Unsupported predefined CAN bitrate: {self.bitrate}")
         bitrate_value = getattr(api.Bitrate, bitrate_name)
 
-        # Match the known-good standalone monitor exactly: open first, then select
-        # driver mode and nominal bus parameters before putting the channel bus-on.
-        channel = api.openChannel(self.channel_number)
+        self._frames = Queue()
+        self._reader_stop = Event()
+        self._reader_ready = Event()
+        self._reader_closed = Event()
+        self._reader_error = None
+        self._channel_active = False
+        self._sequence = 0
+        self._received_count = 0
+        self._delivered_count = 0
+
+        thread = Thread(
+            target=self._receive_loop,
+            args=(bitrate_value,),
+            name=f"crt-kvaser-rx-{self.channel_number}",
+            daemon=True,
+        )
+        self._reader_thread = thread
+        thread.start()
+
+        if not self._reader_ready.wait(READER_START_TIMEOUT_S):
+            self._reader_stop.set()
+            raise KvaserReceiveError(
+                f"Kvaser receive thread did not start within {READER_START_TIMEOUT_S:.1f} s"
+            )
+        if self._reader_error is not None:
+            thread.join(READER_STOP_TIMEOUT_S)
+            self._reader_thread = None
+            raise KvaserReceiveError(
+                f"Could not start Kvaser receive thread: {self._reader_error}"
+            ) from self._reader_error
+        if not self._channel_active:
+            raise KvaserReceiveError("Kvaser receive thread stopped during startup")
+
+    def read(self, timeout_ms: int = 100) -> CanFrame | None:
+        """Return a frame already buffered by the isolated reader thread."""
+
+        if self._reader_thread is None:
+            raise RuntimeError("Kvaser channel is not open")
+        if timeout_ms < 0:
+            raise ValueError("timeout_ms cannot be negative")
+
         try:
-            channel.iocontrol.local_txecho = False
+            if timeout_ms == 0:
+                frame = self._frames.get_nowait()
+            else:
+                frame = self._frames.get(timeout=timeout_ms / 1000.0)
+        except Empty:
+            if self._reader_error is not None:
+                raise KvaserReceiveError(
+                    f"Kvaser receive thread failed: {self._reader_error}"
+                ) from self._reader_error
+            return None
+
+        self._delivered_count += 1
+        return frame
+
+    def _receive_loop(self, bitrate_value: Any) -> None:
+        api = _require_canlib()
+        channel: Any | None = None
+
+        try:
+            # Keep the full CANlib handle lifecycle in this one producer thread,
+            # exactly like the known-good standalone monitor.
+            channel = api.openChannel(self.channel_number)
             driver = (
                 api.Driver.SILENT
                 if self.mode is KvaserReceiveMode.LISTEN_ONLY
@@ -172,89 +251,64 @@ class KvaserPassiveChannel:
             channel.setBusOutputControl(driver)
             channel.setBusParams(bitrate_value)
             channel.busOn()
-        except Exception:
-            channel.close()
-            raise
 
-        self._channel = channel
-        self._sequence = 0
-        self._frames = Queue()
-        self._reader_error = None
-        self._reader_stop = Event()
-        self._reader_thread = Thread(
-            target=self._receive_loop,
-            name=f"crt-kvaser-rx-{self.channel_number}",
-            daemon=True,
-        )
-        self._reader_thread.start()
+            self._channel_active = True
+            self._reader_ready.set()
 
-    def read(self, timeout_ms: int = 100) -> CanFrame | None:
-        """Return a frame already drained from CANlib by the reader thread."""
+            while not self._reader_stop.is_set():
+                try:
+                    frame = channel.read(timeout=self.driver_read_timeout_ms)
+                except api.CanNoMsg:
+                    continue
 
-        if self._channel is None:
-            raise RuntimeError("Kvaser channel is not open")
-        if timeout_ms < 0:
-            raise ValueError("timeout_ms cannot be negative")
-
-        try:
-            if timeout_ms == 0:
-                return self._frames.get_nowait()
-            return self._frames.get(timeout=timeout_ms / 1000.0)
-        except Empty:
-            if self._reader_error is not None:
-                raise KvaserReceiveError(
-                    f"Kvaser receive thread failed: {self._reader_error}"
-                ) from self._reader_error
-            return None
-
-    def _receive_loop(self) -> None:
-        channel = self._channel
-        if channel is None:
-            return
-        api = _require_canlib()
-
-        while not self._reader_stop.is_set():
-            try:
-                frame = channel.read(timeout=self.driver_read_timeout_ms)
-            except api.CanNoMsg:
-                continue
-            except Exception as exc:
-                if not self._reader_stop.is_set():
-                    self._reader_error = exc
-                break
-
-            flags = frame.flags
-            captured = CanFrame(
-                sequence=self._sequence,
-                timestamp_ns=perf_counter_ns(),
-                arbitration_id=int(frame.id),
-                data=bytes(frame.data[: frame.dlc]),
-                channel=self.channel_number,
-                is_extended_id=bool(flags & api.MessageFlag.EXT),
-                is_remote_frame=bool(flags & api.MessageFlag.RTR),
-                is_error_frame=bool(flags & api.MessageFlag.ERROR_FRAME),
-                source_timestamp=int(frame.timestamp),
-                source_flags=int(flags),
-            )
-            self._sequence += 1
-            self._frames.put(captured)
+                flags = frame.flags
+                captured = CanFrame(
+                    sequence=self._sequence,
+                    timestamp_ns=perf_counter_ns(),
+                    arbitration_id=int(frame.id),
+                    data=bytes(frame.data[: frame.dlc]),
+                    channel=self.channel_number,
+                    is_extended_id=bool(flags & api.MessageFlag.EXT),
+                    is_remote_frame=bool(flags & api.MessageFlag.RTR),
+                    is_error_frame=bool(flags & api.MessageFlag.ERROR_FRAME),
+                    source_timestamp=int(frame.timestamp),
+                    source_flags=int(flags),
+                )
+                self._sequence += 1
+                self._received_count += 1
+                self._frames.put(captured)
+        except BaseException as exc:
+            if not self._reader_stop.is_set():
+                self._reader_error = exc
+            self._reader_ready.set()
+        finally:
+            self._channel_active = False
+            if channel is not None:
+                try:
+                    channel.busOff()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+            self._reader_ready.set()
+            self._reader_closed.set()
 
     def close(self) -> None:
-        channel = self._channel
-        if channel is None:
+        thread = self._reader_thread
+        if thread is None:
             return
 
         self._reader_stop.set()
-        reader = self._reader_thread
-        if reader is not None:
-            reader.join(timeout=max(1.0, self.driver_read_timeout_ms / 1000.0 * 10))
+        thread.join(READER_STOP_TIMEOUT_S)
+        if thread.is_alive():
+            raise KvaserReceiveError(
+                f"Kvaser receive thread did not stop within {READER_STOP_TIMEOUT_S:.1f} s"
+            )
         self._reader_thread = None
-        self._channel = None
-
-        try:
-            channel.busOff()
-        finally:
-            channel.close()
+        self._channel_active = False
 
         while True:
             try:
