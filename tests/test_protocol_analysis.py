@@ -63,8 +63,35 @@ def test_uds_security_access_exposes_level_and_seed_key_phase() -> None:
     assert key.fields["security_access_type"] == "send-key"
 
 
-def test_single_frame_j1939_is_classified_with_identifier_fields() -> None:
-    # Priority 6, PF EA (Request), destination 0x30, source 0xF9.
+def test_request_download_request_uses_data_and_address_length_formats() -> None:
+    decoded = ProtocolRegistry().decode(
+        _message(bytes.fromhex("34 00 44 00 A2 00 00 00 00 11 EE"))
+    )
+
+    assert decoded.protocol is ProtocolKind.UDS
+    assert decoded.fields["response_type"] == "request"
+    assert decoded.fields["data_format_identifier"] == 0x00
+    assert decoded.fields["address_and_length_format_identifier"] == 0x44
+    assert decoded.fields["memory_address_length"] == 4
+    assert decoded.fields["memory_size_length"] == 4
+    assert "length_format_identifier" not in decoded.fields
+
+
+def test_request_download_positive_response_uses_max_block_length_format() -> None:
+    decoded = ProtocolRegistry().decode(_message(bytes.fromhex("74 20 10 00")))
+
+    assert decoded.protocol is ProtocolKind.UDS
+    assert decoded.fields["response_type"] == "positive-response"
+    assert decoded.fields["length_format_identifier"] == 0x20
+    assert decoded.fields["max_number_of_block_length_size"] == 2
+    assert decoded.fields["max_number_of_block_length"] == 0x1000
+    assert "data_format_identifier" not in decoded.fields
+    assert "address_and_length_format_identifier" not in decoded.fields
+
+
+def test_raw_29bit_frame_remains_unknown_with_j1939_candidate_fields() -> None:
+    # Priority 6, PF EA (Request), destination 0x30, source 0xF9. The identifier
+    # can be parsed as J1939, but that alone does not prove the application protocol.
     decoded = ProtocolRegistry().decode(
         _message(
             bytes.fromhex("00 EE 00 FF FF FF FF FF"),
@@ -74,12 +101,13 @@ def test_single_frame_j1939_is_classified_with_identifier_fields() -> None:
         )
     )
 
-    assert decoded.protocol is ProtocolKind.J1939
-    assert decoded.fields["pgn"] == 0xEA00
-    assert decoded.fields["pgn_name"] == "Request"
-    assert decoded.fields["priority"] == 6
-    assert decoded.fields["pdu_type"] == "PDU1"
-    assert decoded.fields["direction"] == "peer-to-peer"
+    assert decoded.protocol is ProtocolKind.UNKNOWN
+    candidate = decoded.fields["j1939_identifier_candidate"]
+    assert candidate["pgn"] == 0xEA00
+    assert candidate["pgn_name"] == "Request"
+    assert candidate["priority"] == 6
+    assert candidate["pdu_type"] == "PDU1"
+    assert decoded.confidence == 0.0
 
 
 def test_j1939_tp_application_message_uses_pgn_catalog() -> None:
