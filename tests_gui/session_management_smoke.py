@@ -105,10 +105,11 @@ def main() -> int:
         imported_inspector = window.inspector.toPlainText()
         assert "Rodzaj: Importowana" in imported_inspector
         assert str(imported_path.resolve()) in imported_inspector
-        assert "tylko z listy" in imported_inspector
+        assert "pliki pochodne w projekcie" in imported_inspector
+        assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_inspector
         assert _menu_labels(window, imported_path) == [
             "Idź do pliku",
-            "Usuń z listy",
+            "Usuń z projektu",
         ]
 
         window.close()
