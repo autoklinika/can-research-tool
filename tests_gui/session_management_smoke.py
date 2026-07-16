@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import tempfile
 from pathlib import Path
@@ -42,10 +43,10 @@ def _menu_labels(window: MainWindow, path: Path) -> list[str]:
     return [action.text() for action in menu.actions() if not action.isSeparator()]
 
 
-def main() -> int:
+def _run_phase(phase: str) -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("Autoklinika-tests")
-    app.setApplicationName("CRT-session-management-smoke")
+    app.setApplicationName(f"CRT-session-management-{phase}")
     install_session_management_integration()
 
     with tempfile.TemporaryDirectory() as directory:
@@ -73,39 +74,50 @@ def main() -> int:
 
         window = MainWindow()
         window._set_project(project)
-        assert (
-            window.explorer.tree.contextMenuPolicy()
-            == Qt.ContextMenuPolicy.CustomContextMenu
-        )
-        assert not hasattr(window, "session_reveal_button")
-        assert not hasattr(window, "session_remove_button")
 
-        root = window.explorer.model.item(0, 0)
-        assert root is not None
-        assert _find_session_item(root, live_path) is not None
-        assert _find_session_item(root, imported_path) is not None
+        if phase == "tree":
+            assert (
+                window.explorer.tree.contextMenuPolicy()
+                == Qt.ContextMenuPolicy.CustomContextMenu
+            )
+            assert not hasattr(window, "session_reveal_button")
+            assert not hasattr(window, "session_remove_button")
+            root = window.explorer.model.item(0, 0)
+            assert root is not None
+            assert _find_session_item(root, live_path) is not None
+            assert _find_session_item(root, imported_path) is not None
 
-        live_record = project.session_by_path(live_path)
-        assert live_record is not None
-        live_details = _format_session_inspector(project, live_record)
-        assert "Data i godzina zapisu pliku:" in live_details
-        assert str(live_path.resolve()) in live_details
-        assert _menu_labels(window, live_path) == ["Idź do pliku", "Usuń log"]
+        elif phase == "live":
+            live_record = project.session_by_path(live_path)
+            assert live_record is not None
+            live_details = _format_session_inspector(project, live_record)
+            assert "Data i godzina zapisu pliku:" in live_details
+            assert str(live_path.resolve()) in live_details
+            assert _menu_labels(window, live_path) == ["Idź do pliku", "Usuń log"]
 
-        imported_record = project.session_by_path(imported_path)
-        assert imported_record is not None
-        imported_details = _format_session_inspector(project, imported_record)
-        assert "Rodzaj: Importowana" in imported_details
-        assert str(imported_path.resolve()) in imported_details
-        assert "pliki pochodne w projekcie" in imported_details
-        assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_details
-        assert _menu_labels(window, imported_path) == [
-            "Idź do pliku",
-            "Usuń z projektu",
-        ]
+        elif phase == "imported":
+            imported_record = project.session_by_path(imported_path)
+            assert imported_record is not None
+            imported_details = _format_session_inspector(project, imported_record)
+            assert "Rodzaj: Importowana" in imported_details
+            assert str(imported_path.resolve()) in imported_details
+            assert "pliki pochodne w projekcie" in imported_details
+            assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_details
+            assert _menu_labels(window, imported_path) == [
+                "Idź do pliku",
+                "Usuń z projektu",
+            ]
+        else:
+            raise ValueError(f"unknown phase: {phase}")
 
         window.close()
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("phase", choices=("tree", "live", "imported"))
+    args = parser.parse_args()
+    _run_phase(args.phase)
     return 0
 
 
