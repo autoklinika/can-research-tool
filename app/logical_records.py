@@ -95,20 +95,27 @@ def reinterpret_raw_record(
     base_registry: ProtocolRegistry,
     dbc_decoder: DbcDecoder | None,
 ) -> LogicalMessageRecord:
-    """Reinterpret a RAW record from its immutable payload and identifier.
+    """Reinterpret a persisted record using the current decoder versions.
 
-    This deliberately ignores a previously persisted DBC label. Therefore disabling
-    a project DBC immediately restores UNKNOWN/base interpretation without changing
-    the session file or regenerating its CSV export.
+    Historical ``messages.csv`` files remain immutable cache/export artifacts. On
+    every open CRT reconstructs a ``TransportMessage`` from their raw identifiers,
+    payload and transport metadata, then applies the current UDS/J1939 decoders.
+    DBC remains a reversible overlay for RAW frames.
     """
 
-    if record.transport != TransportKind.RAW.value or record.arbitration_id is None:
+    try:
+        transport = TransportKind(record.transport)
+    except ValueError:
         return record
+
+    if record.arbitration_id is None and transport is TransportKind.RAW:
+        return record
+
     message = TransportMessage(
         sequence=record.sequence,
         first_timestamp_ns=record.first_timestamp_ns,
         last_timestamp_ns=record.last_timestamp_ns,
-        transport=TransportKind.RAW,
+        transport=transport,
         payload=record.payload,
         frame_sequences=record.frame_sequences,
         arbitration_id=record.arbitration_id,
@@ -118,8 +125,9 @@ def reinterpret_raw_record(
         pgn=record.pgn,
         complete=record.complete,
         error=record.error,
+        metadata=dict(record.fields or {}),
     )
-    if dbc_decoder is not None and dbc_decoder.matches(message):
+    if transport is TransportKind.RAW and dbc_decoder is not None and dbc_decoder.matches(message):
         return LogicalMessageRecord.from_decoded(dbc_decoder.decode(message))
     return LogicalMessageRecord.from_decoded(base_registry.decode(message))
 
@@ -132,9 +140,10 @@ def load_recent_logical_messages(
 ) -> tuple[list[LogicalMessageRecord], int, str]:
     """Load a bounded recent logical-message window without retaining the full file.
 
-    Existing ``*.messages.csv`` is preferred. Active DBC files are applied as a
-    reversible presentation overlay. When the CSV is unavailable, messages are
-    reconstructed from the raw CRT session in one streaming pass.
+    Existing ``*.messages.csv`` is preferred as a transport-message cache. Current
+    protocol decoders and active DBC files are applied as a reversible presentation
+    layer. When the CSV is unavailable, messages are reconstructed from the raw CRT
+    session in one streaming pass.
     """
 
     if max_rows <= 0:
