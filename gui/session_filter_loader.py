@@ -21,11 +21,13 @@ class FilteredSessionLoadTask(QRunnable):
         path: str | Path,
         *,
         max_rows: int,
+        start: int,
         filter_set: ActiveFilterSet,
     ) -> None:
         super().__init__()
         self.path = Path(path)
         self.max_rows = max_rows
+        self.start = start
         self.filter_set = filter_set
         self.signals = FilteredSessionLoadSignals()
 
@@ -36,6 +38,7 @@ class FilteredSessionLoadTask(QRunnable):
                 self.path,
                 self.filter_set,
                 max_rows=self.max_rows,
+                start=self.start,
             )
             self.signals.loaded.emit(str(self.path), page)
         except Exception as exc:
