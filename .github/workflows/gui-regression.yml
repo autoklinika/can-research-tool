@@ -20,6 +20,10 @@ jobs:
           sudo apt-get install -y -qq libegl1
       - name: Install GUI
         run: python -m pip install -q -e ".[gui]"
+      - name: Verify DBC activation controls
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/dbc_activation_smoke.py
       - name: Verify stored-session filters are explicit opt-in
         env:
           QT_QPA_PLATFORM: offscreen
