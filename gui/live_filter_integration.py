@@ -9,6 +9,9 @@ from app.live_filters import ActiveFilterSet
 from .live_capture import LiveCaptureWidget
 
 
+LIVE_FRAME_CAPACITY = 250_000
+LIVE_MESSAGE_CAPACITY = 100_000
+
 _installed = False
 _original_init = LiveCaptureWidget.__init__
 _original_update_status = LiveCaptureWidget._update_status
@@ -70,6 +73,12 @@ def install_live_filter_integration() -> None:
     if _installed:
         return
     _installed = True
+
+    # The old 20k/5k ring buffers made a high-frequency CAN ID dominate the
+    # retained tail and look like a filter. Keep a substantially larger raw Live
+    # history; disk persistence remains independently controlled by "Zapisz".
+    LiveCaptureWidget.LIVE_CAPACITY = LIVE_FRAME_CAPACITY
+    LiveCaptureWidget.LIVE_MESSAGE_CAPACITY = LIVE_MESSAGE_CAPACITY
 
     def integrated_init(self: LiveCaptureWidget, *args, **kwargs) -> None:
         _original_init(self, *args, **kwargs)
