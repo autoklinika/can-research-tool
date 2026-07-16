@@ -40,15 +40,17 @@ class UdsDecoder:
     def decode(self, message: TransportMessage) -> DecodedMessage:
         payload = message.payload
         sid = payload[0]
-        fields: dict[str, object] = {
-            "service_id": sid,
-            "complete": message.complete,
-            "payload_length": len(payload),
-            "frame_count": message.frame_count,
-            "source_address": message.source_address,
-            "destination_address": message.destination_address,
-        }
-        fields.update(message.metadata)
+        fields: dict[str, object] = dict(message.metadata)
+        fields.update(
+            {
+                "service_id": sid,
+                "complete": message.complete,
+                "payload_length": len(payload),
+                "frame_count": message.frame_count,
+                "source_address": message.source_address,
+                "destination_address": message.destination_address,
+            }
+        )
 
         if sid == 0x7F:
             requested_sid = payload[1] if len(payload) >= 2 else None
@@ -114,9 +116,8 @@ class UdsDecoder:
         if base_sid == 0x36 and len(payload) >= 2:
             fields["block_sequence_counter"] = payload[1]
 
-        if base_sid in (0x34, 0x35) and len(payload) >= 3:
-            fields["data_format_identifier"] = payload[1]
-            fields["address_and_length_format_identifier"] = payload[2]
+        if base_sid in (0x34, 0x35):
+            self._decode_transfer_parameters(payload, response_type, fields)
 
         if base_sid == 0x19 and subfunction is not None:
             fields["dtc_subfunction"] = subfunction
@@ -142,6 +143,45 @@ class UdsDecoder:
         if 0 <= candidate <= 0xFF and candidate in UDS_SERVICE_NAMES:
             return candidate, "positive-response"
         return sid, "request"
+
+    @staticmethod
+    def _decode_transfer_parameters(
+        payload: bytes,
+        response_type: str,
+        fields: dict[str, object],
+    ) -> None:
+        if response_type == "request":
+            if len(payload) < 3:
+                return
+            data_format_identifier = payload[1]
+            address_and_length_format_identifier = payload[2]
+            fields.update(
+                {
+                    "data_format_identifier": data_format_identifier,
+                    "address_and_length_format_identifier": address_and_length_format_identifier,
+                    "memory_address_length": address_and_length_format_identifier & 0x0F,
+                    "memory_size_length": (address_and_length_format_identifier >> 4) & 0x0F,
+                }
+            )
+            return
+
+        if len(payload) < 2:
+            return
+        length_format_identifier = payload[1]
+        max_length_size = (length_format_identifier >> 4) & 0x0F
+        fields.update(
+            {
+                "length_format_identifier": length_format_identifier,
+                "max_number_of_block_length_size": max_length_size,
+                "length_format_reserved_nibble": length_format_identifier & 0x0F,
+            }
+        )
+        end = 2 + max_length_size
+        if max_length_size and len(payload) >= end:
+            fields["max_number_of_block_length"] = int.from_bytes(
+                payload[2:end],
+                "big",
+            )
 
     @staticmethod
     def _summary_suffix(
@@ -174,70 +214,31 @@ class J1939TransportDecoder:
 
     def decode(self, message: TransportMessage) -> DecodedMessage:
         pgn_name = j1939_pgn_name(message.pgn)
-        fields: dict[str, object] = {
-            "pgn": message.pgn,
-            "pgn_hex": None if message.pgn is None else f"0x{message.pgn:05X}",
-            "pgn_name": pgn_name,
-            "source_address": message.source_address,
-            "destination_address": message.destination_address,
-            "direction": "broadcast" if message.destination_address in (None, 0xFF) else "peer-to-peer",
-            "complete": message.complete,
-            "transport": message.transport.value,
-            "payload_length": len(message.payload),
-            "frame_count": message.frame_count,
-        }
-        fields.update(message.metadata)
+        fields: dict[str, object] = dict(message.metadata)
+        fields.update(
+            {
+                "pgn": message.pgn,
+                "pgn_hex": None if message.pgn is None else f"0x{message.pgn:05X}",
+                "pgn_name": pgn_name,
+                "source_address": message.source_address,
+                "destination_address": message.destination_address,
+                "direction": (
+                    "broadcast"
+                    if message.destination_address in (None, 0xFF)
+                    else "peer-to-peer"
+                ),
+                "complete": message.complete,
+                "transport": message.transport.value,
+                "payload_length": len(message.payload),
+                "frame_count": message.frame_count,
+            }
+        )
         return DecodedMessage(
             message=message,
             protocol=ProtocolKind.J1939,
             name=f"J1939 {pgn_name}",
             fields=fields,
             confidence=1.0,
-        )
-
-
-class J1939SingleFrameDecoder:
-    """Classify a raw 29-bit frame using the J1939 identifier layout.
-
-    This is deliberately placed after DBC and user rules. A project-specific
-    decoder therefore wins over the generic J1939 interpretation.
-    """
-
-    def matches(self, message: TransportMessage) -> bool:
-        return (
-            message.transport is TransportKind.RAW
-            and message.is_extended_id
-            and message.arbitration_id is not None
-        )
-
-    def decode(self, message: TransportMessage) -> DecodedMessage:
-        assert message.arbitration_id is not None
-        identifier = decode_j1939_identifier(message.arbitration_id)
-        pgn_name = j1939_pgn_name(identifier.pgn)
-        broadcast = identifier.destination_address in (None, 0xFF)
-        fields: dict[str, object] = {
-            "classification_basis": "29-bit J1939 identifier layout",
-            "priority": identifier.priority,
-            "extended_data_page": identifier.extended_data_page,
-            "data_page": identifier.data_page,
-            "pdu_format": identifier.pdu_format,
-            "pdu_specific": identifier.pdu_specific,
-            "pdu_type": "PDU1" if identifier.is_pdu1 else "PDU2",
-            "pgn": identifier.pgn,
-            "pgn_hex": f"0x{identifier.pgn:05X}",
-            "pgn_name": pgn_name,
-            "source_address": identifier.source_address,
-            "destination_address": identifier.destination_address,
-            "direction": "broadcast" if broadcast else "peer-to-peer",
-            "payload_length": len(message.payload),
-            "complete": message.complete,
-        }
-        return DecodedMessage(
-            message=message,
-            protocol=ProtocolKind.J1939,
-            name=f"J1939 {pgn_name}",
-            fields=fields,
-            confidence=0.85,
         )
 
 
@@ -248,15 +249,37 @@ class UnknownDecoder:
         return True
 
     def decode(self, message: TransportMessage) -> DecodedMessage:
+        fields: dict[str, object] = dict(message.metadata)
+        fields.update(
+            {
+                "complete": message.complete,
+                "payload_length": len(message.payload),
+                "frame_count": message.frame_count,
+            }
+        )
+
+        if message.is_extended_id and message.arbitration_id is not None:
+            identifier = decode_j1939_identifier(message.arbitration_id)
+            fields["j1939_identifier_candidate"] = {
+                "classification_basis": "29-bit identifier layout only",
+                "priority": identifier.priority,
+                "extended_data_page": identifier.extended_data_page,
+                "data_page": identifier.data_page,
+                "pdu_format": identifier.pdu_format,
+                "pdu_specific": identifier.pdu_specific,
+                "pdu_type": "PDU1" if identifier.is_pdu1 else "PDU2",
+                "pgn": identifier.pgn,
+                "pgn_hex": f"0x{identifier.pgn:05X}",
+                "pgn_name": j1939_pgn_name(identifier.pgn),
+                "source_address": identifier.source_address,
+                "destination_address": identifier.destination_address,
+            }
+
         return DecodedMessage(
             message=message,
             protocol=ProtocolKind.UNKNOWN,
             name="Unknown / proprietary CAN message",
-            fields={
-                "complete": message.complete,
-                "payload_length": len(message.payload),
-                "frame_count": message.frame_count,
-            },
+            fields=fields,
             confidence=0.0,
         )
 
@@ -285,7 +308,7 @@ class ProtocolRegistry:
             self._decoders.append(DbcDecoder(active_dbc_paths))
         if rules:
             self._decoders.append(RuleBasedDecoder(rules))
-        self._decoders.extend((J1939SingleFrameDecoder(), UnknownDecoder()))
+        self._decoders.append(UnknownDecoder())
 
     def decode(self, message: TransportMessage) -> DecodedMessage:
         for decoder in self._decoders:
