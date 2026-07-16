@@ -20,9 +20,6 @@ from .live_capture import LiveCaptureWidget
 
 
 _installed = False
-_original_init = LiveCaptureWidget.__init__
-_original_set_capture_controls = LiveCaptureWidget._set_capture_controls
-_original_finalize_project_session = LiveCaptureWidget._finalize_project_session
 
 
 def install_live_save_integration() -> None:
@@ -33,8 +30,12 @@ def install_live_save_integration() -> None:
         return
     _installed = True
 
+    original_init = LiveCaptureWidget.__init__
+    original_set_capture_controls = LiveCaptureWidget._set_capture_controls
+    original_finalize_project_session = LiveCaptureWidget._finalize_project_session
+
     def integrated_init(self: LiveCaptureWidget, *args, **kwargs) -> None:
-        _original_init(self, *args, **kwargs)
+        original_init(self, *args, **kwargs)
         self._current_capture_persistent = False
         self._save_reset_pending = False
         self._transient_finalized = False
@@ -93,6 +94,7 @@ def install_live_save_integration() -> None:
             return
 
         dbc_paths = active_project_dbc_paths(self.project)
+        paths = None
         try:
             self._dbc_decoder = DbcDecoder(dbc_paths) if dbc_paths else None
             paths = self._capture.start(
@@ -118,6 +120,9 @@ def install_live_save_integration() -> None:
                     status="recording",
                 )
         except Exception as exc:
+            if self._capture.is_active:
+                self._capture.stop()
+                self._capture.wait(2.0)
             QMessageBox.critical(self, "Nie można rozpocząć rejestracji", str(exc))
             return
 
@@ -142,6 +147,7 @@ def install_live_save_integration() -> None:
         self._install_marker_controls(active)
         self._set_capture_controls(True)
         if persist:
+            assert paths is not None
             self.output_message.emit(
                 f"Rozpoczęto rejestrację z zapisem: {paths.session} | "
                 f"aktywne DBC={len(dbc_paths)}"
@@ -155,13 +161,16 @@ def install_live_save_integration() -> None:
         _update_save_ui(self)
 
     def integrated_set_capture_controls(self: LiveCaptureWidget, active: bool) -> None:
-        _original_set_capture_controls(self, active)
-        self.save_session_button.setEnabled(not active)
-        self.session_name.setEnabled(not active and self.save_session_button.isChecked())
+        original_set_capture_controls(self, active)
+        save_button = getattr(self, "save_session_button", None)
+        if save_button is None:
+            return
+        save_button.setEnabled(not active)
+        self.session_name.setEnabled(not active and save_button.isChecked())
 
     def integrated_finalize_project_session(self: LiveCaptureWidget, status) -> None:
         if self._current_session_path is not None:
-            _original_finalize_project_session(self, status)
+            original_finalize_project_session(self, status)
         elif not self._transient_finalized:
             self._transient_finalized = True
             self.output_message.emit(
