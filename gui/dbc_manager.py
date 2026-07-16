@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
@@ -26,6 +27,7 @@ from app.project_dbc import (
 
 class DbcTableModel(QAbstractTableModel):
     project_changed = Signal()
+    operation_failed = Signal(str)
     _HEADERS = ("Aktywny", "Nazwa", "Plik projektu", "Wiadomości", "SHA-256")
 
     def __init__(self, project: CrtProject, parent=None) -> None:
@@ -40,20 +42,25 @@ class DbcTableModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._HEADERS)
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # noqa: N802,E501
-        if role != Qt.DisplayRole:
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ):  # noqa: N802
+        if role != Qt.ItemDataRole.DisplayRole:
             return None
-        if orientation == Qt.Horizontal and 0 <= section < len(self._HEADERS):
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self._HEADERS):
             return self._HEADERS[section]
         return section + 1
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid() or not 0 <= index.row() < len(self._records):
             return None
         record = self._records[index.row()]
-        if index.column() == 0 and role == Qt.CheckStateRole:
-            return Qt.Checked if record.enabled else Qt.Unchecked
-        if role == Qt.DisplayRole:
+        if index.column() == 0 and role == Qt.ItemDataRole.CheckStateRole:
+            return Qt.CheckState.Checked if record.enabled else Qt.CheckState.Unchecked
+        if role == Qt.ItemDataRole.DisplayRole:
             values = (
                 "",
                 record.name,
@@ -62,9 +69,9 @@ class DbcTableModel(QAbstractTableModel):
                 record.sha256[:16],
             )
             return values[index.column()]
-        if role == Qt.TextAlignmentRole and index.column() in (0, 3):
-            return int(Qt.AlignCenter)
-        if role == Qt.ToolTipRole:
+        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in (0, 3):
+            return int(Qt.AlignmentFlag.AlignCenter)
+        if role == Qt.ItemDataRole.ToolTipRole:
             return (
                 f"{record.relative_path}\n"
                 f"Wiadomości: {record.message_count}\n"
@@ -73,22 +80,53 @@ class DbcTableModel(QAbstractTableModel):
         return None
 
     def flags(self, index: QModelIndex):
-        flags = super().flags(index)
-        if index.isValid() and index.column() == 0:
-            flags |= Qt.ItemIsUserCheckable
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() == 0:
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
         return flags
 
-    def setData(self, index: QModelIndex, value, role: int = Qt.EditRole) -> bool:  # noqa: N802
+    def setData(
+        self,
+        index: QModelIndex,
+        value,
+        role: int = Qt.ItemDataRole.EditRole,
+    ) -> bool:  # noqa: N802
         if (
             not index.isValid()
             or index.column() != 0
-            or role != Qt.CheckStateRole
+            or role != Qt.ItemDataRole.CheckStateRole
             or not 0 <= index.row() < len(self._records)
         ):
             return False
-        record = self._records[index.row()]
-        set_project_dbc_enabled(self.project, record.id, value == Qt.Checked)
-        self.refresh()
+
+        try:
+            state = value if isinstance(value, Qt.CheckState) else Qt.CheckState(int(value))
+        except (TypeError, ValueError):
+            return False
+        return self.set_enabled(index.row(), state == Qt.CheckState.Checked)
+
+    def set_enabled(self, row: int, enabled: bool) -> bool:
+        if not 0 <= row < len(self._records):
+            return False
+        record = self._records[row]
+        enabled = bool(enabled)
+        if record.enabled == enabled:
+            return True
+        try:
+            set_project_dbc_enabled(self.project, record.id, enabled)
+        except Exception as exc:
+            self.operation_failed.emit(str(exc))
+            return False
+
+        self._records[row] = replace(record, enabled=enabled)
+        index = self.index(row, 0)
+        self.dataChanged.emit(
+            index,
+            index,
+            [Qt.ItemDataRole.CheckStateRole, Qt.ItemDataRole.DisplayRole],
+        )
         self.project_changed.emit()
         return True
 
@@ -119,6 +157,7 @@ class DbcManagerWidget(QWidget):
         self.project = project
         self.model = DbcTableModel(project, self)
         self.model.project_changed.connect(self._project_changed)
+        self.model.operation_failed.connect(self._operation_failed)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -133,7 +172,7 @@ class DbcManagerWidget(QWidget):
         root.addWidget(
             QLabel(
                 "Pliki są kopiowane do folderu decoders/dbc projektu. "
-                "Odznaczenie pola wyłącza interpretację bez usuwania pliku."
+                "Zaznaczenie pola Aktywny włącza interpretację bez modyfikowania surowych ramek."
             )
         )
 
@@ -141,6 +180,9 @@ class DbcManagerWidget(QWidget):
         self.import_button = QPushButton("Importuj DBC…")
         self.import_button.clicked.connect(self._import_dbc)
         actions.addWidget(self.import_button)
+        self.toggle_button = QPushButton("Włącz / wyłącz")
+        self.toggle_button.clicked.connect(self._toggle_selected)
+        actions.addWidget(self.toggle_button)
         self.remove_button = QPushButton("Usuń z projektu")
         self.remove_button.clicked.connect(self._remove_selected)
         actions.addWidget(self.remove_button)
@@ -154,8 +196,8 @@ class DbcManagerWidget(QWidget):
 
         self.table = QTableView()
         self.table.setModel(self.model)
-        self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
         self.table.verticalHeader().setDefaultSectionSize(24)
@@ -168,8 +210,8 @@ class DbcManagerWidget(QWidget):
         root.addWidget(self.table, 1)
 
         note = QLabel(
-            "Zmiana aktywności obowiązuje dla następnego logowania i powoduje ponowne "
-            "zinterpretowanie otwartych zapisanych sesji. Aktywnej rejestracji nie zmieniamy w locie."
+            "Zmiana aktywności jest zapisywana natychmiast. Otwarte zapisane sesje są "
+            "interpretowane ponownie, a Live Capture użyje aktualnego zestawu DBC przy kolejnym Start."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -196,6 +238,17 @@ class DbcManagerWidget(QWidget):
         if changed:
             self.model.refresh()
             self._project_changed()
+
+    def _toggle_selected(self) -> None:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.information(self, "CRT", "Zaznacz plik DBC do włączenia lub wyłączenia.")
+            return
+        row = rows[0].row()
+        record = self.model.record_at(row)
+        if record is None:
+            return
+        self.model.set_enabled(row, not record.enabled)
 
     def _remove_selected(self) -> None:
         rows = self.table.selectionModel().selectedRows()
@@ -228,6 +281,9 @@ class DbcManagerWidget(QWidget):
     def _project_changed(self) -> None:
         self._update_summary()
         self.changed.emit()
+
+    def _operation_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "Nie można zmienić aktywności DBC", message)
 
     def _update_summary(self) -> None:
         self.summary.setText(
