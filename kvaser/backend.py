@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 from time import perf_counter_ns
@@ -58,6 +59,9 @@ _BITRATES: dict[int, str] = {
 }
 
 
+DEFAULT_PREFETCH_LIMIT = 4_096
+
+
 def _require_canlib() -> Any:
     if canlib is None:
         raise KvaserUnavailableError(
@@ -93,6 +97,11 @@ class KvaserPassiveChannel:
     The default BENCH mode acknowledges valid CAN frames but still exposes no
     write/send operation. LISTEN_ONLY selects hardware silent mode and emits no
     ACK, which requires another active node on the observed network.
+
+    CANlib keeps its own receive queue. CRT drains that queue into a bounded local
+    prefetch buffer whenever the capture worker requests a frame. This prevents
+    protocol decoding and disk serialization between individual reads from making
+    the hardware/driver queue grow unnecessarily.
     """
 
     def __init__(
@@ -100,16 +109,26 @@ class KvaserPassiveChannel:
         channel_number: int,
         bitrate: int,
         mode: KvaserReceiveMode = KvaserReceiveMode.BENCH,
+        *,
+        prefetch_limit: int = DEFAULT_PREFETCH_LIMIT,
     ) -> None:
+        if prefetch_limit <= 0:
+            raise ValueError("prefetch_limit must be greater than zero")
         self.channel_number = channel_number
         self.bitrate = bitrate
         self.mode = KvaserReceiveMode(mode)
+        self.prefetch_limit = int(prefetch_limit)
         self._channel: Any | None = None
         self._sequence = 0
+        self._prefetched: deque[CanFrame] = deque()
 
     @property
     def is_open(self) -> bool:
         return self._channel is not None
+
+    @property
+    def prefetched_count(self) -> int:
+        return len(self._prefetched)
 
     def open(self) -> None:
         if self._channel is not None:
@@ -146,6 +165,7 @@ class KvaserPassiveChannel:
 
         self._channel = channel
         self._sequence = 0
+        self._prefetched.clear()
 
     def read(self, timeout_ms: int = 100) -> CanFrame | None:
         if self._channel is None:
@@ -153,9 +173,33 @@ class KvaserPassiveChannel:
         if timeout_ms < 0:
             raise ValueError("timeout_ms cannot be negative")
 
+        if self._prefetched:
+            return self._prefetched.popleft()
+
+        first = self._read_one(timeout_ms)
+        if first is None:
+            return None
+        self._prefetched.append(first)
+
+        # After the first blocking read, drain every frame that CANlib already has
+        # queued. Subsequent calls are non-blocking and bounded, so the capture
+        # worker regains control even on a saturated bus.
+        for _ in range(self.prefetch_limit - 1):
+            frame = self._read_one(0)
+            if frame is None:
+                break
+            self._prefetched.append(frame)
+
+        return self._prefetched.popleft()
+
+    def _read_one(self, timeout_ms: int) -> CanFrame | None:
+        channel = self._channel
+        if channel is None:
+            raise RuntimeError("Kvaser channel is not open")
+
         api = _require_canlib()
         try:
-            frame = self._channel.read(timeout=timeout_ms)
+            frame = channel.read(timeout=timeout_ms)
         except api.CanNoMsg:
             return None
 
@@ -178,6 +222,7 @@ class KvaserPassiveChannel:
     def close(self) -> None:
         channel = self._channel
         self._channel = None
+        self._prefetched.clear()
         if channel is None:
             return
         try:
