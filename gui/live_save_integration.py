@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtWidgets import (
-    QFrame,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-)
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtWidgets import QCheckBox, QGroupBox, QMessageBox
 
 from app.capture_service import CaptureConfig
 from app.dbc import DbcDecoder
@@ -22,8 +17,29 @@ from .live_capture import LiveCaptureWidget
 _installed = False
 
 
+class _DbcLoadSignals(QObject):
+    ready = Signal(object)
+    failed = Signal(str)
+
+
+class _DbcLoadTask(QRunnable):
+    def __init__(self, paths: tuple[Path, ...]) -> None:
+        super().__init__()
+        self.paths = paths
+        self.signals = _DbcLoadSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            decoder = DbcDecoder(self.paths) if self.paths else None
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+            return
+        self.signals.ready.emit(decoder)
+
+
 def install_live_save_integration() -> None:
-    """Make disk persistence an explicit, one-capture opt-in action."""
+    """Make disk persistence explicit without slowing down capture startup."""
 
     global _installed
     if _installed:
@@ -39,23 +55,18 @@ def install_live_save_integration() -> None:
         self._current_capture_persistent = False
         self._save_reset_pending = False
         self._transient_finalized = False
+        self._dbc_load_generation = 0
+        self._dbc_loaded_paths: tuple[Path, ...] = ()
+        self._dbc_loading_paths: tuple[Path, ...] = ()
+        self._dbc_load_tasks: list[_DbcLoadTask] = []
 
-        self.save_session_button = QPushButton()
+        self.save_session_button = QCheckBox("Zapisz")
         self.save_session_button.setObjectName("armSessionSaveButton")
-        self.save_session_button.setCheckable(True)
         self.save_session_button.setChecked(False)
-        self.save_session_button.setMinimumHeight(38)
-        self.save_session_button.toggled.connect(lambda checked: _update_save_ui(self))
-
-        self.save_session_hint = QLabel()
-        self.save_session_hint.setWordWrap(True)
-
-        save_row = QFrame()
-        save_row.setObjectName("liveSaveRow")
-        save_layout = QHBoxLayout(save_row)
-        save_layout.setContentsMargins(7, 5, 7, 5)
-        save_layout.addWidget(self.save_session_button)
-        save_layout.addWidget(self.save_session_hint, 1)
+        self.save_session_button.setToolTip(
+            "Zaznacz przed Start, aby zapisać pełną sesję na dysku."
+        )
+        self.save_session_button.toggled.connect(lambda _checked: _update_save_ui(self))
 
         connection_group = next(
             (
@@ -66,11 +77,17 @@ def install_live_save_integration() -> None:
             None,
         )
         if connection_group is not None and connection_group.layout() is not None:
-            connection_group.layout().insertWidget(1, save_row)
+            session_item = connection_group.layout().itemAt(1)
+            session_layout = session_item.layout() if session_item is not None else None
+            if session_layout is not None:
+                session_layout.insertWidget(max(0, session_layout.count() - 2), self.save_session_button)
+            else:
+                connection_group.layout().addWidget(self.save_session_button)
         else:
-            self.layout().insertWidget(1, save_row)
+            self.layout().insertWidget(0, self.save_session_button)
 
         _update_save_ui(self)
+        _schedule_dbc_load(self, active_project_dbc_paths(self.project))
 
     def integrated_start_capture(self: LiveCaptureWidget) -> None:
         channel_number = self.channel_combo.currentData()
@@ -94,9 +111,12 @@ def install_live_save_integration() -> None:
             return
 
         dbc_paths = active_project_dbc_paths(self.project)
+        _schedule_dbc_load(self, dbc_paths)
+
         paths = None
         try:
-            self._dbc_decoder = DbcDecoder(dbc_paths) if dbc_paths else None
+            # Capture starts immediately. DBC construction is intentionally not on
+            # this GUI path and may finish shortly after the first frames arrive.
             paths = self._capture.start(
                 CaptureConfig(
                     channel_number=int(channel_number),
@@ -138,26 +158,16 @@ def install_live_save_integration() -> None:
         self.message_model.clear()
         self.marker_history.clear()
         self.pause_view.setChecked(False)
-        if paths is not None:
-            self.path_label.setText(f"Sesja zapisywana: {paths.session}")
-        else:
-            self.path_label.setText(
-                "Podgląd Live — zapis na dysk WYŁĄCZONY; dane istnieją tylko w buforze GUI"
-            )
+        self.path_label.setText(f"Zapis: {paths.session}" if paths is not None else "Live bez zapisu")
         self._install_marker_controls(active)
         self._set_capture_controls(True)
+
         if persist:
             assert paths is not None
-            self.output_message.emit(
-                f"Rozpoczęto rejestrację z zapisem: {paths.session} | "
-                f"aktywne DBC={len(dbc_paths)}"
-            )
+            self.output_message.emit(f"Start z zapisem: {paths.session}")
             self.project_changed.emit()
         else:
-            self.output_message.emit(
-                "Rozpoczęto podgląd Live bez zapisu na dysk | "
-                f"aktywne DBC={len(dbc_paths)}"
-            )
+            self.output_message.emit("Start Live bez zapisu")
         _update_save_ui(self)
 
     def integrated_set_capture_controls(self: LiveCaptureWidget, active: bool) -> None:
@@ -174,8 +184,8 @@ def install_live_save_integration() -> None:
         elif not self._transient_finalized:
             self._transient_finalized = True
             self.output_message.emit(
-                f"Podgląd Live zakończony bez zapisu | ramki={status.frame_count} | "
-                f"wiadomości={status.logical_message_count} | znaczniki={status.marker_count}"
+                f"Live bez zapisu zakończony | ramki={status.frame_count} | "
+                f"wiadomości={status.logical_message_count}"
             )
 
         if self._save_reset_pending:
@@ -190,47 +200,55 @@ def install_live_save_integration() -> None:
     LiveCaptureWidget._finalize_project_session = integrated_finalize_project_session
 
 
-def _update_save_ui(widget: LiveCaptureWidget) -> None:
-    button = widget.save_session_button
-    active = widget._capture.is_active
-    if active:
-        if widget._current_capture_persistent:
-            button.setText("Zapis sesji: AKTYWNY")
-            button.setStyleSheet(
-                "QPushButton { font-weight: 700; padding: 7px 14px; "
-                "border: 2px solid #2e9d52; }"
-            )
-            widget.save_session_hint.setText(
-                "Pełny strumień tej sesji jest zapisywany. Filtry zmieniają tylko widok."
-            )
-        else:
-            button.setText("Zapis sesji: WYŁĄCZONY")
-            button.setStyleSheet(
-                "QPushButton { font-weight: 700; padding: 7px 14px; "
-                "border: 2px solid #b45f06; }"
-            )
-            widget.save_session_hint.setText(
-                "Tryb podglądu: nie są tworzone pliki sesji, CSV ani markerów."
-            )
+def _schedule_dbc_load(widget: LiveCaptureWidget, paths: tuple[Path, ...]) -> None:
+    normalized = tuple(Path(path) for path in paths)
+    if normalized == widget._dbc_loaded_paths or normalized == widget._dbc_loading_paths:
+        return
+    widget._dbc_load_generation += 1
+    generation = widget._dbc_load_generation
+    widget._dbc_loading_paths = normalized
+
+    if not normalized:
+        widget._dbc_decoder = None
+        widget._dbc_loaded_paths = ()
+        widget._dbc_loading_paths = ()
         return
 
-    if button.isChecked():
-        button.setText("Zapisz sesję: UZBROJONY")
-        button.setStyleSheet(
-            "QPushButton { font-weight: 700; padding: 7px 14px; "
-            "border: 2px solid #2e9d52; }"
-        )
-        widget.save_session_hint.setText(
-            "Zapis jest uzbrojony dla następnego Start. Po zakończeniu zostanie automatycznie wyłączony."
-        )
-        widget.session_name.setEnabled(True)
-    else:
-        button.setText("Zapisz sesję: NIE")
-        button.setStyleSheet(
-            "QPushButton { font-weight: 700; padding: 7px 14px; "
-            "border: 2px solid #b45f06; }"
-        )
-        widget.save_session_hint.setText(
-            "Domyślnie Start uruchamia tylko Live View. Kliknij tutaj przed Start, aby utworzyć sesję na dysku."
-        )
-        widget.session_name.setEnabled(False)
+    task = _DbcLoadTask(normalized)
+    widget._dbc_load_tasks.append(task)
+
+    def ready(decoder: object) -> None:
+        if generation != widget._dbc_load_generation:
+            return
+        widget._dbc_decoder = decoder
+        widget._dbc_loaded_paths = normalized
+        widget._dbc_loading_paths = ()
+        widget.output_message.emit(f"Załadowano DBC w tle: {len(normalized)}")
+        _trim_dbc_tasks(widget)
+
+    def failed(error: str) -> None:
+        if generation != widget._dbc_load_generation:
+            return
+        widget._dbc_loading_paths = ()
+        widget.output_message.emit(f"Błąd ładowania DBC: {error}")
+        _trim_dbc_tasks(widget)
+
+    task.signals.ready.connect(ready)
+    task.signals.failed.connect(failed)
+    QThreadPool.globalInstance().start(task)
+
+
+def _trim_dbc_tasks(widget: LiveCaptureWidget) -> None:
+    widget._dbc_load_tasks = widget._dbc_load_tasks[-2:]
+
+
+def _update_save_ui(widget: LiveCaptureWidget) -> None:
+    checkbox = widget.save_session_button
+    active = widget._capture.is_active
+    checkbox.setText("Zapisz")
+    checkbox.setToolTip(
+        "Pełna sesja jest zapisywana na dysku."
+        if active and widget._current_capture_persistent
+        else "Zaznacz przed Start, aby zapisać pełną sesję na dysku."
+    )
+    widget.session_name.setEnabled(not active and checkbox.isChecked())
