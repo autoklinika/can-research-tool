@@ -34,7 +34,7 @@ def test_decodes_j1939_identifier_without_claiming_protocol() -> None:
     assert identifier.pgn == 0xEC00
 
 
-def test_reassembles_j1939_bam_and_keeps_raw_fallback() -> None:
+def test_reassembles_j1939_bam_and_classifies_single_frame_j1939() -> None:
     frames = [
         frame(0, 0, 0x18ECFF30, "20 0A 00 02 FF CA FE 00"),
         frame(1, 10, 0x18EBFF30, "01 01 02 03 04 05 06 07"),
@@ -47,19 +47,24 @@ def test_reassembles_j1939_bam_and_keeps_raw_fallback() -> None:
 
     assert len(decoded) == 2
 
-    j1939_message = next(item for item in decoded if item.protocol is ProtocolKind.J1939)
-    assert j1939_message.message.transport is TransportKind.J1939_BAM
-    assert j1939_message.message.pgn == 0xFECA
-    assert j1939_message.message.source_address == 0x30
-    assert j1939_message.message.destination_address == 0xFF
-    assert j1939_message.message.payload == bytes(range(1, 11))
-    assert j1939_message.message.complete is True
-    assert j1939_message.message.frame_count == 3
+    tp_message = next(
+        item for item in decoded if item.message.transport is TransportKind.J1939_BAM
+    )
+    assert tp_message.protocol is ProtocolKind.J1939
+    assert tp_message.message.pgn == 0xFECA
+    assert tp_message.message.source_address == 0x30
+    assert tp_message.message.destination_address == 0xFF
+    assert tp_message.message.payload == bytes(range(1, 11))
+    assert tp_message.message.complete is True
+    assert tp_message.message.frame_count == 3
 
-    unknown = next(item for item in decoded if item.protocol is ProtocolKind.UNKNOWN)
-    assert unknown.message.transport is TransportKind.RAW
-    assert unknown.message.arbitration_id == 0x18FEAE30
-    assert "j1939_identifier_candidate" in unknown.fields
+    single_frame = next(
+        item for item in decoded if item.message.transport is TransportKind.RAW
+    )
+    assert single_frame.protocol is ProtocolKind.J1939
+    assert single_frame.message.arbitration_id == 0x18FEAE30
+    assert single_frame.fields["classification_basis"] == "29-bit J1939 identifier layout"
+    assert single_frame.fields["pgn"] == 0xFEAE
 
 
 def test_reassembles_29bit_isotp_and_decodes_uds() -> None:
