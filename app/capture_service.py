@@ -53,6 +53,7 @@ class CaptureConfig:
     mode: KvaserReceiveMode = KvaserReceiveMode.BENCH
     session_name: str = ""
     output_dir: Path = Path("sessions")
+    persist_to_disk: bool = True
     duration_s: float | None = None
     live_buffer_capacity: int = 20_000
     live_message_capacity: int = 5_000
@@ -104,6 +105,7 @@ class CaptureStatus:
     adapter_name: str
     error: str
     paths: CapturePaths | None
+    persist_to_disk: bool
     live_capacity: int
     live_retained: int
     live_dropped_from_view: int
@@ -114,7 +116,7 @@ class CaptureStatus:
 
 
 class CaptureService:
-    """Background Kvaser capture with bounded GUI state and precise markers."""
+    """Background Kvaser capture with bounded GUI state and optional persistence."""
 
     def __init__(
         self,
@@ -142,23 +144,26 @@ class CaptureService:
         self._adapter_name = ""
         self._error = ""
         self._paths: CapturePaths | None = None
+        self._persist_to_disk = False
         self._last_marker: CaptureMarker | None = None
 
-    def start(self, config: CaptureConfig) -> CapturePaths:
+    def start(self, config: CaptureConfig) -> CapturePaths | None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeError("capture is already running")
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             requested_name = config.session_name.strip() or f"capture_{timestamp}"
-            safe_name = _safe_filename(requested_name)
-            output_dir = Path(config.output_dir)
-            paths = CapturePaths(
-                session=output_dir / f"{safe_name}.crt.jsonl",
-                raw_frames_csv=output_dir / f"{safe_name}.frames.csv",
-                logical_messages_csv=output_dir / f"{safe_name}.messages.csv",
-                markers=output_dir / f"{safe_name}.markers.jsonl",
-            )
+            paths: CapturePaths | None = None
+            if config.persist_to_disk:
+                safe_name = _safe_filename(requested_name)
+                output_dir = Path(config.output_dir)
+                paths = CapturePaths(
+                    session=output_dir / f"{safe_name}.crt.jsonl",
+                    raw_frames_csv=output_dir / f"{safe_name}.frames.csv",
+                    logical_messages_csv=output_dir / f"{safe_name}.messages.csv",
+                    markers=output_dir / f"{safe_name}.markers.jsonl",
+                )
 
             self._stop_event = Event()
             self._live_buffer = LiveFrameBuffer(config.live_buffer_capacity)
@@ -176,6 +181,7 @@ class CaptureService:
             self._adapter_name = ""
             self._error = ""
             self._paths = paths
+            self._persist_to_disk = bool(config.persist_to_disk)
             self._last_marker = None
             self._thread = Thread(
                 target=self._run,
@@ -206,7 +212,7 @@ class CaptureService:
         source: str = "keyboard",
         note: str = "",
     ) -> CaptureMarker:
-        """Timestamp a marker immediately and queue its disk write."""
+        """Timestamp a marker immediately and queue its optional disk write."""
 
         with self._lock:
             if self._state is not CaptureState.RUNNING or self._capture_origin_ns is None:
@@ -245,6 +251,7 @@ class CaptureService:
                 adapter_name=self._adapter_name,
                 error=self._error,
                 paths=self._paths,
+                persist_to_disk=self._persist_to_disk,
                 live_capacity=live.capacity,
                 live_retained=(
                     0
@@ -283,7 +290,7 @@ class CaptureService:
         self,
         config: CaptureConfig,
         requested_name: str,
-        paths: CapturePaths,
+        paths: CapturePaths | None,
     ) -> None:
         session_writer: SessionStreamWriter | None = None
         frame_writer: FrameCsvStreamWriter | None = None
@@ -310,43 +317,46 @@ class CaptureService:
                     f"Kvaser channel {config.channel_number} was not found; available: {available}"
                 )
 
-            session = CaptureSession(
-                name=requested_name,
-                source="kvaser-live-stream",
-                bitrate=config.bitrate,
-                channel=config.channel_number,
-                adapter=channel_info.name,
-                metadata={
-                    "receive_mode": KvaserReceiveMode(config.mode).value,
-                    "serial_number": channel_info.serial_number,
-                    "product_number": channel_info.product_number,
-                    "streaming_capture": True,
-                    "live_buffer_capacity": config.live_buffer_capacity,
-                    "live_message_capacity": config.live_message_capacity,
-                    "requested_duration_s": config.duration_s,
-                    "marker_presets": [preset.to_dict() for preset in config.marker_presets],
-                    "marker_stream": paths.markers.name,
-                },
-            )
-            session_writer = SessionStreamWriter(
-                session,
-                paths.session,
-                flush_every=config.writer_flush_every,
-            )
-            frame_writer = FrameCsvStreamWriter(
-                paths.raw_frames_csv,
-                flush_every=config.writer_flush_every,
-            )
-            message_writer = MessageCsvStreamWriter(paths.logical_messages_csv)
-            marker_writer = MarkerStreamWriter(
-                paths.markers,
-                presets=config.marker_presets,
-                flush_every=1,
-            )
-            session_writer.open()
-            frame_writer.open()
-            message_writer.open()
-            marker_writer.open()
+            if paths is not None:
+                session = CaptureSession(
+                    name=requested_name,
+                    source="kvaser-live-stream",
+                    bitrate=config.bitrate,
+                    channel=config.channel_number,
+                    adapter=channel_info.name,
+                    metadata={
+                        "receive_mode": KvaserReceiveMode(config.mode).value,
+                        "serial_number": channel_info.serial_number,
+                        "product_number": channel_info.product_number,
+                        "streaming_capture": True,
+                        "live_buffer_capacity": config.live_buffer_capacity,
+                        "live_message_capacity": config.live_message_capacity,
+                        "requested_duration_s": config.duration_s,
+                        "marker_presets": [
+                            preset.to_dict() for preset in config.marker_presets
+                        ],
+                        "marker_stream": paths.markers.name,
+                    },
+                )
+                session_writer = SessionStreamWriter(
+                    session,
+                    paths.session,
+                    flush_every=config.writer_flush_every,
+                )
+                frame_writer = FrameCsvStreamWriter(
+                    paths.raw_frames_csv,
+                    flush_every=config.writer_flush_every,
+                )
+                message_writer = MessageCsvStreamWriter(paths.logical_messages_csv)
+                marker_writer = MarkerStreamWriter(
+                    paths.markers,
+                    presets=config.marker_presets,
+                    flush_every=1,
+                )
+                session_writer.open()
+                frame_writer.open()
+                message_writer.open()
+                marker_writer.open()
 
             pipeline = StreamingTransportPipeline()
             protocols = ProtocolRegistry()
@@ -380,8 +390,10 @@ class CaptureService:
                             frame,
                             timestamp_ns=max(0, frame.timestamp_ns - capture_origin_ns),
                         )
-                        session_writer.append(normalized)
-                        frame_writer.append(normalized)
+                        if session_writer is not None:
+                            session_writer.append(normalized)
+                        if frame_writer is not None:
+                            frame_writer.append(normalized)
                         pending_live.append(normalized)
                         local_frame_count += 1
                         unique_ids.add(
@@ -390,7 +402,8 @@ class CaptureService:
 
                         for message in pipeline.feed(normalized):
                             decoded = protocols.decode(message)
-                            message_writer.append(decoded)
+                            if message_writer is not None:
+                                message_writer.append(decoded)
                             pending_messages.append(
                                 LogicalMessageRecord.from_decoded(decoded)
                             )
@@ -419,7 +432,8 @@ class CaptureService:
             local_marker_count += self._drain_markers(marker_writer)
             for message in pipeline.flush():
                 decoded = protocols.decode(message)
-                message_writer.append(decoded)
+                if message_writer is not None:
+                    message_writer.append(decoded)
                 pending_messages.append(LogicalMessageRecord.from_decoded(decoded))
                 local_message_count += 1
                 if not message.complete:
@@ -442,14 +456,18 @@ class CaptureService:
                 "unique_can_ids": len(unique_ids),
                 "clean_close": True,
             }
-            session_writer.close(final_metadata)
-            session_writer = None
-            frame_writer.close()
-            frame_writer = None
-            message_writer.close()
-            message_writer = None
-            marker_writer.close()
-            marker_writer = None
+            if session_writer is not None:
+                session_writer.close(final_metadata)
+                session_writer = None
+            if frame_writer is not None:
+                frame_writer.close()
+                frame_writer = None
+            if message_writer is not None:
+                message_writer.close()
+                message_writer = None
+            if marker_writer is not None:
+                marker_writer.close()
+                marker_writer = None
 
             self._publish_progress(
                 local_frame_count,
@@ -469,10 +487,10 @@ class CaptureService:
             if pending_messages:
                 self._live_messages.append_many(pending_messages)
             elapsed = monotonic() - started
-            if marker_writer is not None:
-                try:
-                    local_marker_count += self._drain_markers(marker_writer)
-                finally:
+            try:
+                local_marker_count += self._drain_markers(marker_writer)
+            finally:
+                if marker_writer is not None:
                     marker_writer.close()
             if session_writer is not None:
                 session_writer.close(
@@ -505,14 +523,15 @@ class CaptureService:
                 self._started_monotonic = None
                 self._capture_origin_ns = None
 
-    def _drain_markers(self, writer: MarkerStreamWriter) -> int:
+    def _drain_markers(self, writer: MarkerStreamWriter | None) -> int:
         count = 0
         while True:
             try:
                 marker = self._marker_queue.get_nowait()
             except Empty:
                 break
-            writer.append(marker)
+            if writer is not None:
+                writer.append(marker)
             count += 1
         return count
 
