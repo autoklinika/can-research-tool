@@ -62,8 +62,12 @@ jobs:
 
           from app.markers import MarkerPreset
           from app.project_dbc import import_project_dbc
+          from gui.filter_integration import install_filter_integration
+          from gui.live_filter_integration import install_live_filter_integration
+          from gui.live_save_integration import install_live_save_integration
           from gui.main_window import MainWindow
           from gui.marker_manager import MarkerManagerDialog
+          from gui.session_filter_integration import install_session_filter_integration
 
 
           DBC_TEXT = '''VERSION ""
@@ -130,6 +134,11 @@ jobs:
                   return "bench"
 
 
+          install_filter_integration()
+          install_live_filter_integration()
+          install_live_save_integration()
+          install_session_filter_integration()
+
           app = QApplication([])
           with TemporaryDirectory() as temporary:
               PROJECT_ROOT = Path(temporary) / "project"
@@ -141,6 +150,7 @@ jobs:
               assert window.project.root == PROJECT_ROOT.resolve()
               assert (PROJECT_ROOT / "project.crt.json").is_file()
               assert (PROJECT_ROOT / ".crt" / "project.sqlite").is_file()
+              assert hasattr(window, "filters_action")
 
               window.project.add_study_area("EGR")
               window.project.save_marker_presets(
@@ -152,6 +162,15 @@ jobs:
               live._update_marker_tile()
               assert "1 aktywnych / 1" in live.marker_setup_button.text()
               assert live.message_table.model() is live.message_model
+              assert live.frame_table.model() is live.live_filter_proxy
+              assert live.save_session_button.isChecked() is False
+              assert "Zapisz sesję" in live.save_session_button.text()
+              assert live.session_name.isEnabled() is False
+
+              live.save_session_button.click()
+              assert live.save_session_button.isChecked() is True
+              assert "UZBROJONY" in live.save_session_button.text()
+              assert live.session_name.isEnabled() is True
 
               marker_dialog = MarkerManagerDialog(window.project)
               assert marker_dialog.model.rowCount() == 1
