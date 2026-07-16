@@ -30,9 +30,7 @@ def install_session_filter_integration() -> None:
         self._stored_filter_database = _find_project_database(Path(path))
         self._stored_available_filter_set = _load_filter_set(self._stored_filter_database)
         self._stored_available_filter_signature = self._stored_available_filter_set.signature
-        # Saved sessions always open as raw, unfiltered data. Applying project filters
-        # requires an explicit per-tab opt-in by the user.
-        self._stored_filter_set = ActiveFilterSet(())
+        self._stored_filter_set = ActiveFilterSet((), scope="stored_session")
         self._stored_filter_page: FilteredSessionPage | None = None
         self._stored_page_start = 0
 
@@ -141,16 +139,19 @@ def _install_page_controls(widget: SessionViewWidget) -> None:
 
 def _load_filter_set(database_path: Path | None) -> ActiveFilterSet:
     if database_path is None:
-        return ActiveFilterSet(())
-    return ActiveFilterSet(ProjectFilterRepository(database_path).list_presets())
+        return ActiveFilterSet((), scope="stored_session")
+    return ActiveFilterSet(
+        ProjectFilterRepository(database_path).list_presets(),
+        scope="stored_session",
+    )
 
 
 def _set_filter_application(widget: SessionViewWidget, checked: bool) -> None:
-    # Starting a new load increments the generation. Older workers therefore cannot
-    # overwrite the new mode after the checkbox changes.
     widget._stored_page_start = 0
     widget._stored_filter_set = (
-        widget._stored_available_filter_set if checked else ActiveFilterSet(())
+        widget._stored_available_filter_set
+        if checked
+        else ActiveFilterSet((), scope="stored_session")
     )
     widget._start_load()
 
