@@ -21,11 +21,7 @@ class FakeChannel:
         self.driver = None
         self.bus_on = False
         self.closed = False
-        self.accept_calls: list[tuple[int, int]] = []
         self.iocontrol = FakeIoControl()
-
-    def canAccept(self, envelope: int, flag: int) -> None:  # noqa: N802
-        self.accept_calls.append((envelope, flag))
 
     def setBusOutputControl(self, driver) -> None:  # noqa: N802
         self.driver = driver
@@ -63,7 +59,6 @@ class FakeCanNoMsg(Exception):
 class FakeApi:
     ChannelCap = SimpleNamespace(SILENT_MODE=1)
     Driver = SimpleNamespace(SILENT=99, NORMAL=44)
-    AcceptFilterFlag = SimpleNamespace(NULL_MASK=0)
     Bitrate = SimpleNamespace(
         BITRATE_10K=10,
         BITRATE_50K=50,
@@ -105,7 +100,6 @@ def test_bench_mode_acknowledges_frames_but_has_no_tx_api(monkeypatch) -> None:
 
     assert api.opened_with == (0, api.Bitrate.BITRATE_250K)
     assert api.channel.driver == api.Driver.NORMAL
-    assert api.channel.accept_calls == [(0, api.AcceptFilterFlag.NULL_MASK)]
     assert api.channel.iocontrol.local_txecho is False
     assert api.channel.iocontrol.flushed is True
     assert api.channel.bus_on is True
@@ -135,7 +129,6 @@ def test_listen_only_mode_forces_silent_driver(monkeypatch) -> None:
     listener.open()
 
     assert api.channel.driver == api.Driver.SILENT
-    assert api.channel.accept_calls == [(0, api.AcceptFilterFlag.NULL_MASK)]
     assert api.channel.iocontrol.local_txecho is False
     assert not hasattr(listener, "write")
     assert not hasattr(listener, "send")
