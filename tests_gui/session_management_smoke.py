@@ -101,7 +101,7 @@ def _run_phase(phase: str) -> None:
             imported_details = _format_session_inspector(project, imported_record)
             assert "Rodzaj: Importowana" in imported_details
             assert str(imported_path.resolve()) in imported_details
-            assert "pliki pochodne w projekcie" in imported_details
+            assert "plikami pochodnymi w projekcie" in imported_details
             assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_details
             assert _menu_labels(window, imported_path) == [
                 "Idź do pliku",
