@@ -10,10 +10,15 @@ from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QApplication
 
+from app.models import CaptureSession
 from app.project import CrtProject
+from app.session_stream import SessionStreamWriter
 from gui.main_window import MainWindow
 from gui.project_explorer import ROLE_NODE_TYPE, ROLE_NODE_VALUE
-from gui.session_management_integration import install_session_management_integration
+from gui.session_management_integration import (
+    _format_session_inspector,
+    install_session_management_integration,
+)
 
 
 def _find_session_item(item: QStandardItem, path: Path) -> QStandardItem | None:
@@ -50,6 +55,12 @@ def _menu_labels(window: MainWindow, path: Path) -> list[str]:
     return [action.text() for action in menu.actions() if not action.isSeparator()]
 
 
+def _write_empty_session(path: Path, *, name: str, source: str) -> None:
+    writer = SessionStreamWriter(CaptureSession(name=name, source=source), path)
+    writer.open()
+    writer.close({"clean_close": True, "frame_count": 0})
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("Autoklinika-tests")
@@ -60,8 +71,7 @@ def main() -> int:
         project = CrtProject.create(Path(directory) / "project", name="Session smoke")
 
         live_path = project.live_sessions_dir / "live_case.crt.jsonl"
-        live_path.parent.mkdir(parents=True, exist_ok=True)
-        live_path.write_text("live", encoding="utf-8")
+        _write_empty_session(live_path, name="Live case", source="kvaser-live-stream")
         project.register_session(
             live_path,
             name="Live case",
@@ -70,8 +80,11 @@ def main() -> int:
         )
 
         imported_path = project.imported_sessions_dir / "imported_case.crt.jsonl"
-        imported_path.parent.mkdir(parents=True, exist_ok=True)
-        imported_path.write_text("imported", encoding="utf-8")
+        _write_empty_session(
+            imported_path,
+            name="Imported case",
+            source="imported-crt-session",
+        )
         project.register_session(
             imported_path,
             name="Imported case",
@@ -105,8 +118,12 @@ def main() -> int:
         imported_inspector = window.inspector.toPlainText()
         assert "Rodzaj: Importowana" in imported_inspector
         assert str(imported_path.resolve()) in imported_inspector
-        assert "pliki pochodne w projekcie" in imported_inspector
-        assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_inspector
+
+        imported_record = project.session_by_path(imported_path)
+        assert imported_record is not None
+        imported_details = _format_session_inspector(project, imported_record)
+        assert "pliki pochodne w projekcie" in imported_details
+        assert "oryginalny plik poza projektem pozostaje bez zmian" in imported_details
         assert _menu_labels(window, imported_path) == [
             "Idź do pliku",
             "Usuń z projektu",
