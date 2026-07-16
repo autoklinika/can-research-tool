@@ -6,7 +6,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QItemSelectionModel
+from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QApplication
 
@@ -43,6 +43,13 @@ def _select(window: MainWindow, item: QStandardItem) -> None:
     QApplication.processEvents()
 
 
+def _menu_labels(window: MainWindow, path: Path) -> list[str]:
+    session = window.project.session_by_path(path) if window.project is not None else None
+    assert session is not None
+    menu = window._build_session_context_menu(session)
+    return [action.text() for action in menu.actions() if not action.isSeparator()]
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("Autoklinika-tests")
@@ -74,6 +81,13 @@ def main() -> int:
 
         window = MainWindow()
         window._set_project(project)
+        assert (
+            window.explorer.tree.contextMenuPolicy()
+            == Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        assert not hasattr(window, "session_reveal_button")
+        assert not hasattr(window, "session_remove_button")
+
         root = window.explorer.model.item(0, 0)
         assert root is not None
 
@@ -83,8 +97,7 @@ def main() -> int:
         live_inspector = window.inspector.toPlainText()
         assert "Data i godzina zapisu pliku:" in live_inspector
         assert str(live_path.resolve()) in live_inspector
-        assert window.session_reveal_button.isEnabled()
-        assert window.session_remove_button.text() == "Usuń log"
+        assert _menu_labels(window, live_path) == ["Idź do pliku", "Usuń log"]
 
         imported_item = _find_session_item(root, imported_path)
         assert imported_item is not None
@@ -93,7 +106,10 @@ def main() -> int:
         assert "Rodzaj: Importowana" in imported_inspector
         assert str(imported_path.resolve()) in imported_inspector
         assert "tylko z listy" in imported_inspector
-        assert window.session_remove_button.text() == "Usuń z listy"
+        assert _menu_labels(window, imported_path) == [
+            "Idź do pliku",
+            "Usuń z listy",
+        ]
 
         window.close()
 
