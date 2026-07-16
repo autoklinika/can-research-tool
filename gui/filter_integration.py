@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMenu, QMessageBox
 
 from .filter_manager import FilterManagerWidget
 from .main_window import MainWindow
@@ -12,12 +12,7 @@ _original_init = MainWindow.__init__
 
 
 def install_filter_integration() -> None:
-    """Attach the filter workspace to the existing CRT MainWindow.
-
-    Kept in a small adapter so the feature can be developed without rewriting the
-    mature main-window module. Once the activity registry becomes data-driven this
-    adapter can be replaced by a normal workspace registration.
-    """
+    """Attach the filter workspace to the existing CRT MainWindow."""
 
     global _installed
     if _installed:
@@ -29,19 +24,18 @@ def install_filter_integration() -> None:
         self.filters_action = QAction("Filtry", self)
         self.filters_action.setObjectName("globalFiltersAction")
         self.filters_action.triggered.connect(lambda: _open_filters(self))
+
         actions = self.activity_bar.actions()
         insert_before = self.settings_action if self.settings_action in actions else None
         if insert_before is None:
             self.activity_bar.addAction(self.filters_action)
         else:
             self.activity_bar.insertAction(insert_before, self.filters_action)
+
         view_menu = next(
-            (menu for menu in self.menuBar().findChildren(type(self.menuBar().addMenu("__probe__"))) if menu.title() == "Widok"),
+            (menu for menu in self.menuBar().findChildren(QMenu) if menu.title() == "Widok"),
             None,
         )
-        probe = next((menu for menu in self.menuBar().actions() if menu.text() == "__probe__"), None)
-        if probe is not None:
-            self.menuBar().removeAction(probe)
         if view_menu is not None:
             view_menu.addAction(self.filters_action)
 
