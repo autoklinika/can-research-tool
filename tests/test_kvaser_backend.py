@@ -1,4 +1,5 @@
 from collections import deque
+from time import monotonic, sleep
 from types import SimpleNamespace
 
 import kvaser.backend as backend
@@ -15,15 +16,12 @@ class FakeCanNoMsg(Exception):
 class FakeIoControl:
     def __init__(self) -> None:
         self.local_txecho = True
-        self.flushed = False
-
-    def flush_rx_buffer(self) -> None:
-        self.flushed = True
 
 
 class FakeChannel:
     def __init__(self, frames=None) -> None:
         self.driver = None
+        self.bus_params = None
         self.bus_on = False
         self.closed = False
         self.iocontrol = FakeIoControl()
@@ -32,6 +30,9 @@ class FakeChannel:
 
     def setBusOutputControl(self, driver) -> None:  # noqa: N802
         self.driver = driver
+
+    def setBusParams(self, bitrate) -> None:  # noqa: N802
+        self.bus_params = bitrate
 
     def busOn(self) -> None:  # noqa: N802
         self.bus_on = True
@@ -44,9 +45,10 @@ class FakeChannel:
 
     def read(self, timeout: int):
         self.read_calls.append(timeout)
-        if not self.frames:
-            raise FakeCanNoMsg
-        return self.frames.popleft()
+        if self.frames:
+            return self.frames.popleft()
+        sleep(max(0.0005, timeout / 1000.0))
+        raise FakeCanNoMsg
 
 
 class FakeChannelData:
@@ -86,48 +88,60 @@ class FakeApi:
         assert number == 0
         return FakeChannelData()
 
-    def openChannel(self, number: int, *, bitrate):  # noqa: N802
-        self.opened_with = (number, bitrate)
+    def openChannel(self, number: int):  # noqa: N802
+        self.opened_with = number
         return self.channel
 
 
 def _raw_frame(can_id: int, data: str, timestamp: int):
+    payload = bytes.fromhex(data)
     return SimpleNamespace(
         id=can_id,
-        data=bytes.fromhex(data),
+        data=payload,
+        dlc=len(payload),
         flags=FakeFlags(4),
         timestamp=timestamp,
     )
 
 
-def test_bench_mode_acknowledges_frames_but_has_no_tx_api(monkeypatch) -> None:
+def _wait_until(predicate, timeout_s: float = 0.5) -> bool:
+    deadline = monotonic() + timeout_s
+    while monotonic() < deadline:
+        if predicate():
+            return True
+        sleep(0.001)
+    return bool(predicate())
+
+
+def test_bench_mode_matches_known_good_channel_setup(monkeypatch) -> None:
     api = FakeApi()
     monkeypatch.setattr(backend, "canlib", api)
 
     listener = backend.KvaserPassiveChannel(channel_number=0, bitrate=250_000)
     listener.open()
 
-    assert api.opened_with == (0, api.Bitrate.BITRATE_250K)
+    assert api.opened_with == 0
     assert api.channel.driver == api.Driver.NORMAL
+    assert api.channel.bus_params == api.Bitrate.BITRATE_250K
     assert api.channel.iocontrol.local_txecho is False
-    assert api.channel.iocontrol.flushed is True
     assert api.channel.bus_on is True
     assert not hasattr(listener, "write")
     assert not hasattr(listener, "send")
 
-    frame = listener.read(timeout_ms=25)
+    frame = listener.read(timeout_ms=100)
     assert frame is not None
     assert frame.arbitration_id == 0x18FF0011
     assert frame.is_extended_id is True
     assert frame.source_timestamp == 1234
-    assert api.channel.read_calls == [25, 0]
+    assert api.channel.read_calls
+    assert set(api.channel.read_calls) == {1}
 
     listener.close()
     assert api.channel.bus_on is False
     assert api.channel.closed is True
 
 
-def test_read_prefetches_queued_frames_before_processing(monkeypatch) -> None:
+def test_reader_thread_drains_canlib_before_processing(monkeypatch) -> None:
     api = FakeApi(
         [
             _raw_frame(0x18FF0001, "01", 100),
@@ -137,47 +151,40 @@ def test_read_prefetches_queued_frames_before_processing(monkeypatch) -> None:
     )
     monkeypatch.setattr(backend, "canlib", api)
 
-    listener = backend.KvaserPassiveChannel(
-        channel_number=0,
-        bitrate=250_000,
-        prefetch_limit=16,
-    )
+    listener = backend.KvaserPassiveChannel(channel_number=0, bitrate=250_000)
     listener.open()
 
-    first = listener.read(timeout_ms=25)
-    assert first is not None
-    assert first.arbitration_id == 0x18FF0001
-    assert listener.prefetched_count == 2
-    assert api.channel.read_calls == [25, 0, 0, 0]
+    assert _wait_until(lambda: listener.prefetched_count == 3)
+    assert api.channel.frames == deque()
+    assert set(api.channel.read_calls) == {1}
 
-    second = listener.read(timeout_ms=25)
-    third = listener.read(timeout_ms=25)
-    assert second is not None and second.arbitration_id == 0x18FF0002
-    assert third is not None and third.arbitration_id == 0x18FF0003
-    assert [first.sequence, second.sequence, third.sequence] == [0, 1, 2]
-    assert api.channel.read_calls == [25, 0, 0, 0]
+    frames = [listener.read(timeout_ms=50) for _ in range(3)]
+    assert [frame.arbitration_id for frame in frames if frame is not None] == [
+        0x18FF0001,
+        0x18FF0002,
+        0x18FF0003,
+    ]
+    assert [frame.sequence for frame in frames if frame is not None] == [0, 1, 2]
+
+    listener.close()
 
 
-def test_prefetch_limit_is_bounded(monkeypatch) -> None:
-    api = FakeApi(
-        [
-            _raw_frame(0x100 + index, f"{index:02X}", index)
-            for index in range(5)
-        ]
-    )
+def test_reader_continues_while_consumer_is_idle(monkeypatch) -> None:
+    source_frames = [
+        _raw_frame(0x100 + index, f"{index:02X}", index)
+        for index in range(64)
+    ]
+    api = FakeApi(source_frames)
     monkeypatch.setattr(backend, "canlib", api)
 
-    listener = backend.KvaserPassiveChannel(
-        channel_number=0,
-        bitrate=250_000,
-        prefetch_limit=3,
-    )
+    listener = backend.KvaserPassiveChannel(channel_number=0, bitrate=500_000)
     listener.open()
 
-    first = listener.read(timeout_ms=10)
-    assert first is not None
-    assert listener.prefetched_count == 2
-    assert api.channel.read_calls == [10, 0, 0]
+    assert _wait_until(lambda: listener.prefetched_count == len(source_frames))
+    assert not api.channel.frames
+    assert api.channel.bus_params == api.Bitrate.BITRATE_500K
+
+    listener.close()
 
 
 def test_listen_only_mode_forces_silent_driver(monkeypatch) -> None:
@@ -192,6 +199,9 @@ def test_listen_only_mode_forces_silent_driver(monkeypatch) -> None:
     listener.open()
 
     assert api.channel.driver == api.Driver.SILENT
+    assert api.channel.bus_params == api.Bitrate.BITRATE_250K
     assert api.channel.iocontrol.local_txecho is False
     assert not hasattr(listener, "write")
     assert not hasattr(listener, "send")
+
+    listener.close()
