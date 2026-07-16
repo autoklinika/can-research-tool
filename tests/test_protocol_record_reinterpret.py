@@ -20,7 +20,11 @@ def test_persisted_uds_record_is_reinterpreted_with_current_nrc_catalog() -> Non
         complete=True,
         frame_sequences=(10,),
         payload=bytes.fromhex("7F 27 35"),
-        fields={"legacy": True},
+        fields={
+            "legacy": True,
+            "negative_response_name": "stale-name",
+            "addressing": "normal-fixed-29bit",
+        },
     )
 
     current = reinterpret_raw_record(
@@ -34,9 +38,11 @@ def test_persisted_uds_record_is_reinterpreted_with_current_nrc_catalog() -> Non
     assert current.fields is not None
     assert current.fields["negative_response_name"] == "invalidKey"
     assert current.fields["requested_service_name"] == "SecurityAccess"
+    assert current.fields["addressing"] == "normal-fixed-29bit"
+    assert "legacy" not in current.fields
 
 
-def test_persisted_raw_extended_record_is_reinterpreted_as_j1939() -> None:
+def test_persisted_raw_extended_record_remains_unknown_with_candidate_metadata() -> None:
     historical = LogicalMessageRecord(
         sequence=8,
         first_timestamp_ns=3_000,
@@ -52,7 +58,7 @@ def test_persisted_raw_extended_record_is_reinterpreted_as_j1939() -> None:
         complete=True,
         frame_sequences=(11,),
         payload=bytes.fromhex("00 EE 00 FF FF FF FF FF"),
-        fields={},
+        fields={"old_protocol_field": "must disappear"},
     )
 
     current = reinterpret_raw_record(
@@ -61,6 +67,8 @@ def test_persisted_raw_extended_record_is_reinterpreted_as_j1939() -> None:
         dbc_decoder=None,
     )
 
-    assert current.protocol == "j1939"
+    assert current.protocol == "unknown"
     assert current.fields is not None
-    assert current.fields["pgn_name"] == "Request"
+    candidate = current.fields["j1939_identifier_candidate"]
+    assert candidate["pgn_name"] == "Request"
+    assert "old_protocol_field" not in current.fields
