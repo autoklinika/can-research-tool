@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, QTimer
-from PySide6.QtWidgets import QLabel
 
 from app.filters import CanFrameRecord, ProjectFilterRepository
 from app.live_filters import ActiveFilterSet
@@ -16,7 +15,7 @@ _original_frame_selected = LiveCaptureWidget._frame_selected
 
 
 class LiveFrameFilterProxy(QSortFilterProxyModel):
-    """Filters only the Live Capture table; the source model retains every frame."""
+    """Filter only the Live table; the source model retains the complete GUI buffer."""
 
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
@@ -69,18 +68,10 @@ def install_live_filter_integration() -> None:
         self.frame_table.setModel(self.live_filter_proxy)
         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
 
-        self.live_filter_label = QLabel()
-        self.live_filter_label.setObjectName("liveFilterStatus")
-        self.live_filter_label.setStyleSheet(
-            "QLabel { padding: 5px 9px; border: 1px solid palette(mid); font-weight: 600; }"
-        )
-        self.layout().insertWidget(1, self.live_filter_label)
-
+        # Counters are sufficient. Do not add another large status banner to Live.
         self._live_filter_reload_timer = QTimer(self)
-        self._live_filter_reload_timer.setInterval(500)
-        self._live_filter_reload_timer.timeout.connect(
-            lambda: _reload_and_update(self)
-        )
+        self._live_filter_reload_timer.setInterval(150)
+        self._live_filter_reload_timer.timeout.connect(lambda: _reload_and_update(self))
         self._live_filter_reload_timer.start()
         _reload_and_update(self)
 
@@ -137,31 +128,6 @@ def install_live_filter_integration() -> None:
 def _reload_and_update(widget: LiveCaptureWidget) -> None:
     proxy = widget.live_filter_proxy
     proxy.reload_project_filters()
-    count = proxy.filter_set.active_count
-    save_text = _save_status_text(widget)
-    if count:
-        invalid = len(proxy.filter_set.validation_issues)
-        suffix = f" | błędne: {invalid}" if invalid else ""
-        widget.live_filter_label.setText(
-            f"Filtr widoku aktywny: {count}{suffix} | {save_text}"
-        )
-    else:
-        widget.live_filter_label.setText(
-            f"Filtr widoku: wyłączony | {save_text}"
-        )
     widget.visible_label.setText(
         f"Widoczne: {proxy.rowCount():,} / bufor {widget.frame_model.frame_count:,}".replace(",", " ")
     )
-
-
-def _save_status_text(widget: LiveCaptureWidget) -> str:
-    if widget._capture.is_active:
-        return (
-            "Zapis: wszystkie ramki"
-            if widget._capture.status().persist_to_disk
-            else "Zapis: WYŁĄCZONY"
-        )
-    button = getattr(widget, "save_session_button", None)
-    if button is not None and button.isChecked():
-        return "Zapis następnej sesji: UZBROJONY"
-    return "Zapis następnej sesji: wyłączony"
