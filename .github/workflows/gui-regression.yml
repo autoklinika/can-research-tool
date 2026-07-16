@@ -24,6 +24,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/dbc_activation_smoke.py
+      - name: Verify CAN session inspector and actions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_management_smoke.py
       - name: Verify stored-session filters are explicit opt-in
         env:
           QT_QPA_PLATFORM: offscreen
