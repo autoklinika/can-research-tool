@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .project import CrtProject, SessionRecord
+from .session_stream import read_session_header
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,11 +16,16 @@ class SessionRemovalResult:
 
 
 def session_artifact_paths(project: CrtProject, session: SessionRecord) -> tuple[Path, ...]:
-    """Return the files owned by one Live Capture session.
+    """Return every project-owned file associated with one CAN session.
 
-    A live session is stored as a primary ``*.crt.jsonl`` stream plus optional
-    raw-frame, logical-message and marker sidecars. The paths are derived from
-    the indexed primary path and are always constrained to the project root.
+    Both Live and imported sessions own a primary ``*.crt.jsonl`` stream plus
+    optional raw-frame, logical-message, marker and sparse-index sidecars. CSV
+    imports additionally own the copy placed in ``sessions/imported/source``;
+    its project-relative path is stored in the CRT session header.
+
+    Every returned path is constrained to the project root. An external source
+    path can therefore never be deleted, even if a malformed or future session
+    header happens to contain one.
     """
 
     primary = project.absolute_path(session.relative_path)
@@ -29,12 +35,25 @@ def session_artifact_paths(project: CrtProject, session: SessionRecord) -> tuple
     else:
         base = primary.stem
 
-    candidates = (
+    candidates: list[Path] = [
         primary,
         primary.with_name(f"{base}.frames.csv"),
         primary.with_name(f"{base}.messages.csv"),
         primary.with_name(f"{base}.markers.jsonl"),
-    )
+        primary.with_suffix(primary.suffix + ".idx.json"),
+    ]
+
+    if session.source.startswith("imported") and primary.is_file():
+        try:
+            header = read_session_header(primary)
+            original_file = header.metadata.get("original_file")
+            if isinstance(original_file, str) and original_file.strip():
+                candidates.append(project.absolute_path(original_file))
+        except (OSError, ValueError, KeyError, TypeError):
+            # The indexed session and its standard sidecars can still be removed
+            # even when an old or damaged header cannot expose the imported copy.
+            pass
+
     unique: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
@@ -52,18 +71,16 @@ def remove_session(
     *,
     delete_files: bool,
 ) -> SessionRemovalResult:
-    """Remove a session from the project index and optionally delete its files.
+    """Remove a session from the project index and optionally its project files.
 
-    Imported sessions intentionally support index-only removal. Deleting files
-    for an imported record is rejected so a GUI regression cannot destroy the
-    preserved imported source or the project's imported copy.
+    ``delete_files`` affects only paths owned by the CRT project. The original
+    file selected by the user during import lives outside the project and is not
+    part of ``session_artifact_paths``.
     """
 
     session = _session_by_id(project, session_id)
     if session is None:
         raise KeyError(f"nie znaleziono sesji: {session_id}")
-    if delete_files and session.source.startswith("imported"):
-        raise ValueError("importowaną sesję można usunąć wyłącznie z listy")
 
     artifacts = session_artifact_paths(project, session) if delete_files else ()
     for path in artifacts:
