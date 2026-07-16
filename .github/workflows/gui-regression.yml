@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  stored-session-filter-opt-in:
+  filter-regressions:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,3 +24,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/stored_session_filter_optin_smoke.py
+      - name: Verify Live filters use the background worker
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_filter_worker_smoke.py
