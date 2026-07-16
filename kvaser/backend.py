@@ -67,28 +67,6 @@ def _require_canlib() -> Any:
     return canlib
 
 
-def _reset_acceptance_filters(channel: Any, api: Any) -> None:
-    """Remove any receive filter before the handle is placed on bus.
-
-    CANlib normally opens a fresh handle without an acceptance filter, but CRT
-    makes this explicit so a stale driver/handle configuration cannot restrict
-    the capture to one standard or extended identifier.
-    """
-
-    accept = getattr(channel, "canAccept", None)
-    filter_flags = getattr(api, "AcceptFilterFlag", None)
-    null_mask = getattr(filter_flags, "NULL_MASK", None)
-    if callable(accept) and null_mask is not None:
-        accept(0, null_mask)
-        return
-
-    setter = getattr(channel, "canSetAcceptanceFilter", None)
-    if not callable(setter):
-        return
-    setter(code=0, mask=0, is_extended=False)
-    setter(code=0, mask=0, is_extended=True)
-
-
 def list_channels() -> list[KvaserChannelInfo]:
     api = _require_canlib()
     channels: list[KvaserChannelInfo] = []
@@ -154,7 +132,6 @@ class KvaserPassiveChannel:
         channel = api.openChannel(self.channel_number, bitrate=bitrate_value)
         try:
             channel.iocontrol.local_txecho = False
-            _reset_acceptance_filters(channel, api)
             driver = (
                 api.Driver.SILENT
                 if self.mode is KvaserReceiveMode.LISTEN_ONLY
