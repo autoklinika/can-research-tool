@@ -25,21 +25,39 @@ class ActiveFilterSet:
     Session recording is intentionally outside this class. Include and exclude
     presets control visibility; highlight presets only annotate matching rows.
     Multiple include presets are combined with AND, matching the CRT default.
+
+    ``scope`` prevents a preset intended for a stored session from accidentally
+    affecting Live Capture (and vice versa). Passing ``None`` keeps the legacy
+    behaviour and is useful for isolated engine tests.
     """
 
-    def __init__(self, presets: Iterable[FilterPreset]) -> None:
+    def __init__(
+        self,
+        presets: Iterable[FilterPreset],
+        *,
+        scope: str | None = None,
+    ) -> None:
         compiler = FilterCompiler()
-        self.presets = tuple(preset for preset in presets if preset.enabled)
+        self.scope = scope
+        self.presets = tuple(
+            preset
+            for preset in presets
+            if preset.enabled and (scope is None or scope in preset.scope)
+        )
         self._compiler = compiler
         self.validation_issues = tuple(
-            (preset.name, tuple(compiler.validate(preset)))
+            (preset.name, tuple(issues))
             for preset in self.presets
-            if compiler.validate(preset)
+            if (issues := compiler.validate(preset))
         )
 
     @property
     def active_count(self) -> int:
         return len(self.presets)
+
+    @property
+    def active_names(self) -> tuple[str, ...]:
+        return tuple(preset.name for preset in self.presets)
 
     @property
     def affects_visibility(self) -> bool:
@@ -50,16 +68,20 @@ class ActiveFilterSet:
 
     @property
     def signature(self) -> tuple[object, ...]:
-        return tuple(
-            (
-                preset.id,
-                preset.name,
-                preset.enabled,
-                preset.mode.value,
-                preset.shortcut,
-                repr(preset.root),
-            )
-            for preset in self.presets
+        return (
+            self.scope,
+            *(
+                (
+                    preset.id,
+                    preset.name,
+                    preset.enabled,
+                    preset.mode.value,
+                    preset.shortcut,
+                    tuple(preset.scope),
+                    repr(preset.root),
+                )
+                for preset in self.presets
+            ),
         )
 
     def decide(self, frame: CanFrameRecord) -> LiveFilterDecision:
