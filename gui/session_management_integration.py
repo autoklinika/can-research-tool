@@ -119,9 +119,10 @@ def _build_session_context_menu(self: MainWindow, session: SessionRecord) -> QMe
 
     menu.addSeparator()
     imported = session.source.startswith("imported")
-    remove_action = menu.addAction("Usuń z listy" if imported else "Usuń log")
+    remove_action = menu.addAction("Usuń z projektu" if imported else "Usuń log")
     remove_action.setToolTip(
-        "Usuń wpis z projektu. Pliki importowane pozostaną na dysku."
+        "Usuń wpis i wszystkie kopie oraz pliki pochodne zapisane w projekcie. "
+        "Oryginalny plik źródłowy poza projektem pozostanie bez zmian."
         if imported
         else "Usuń wpis oraz wszystkie pliki tej sesji Live z dysku."
     )
@@ -159,15 +160,20 @@ def _remove_selected_session(self: MainWindow) -> None:
         )
         return
 
+    artifacts = session_artifact_paths(self.project, session)
+    existing_count = sum(candidate.exists() or candidate.is_symlink() for candidate in artifacts)
     if imported:
-        title = "Usuń importowaną sesję z listy"
+        title = "Usuń importowaną sesję z projektu"
         text = (
-            f"Usunąć „{session.name}” z listy sesji CAN?\n\n"
-            "Główny plik i wszystkie pliki importu pozostaną na dysku."
+            f"Usunąć „{session.name}” z projektu?\n\n"
+            f"Pliki projektu do usunięcia: {existing_count}\n"
+            f"Lokalizacja sesji: {path}\n\n"
+            "Usunięte zostaną kopie i pliki pochodne znajdujące się w projekcie. "
+            "Oryginalny plik wybrany podczas importu, znajdujący się poza projektem, "
+            "pozostanie bez zmian.\n\n"
+            "Tej operacji nie można cofnąć."
         )
     else:
-        artifacts = session_artifact_paths(self.project, session)
-        existing_count = sum(path.exists() or path.is_symlink() for path in artifacts)
         title = "Usuń log Live"
         text = (
             f"Usunąć „{session.name}” z projektu oraz z dysku?\n\n"
@@ -191,7 +197,7 @@ def _remove_selected_session(self: MainWindow) -> None:
         result = remove_session(
             self.project,
             session.id,
-            delete_files=not imported,
+            delete_files=True,
         )
     except Exception as exc:
         QMessageBox.critical(self, "Nie można usunąć sesji", str(exc))
@@ -200,11 +206,13 @@ def _remove_selected_session(self: MainWindow) -> None:
     self.explorer.refresh()
     if imported:
         self.inspector.setPlainText(
-            "IMPORTOWANA SESJA USUNIĘTA Z LISTY\n\n"
-            f"Pliki pozostawiono na dysku:\n{path}"
+            "IMPORTOWANA SESJA USUNIĘTA Z PROJEKTU\n\n"
+            f"Usunięto plików projektu: {len(result.removed_files)}\n"
+            "Oryginalny plik źródłowy poza projektem pozostawiono bez zmian."
         )
         self._append_output(
-            f"Usunięto importowaną sesję z listy: {session.name} | plik pozostawiony: {path}"
+            f"Usunięto importowaną sesję z projektu: {session.name} | "
+            f"pliki={len(result.removed_files)}"
         )
     else:
         self.inspector.setPlainText(
@@ -245,7 +253,8 @@ def _format_session_inspector(project, session: SessionRecord) -> str:
         file_state = "nie istnieje"
 
     removal = (
-        "tylko z listy; pliki pozostają na dysku"
+        "z listy oraz wraz z kopiami i plikami pochodnymi w projekcie; "
+        "oryginalny plik poza projektem pozostaje bez zmian"
         if imported
         else "z listy i wraz ze wszystkimi plikami sesji"
     )
