@@ -138,16 +138,30 @@ def _reload_and_update(widget: LiveCaptureWidget) -> None:
     proxy = widget.live_filter_proxy
     proxy.reload_project_filters()
     count = proxy.filter_set.active_count
+    save_text = _save_status_text(widget)
     if count:
         invalid = len(proxy.filter_set.validation_issues)
         suffix = f" | błędne: {invalid}" if invalid else ""
         widget.live_filter_label.setText(
-            f"Filtr widoku aktywny: {count}{suffix} | Zapis: wszystkie ramki"
+            f"Filtr widoku aktywny: {count}{suffix} | {save_text}"
         )
     else:
         widget.live_filter_label.setText(
-            "Filtr widoku: wyłączony | Zapis: wszystkie ramki"
+            f"Filtr widoku: wyłączony | {save_text}"
         )
     widget.visible_label.setText(
         f"Widoczne: {proxy.rowCount():,} / bufor {widget.frame_model.frame_count:,}".replace(",", " ")
     )
+
+
+def _save_status_text(widget: LiveCaptureWidget) -> str:
+    if widget._capture.is_active:
+        return (
+            "Zapis: wszystkie ramki"
+            if widget._capture.status().persist_to_disk
+            else "Zapis: WYŁĄCZONY"
+        )
+    button = getattr(widget, "save_session_button", None)
+    if button is not None and button.isChecked():
+        return "Zapis następnej sesji: UZBROJONY"
+    return "Zapis następnej sesji: wyłączony"
