@@ -128,3 +128,8 @@ class FrameTableModel(QAbstractTableModel):
         if 0 <= row < len(self._frames):
             return self._frames[row]
         return None
+
+    def snapshot_frames(self) -> tuple[CanFrame, ...]:
+        """Return an immutable reference snapshot safe for background evaluation."""
+
+        return tuple(self._frames)
