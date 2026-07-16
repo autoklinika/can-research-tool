@@ -11,6 +11,7 @@ from .live_save_integration import install_live_save_integration
 from .main_window import MainWindow
 from .protocol_view_integration import install_protocol_view_integration
 from .session_filter_integration import install_session_filter_integration
+from .session_management_integration import install_session_management_integration
 
 
 def main() -> int:
@@ -23,6 +24,7 @@ def main() -> int:
     install_live_save_integration()
     install_session_filter_integration()
     install_protocol_view_integration()
+    install_session_management_integration()
     window = MainWindow()
     window.show()
     return app.exec()
