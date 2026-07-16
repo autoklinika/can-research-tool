@@ -42,6 +42,13 @@ class ActiveFilterSet:
         return len(self.presets)
 
     @property
+    def affects_visibility(self) -> bool:
+        return any(
+            preset.mode in {FilterMode.INCLUDE, FilterMode.EXCLUDE}
+            for preset in self.presets
+        )
+
+    @property
     def signature(self) -> tuple[object, ...]:
         return tuple(
             (
