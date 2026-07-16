@@ -32,27 +32,29 @@ class FakeChannel:
         return None
 
 
+def _channel_factory(**kwargs):
+    assert kwargs["channel_number"] == 0
+    assert kwargs["bitrate"] == 250_000
+    assert kwargs["mode"] is KvaserReceiveMode.BENCH
+    return FakeChannel()
+
+
+def _channel_provider():
+    return [
+        KvaserChannelInfo(
+            number=0,
+            name="Fake Kvaser",
+            serial_number="123",
+            product_number="00-00000-00000-0",
+            supports_silent_mode=True,
+        )
+    ]
+
+
 def test_capture_service_streams_to_disk_and_bounds_live_view(tmp_path: Path) -> None:
-    def channel_factory(**kwargs):
-        assert kwargs["channel_number"] == 0
-        assert kwargs["bitrate"] == 250_000
-        assert kwargs["mode"] is KvaserReceiveMode.BENCH
-        return FakeChannel()
-
-    def channel_provider():
-        return [
-            KvaserChannelInfo(
-                number=0,
-                name="Fake Kvaser",
-                serial_number="123",
-                product_number="00-00000-00000-0",
-                supports_silent_mode=True,
-            )
-        ]
-
     service = CaptureService(
-        channel_factory=channel_factory,
-        channel_provider=channel_provider,
+        channel_factory=_channel_factory,
+        channel_provider=_channel_provider,
     )
     paths = service.start(
         CaptureConfig(
@@ -69,6 +71,7 @@ def test_capture_service_streams_to_disk_and_bounds_live_view(tmp_path: Path) ->
     assert service.wait(2.0) is True
     status = service.status()
     assert status.state is CaptureState.STOPPED
+    assert status.persist_to_disk is True
     assert status.frame_count == 3
     assert status.logical_message_count == 3
     assert status.unique_can_ids == 3
@@ -77,7 +80,37 @@ def test_capture_service_streams_to_disk_and_bounds_live_view(tmp_path: Path) ->
 
     snapshot = service.live_snapshot_since(None)
     assert [frame.sequence for frame in snapshot.frames] == [1, 2]
+    assert paths is not None
     assert paths.session.exists()
     assert paths.raw_frames_csv.exists()
     assert paths.logical_messages_csv.exists()
     assert paths.session.with_suffix(paths.session.suffix + ".idx.json").exists()
+
+
+def test_transient_capture_keeps_live_data_without_creating_files(tmp_path: Path) -> None:
+    service = CaptureService(
+        channel_factory=_channel_factory,
+        channel_provider=_channel_provider,
+    )
+    paths = service.start(
+        CaptureConfig(
+            channel_number=0,
+            bitrate=250_000,
+            mode=KvaserReceiveMode.BENCH,
+            session_name="transient-test",
+            output_dir=tmp_path,
+            persist_to_disk=False,
+            duration_s=0.03,
+            live_buffer_capacity=10,
+        )
+    )
+
+    assert paths is None
+    assert service.wait(2.0) is True
+    status = service.status()
+    assert status.state is CaptureState.STOPPED
+    assert status.persist_to_disk is False
+    assert status.paths is None
+    assert status.frame_count == 3
+    assert [frame.sequence for frame in service.live_snapshot_since(None).frames] == [0, 1, 2]
+    assert list(tmp_path.iterdir()) == []
