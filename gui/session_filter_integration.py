@@ -146,9 +146,8 @@ def _load_filter_set(database_path: Path | None) -> ActiveFilterSet:
 
 
 def _set_filter_application(widget: SessionViewWidget, checked: bool) -> None:
-    # Incrementing the generation invalidates every worker started for the previous
-    # mode, so a slow filtered scan cannot overwrite the unfiltered page later.
-    widget._stored_filter_generation += 1
+    # Starting a new load increments the generation. Older workers therefore cannot
+    # overwrite the new mode after the checkbox changes.
     widget._stored_page_start = 0
     widget._stored_filter_set = (
         widget._stored_available_filter_set if checked else ActiveFilterSet(())
