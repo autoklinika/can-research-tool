@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QDir, QProcess, QUrl
+from PySide6.QtCore import QDir, QItemSelectionModel, QPoint, QProcess, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QPushButton
+from PySide6.QtWidgets import QMenu, QMessageBox
 
 from app.project import SessionRecord
 from app.session_management import remove_session, session_artifact_paths
@@ -30,33 +30,18 @@ def install_session_management_integration() -> None:
     def build_docks(self: MainWindow) -> None:
         original_build_docks(self)
 
-        actions = QHBoxLayout()
-        self.session_reveal_button = QPushButton("Idź do pliku")
-        self.session_reveal_button.setEnabled(False)
-        self.session_reveal_button.setToolTip(
-            "Otwórz folder i wskaż główny plik wybranej sesji CAN."
-        )
-        self.session_reveal_button.clicked.connect(self._reveal_selected_session)
-        actions.addWidget(self.session_reveal_button)
-
-        self.session_remove_button = QPushButton("Usuń")
-        self.session_remove_button.setEnabled(False)
-        self.session_remove_button.clicked.connect(self._remove_selected_session)
-        actions.addWidget(self.session_remove_button)
-
-        layout = self.explorer.layout()
-        if layout is not None:
-            layout.addLayout(actions)
-
-        self.explorer.tree.selectionModel().selectionChanged.connect(
-            self._session_selection_changed
-        )
+        tree = self.explorer.tree
+        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(self._show_session_context_menu)
+        tree.selectionModel().selectionChanged.connect(self._session_selection_changed)
         self.explorer.model.modelReset.connect(self._clear_session_selection)
 
     MainWindow._build_docks = build_docks
     MainWindow._session_selection_changed = _session_selection_changed
     MainWindow._clear_session_selection = _clear_session_selection
     MainWindow._selected_project_session = _selected_project_session
+    MainWindow._show_session_context_menu = _show_session_context_menu
+    MainWindow._build_session_context_menu = _build_session_context_menu
     MainWindow._reveal_selected_session = _reveal_selected_session
     MainWindow._remove_selected_session = _remove_selected_session
     MainWindow._close_session_tab_for_path = _close_session_tab_for_path
@@ -66,34 +51,12 @@ def install_session_management_integration() -> None:
 def _session_selection_changed(self: MainWindow, *_args: Any) -> None:
     session = self._selected_project_session()
     if session is None or self.project is None:
-        self._clear_session_selection()
         return
-
-    path = self.project.absolute_path(session.relative_path)
-    imported = session.source.startswith("imported")
-    self.session_reveal_button.setEnabled(path.parent.is_dir())
-    self.session_remove_button.setEnabled(True)
-    if imported:
-        self.session_remove_button.setText("Usuń z listy")
-        self.session_remove_button.setToolTip(
-            "Usuń wpis z projektu. Pliki importowane pozostaną na dysku."
-        )
-    else:
-        self.session_remove_button.setText("Usuń log")
-        self.session_remove_button.setToolTip(
-            "Usuń wpis oraz wszystkie pliki tej sesji Live z dysku."
-        )
     self.inspector.setPlainText(_format_session_inspector(self.project, session))
 
 
 def _clear_session_selection(self: MainWindow, *_args: Any) -> None:
-    reveal = getattr(self, "session_reveal_button", None)
-    remove = getattr(self, "session_remove_button", None)
-    if reveal is not None:
-        reveal.setEnabled(False)
-    if remove is not None:
-        remove.setEnabled(False)
-        remove.setText("Usuń")
+    return
 
 
 def _selected_project_session(self: MainWindow) -> SessionRecord | None:
@@ -115,6 +78,55 @@ def _selected_project_session(self: MainWindow) -> SessionRecord | None:
         return self.project.session_by_path(Path(str(value)).resolve())
     except (OSError, ValueError):
         return None
+
+
+def _show_session_context_menu(self: MainWindow, position: QPoint) -> None:
+    tree = self.explorer.tree
+    index = tree.indexAt(position)
+    if not index.isValid():
+        return
+    item = self.explorer.model.itemFromIndex(index)
+    if item is None or item.data(ROLE_NODE_TYPE) != "session":
+        return
+
+    selection_model = tree.selectionModel()
+    if selection_model is None:
+        return
+    selection_model.select(
+        index,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect
+        | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    tree.setCurrentIndex(index)
+
+    session = self._selected_project_session()
+    if session is None:
+        return
+    menu = self._build_session_context_menu(session)
+    menu.exec(tree.viewport().mapToGlobal(position))
+
+
+def _build_session_context_menu(self: MainWindow, session: SessionRecord) -> QMenu:
+    menu = QMenu(self.explorer.tree)
+
+    reveal_action = menu.addAction("Idź do pliku")
+    if self.project is None:
+        reveal_action.setEnabled(False)
+    else:
+        path = self.project.absolute_path(session.relative_path)
+        reveal_action.setEnabled(path.parent.is_dir())
+    reveal_action.triggered.connect(self._reveal_selected_session)
+
+    menu.addSeparator()
+    imported = session.source.startswith("imported")
+    remove_action = menu.addAction("Usuń z listy" if imported else "Usuń log")
+    remove_action.setToolTip(
+        "Usuń wpis z projektu. Pliki importowane pozostaną na dysku."
+        if imported
+        else "Usuń wpis oraz wszystkie pliki tej sesji Live z dysku."
+    )
+    remove_action.triggered.connect(self._remove_selected_session)
+    return menu
 
 
 def _reveal_selected_session(self: MainWindow) -> None:
@@ -186,7 +198,6 @@ def _remove_selected_session(self: MainWindow) -> None:
         return
 
     self.explorer.refresh()
-    self._clear_session_selection()
     if imported:
         self.inspector.setPlainText(
             "IMPORTOWANA SESJA USUNIĘTA Z LISTY\n\n"
