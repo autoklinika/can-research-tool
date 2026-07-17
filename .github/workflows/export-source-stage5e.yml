@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/filter-gui-stage5e
+  pull_request:
+    branches:
+      - agent/filter-uds-stage5d
 
 permissions:
   contents: write
