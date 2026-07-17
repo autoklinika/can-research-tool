@@ -9,6 +9,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Iterable, Mapping
 from uuid import uuid4
 
+from .j1939 import decode_j1939_identifier
+
 if TYPE_CHECKING:
     from .logical_records import LogicalMessageRecord
 
@@ -44,7 +46,7 @@ class FilterField(StrEnum):
 
 
 class ProtocolFilterField(StrEnum):
-    """Logical-message fields evaluated by the same global filter compiler.
+    """Logical-message fields evaluated by the global filter compiler.
 
     They intentionally remain separate from ``FilterField`` until the logical-message
     filter editor is introduced. Existing GUI code iterates ``FilterField`` and must
@@ -58,9 +60,27 @@ class ProtocolFilterField(StrEnum):
     ERROR = "error"
     CONFIDENCE = "confidence"
     SOURCE_FRAME_COUNT = "source_frame_count"
+    PAYLOAD_LENGTH = "payload_length"
+    DECLARED_PAYLOAD_LENGTH = "declared_payload_length"
+    RECEIVED_PAYLOAD_LENGTH = "received_payload_length"
+    DECLARED_PACKET_COUNT = "declared_packet_count"
+    RECEIVED_PACKET_COUNT = "received_packet_count"
+
     PGN = "pgn"
+    PGN_NAME = "pgn_name"
     SOURCE_ADDRESS = "source_address"
     DESTINATION_ADDRESS = "destination_address"
+    PRIORITY = "priority"
+    EXTENDED_DATA_PAGE = "extended_data_page"
+    DATA_PAGE = "data_page"
+    PDU_FORMAT = "pdu_format"
+    PDU_SPECIFIC = "pdu_specific"
+    PDU_TYPE = "pdu_type"
+    BROADCAST = "broadcast"
+    DESTINATION_SPECIFIC = "destination_specific"
+    J1939_TRANSPORT = "j1939_transport"
+    J1939_IS_TP = "j1939_is_tp"
+
     SID = "sid"
     BASE_SID = "base_sid"
     DIRECTION = "direction"
@@ -132,6 +152,8 @@ class FilterContext:
             ProtocolFilterField.ERROR.value: record.error,
             ProtocolFilterField.CONFIDENCE.value: record.confidence,
             ProtocolFilterField.SOURCE_FRAME_COUNT.value: record.frame_count,
+            ProtocolFilterField.PAYLOAD_LENGTH.value: len(record.payload),
+            ProtocolFilterField.RECEIVED_PAYLOAD_LENGTH.value: len(record.payload),
         }
         if record.arbitration_id is not None:
             values[FilterField.CAN_ID.value] = record.arbitration_id
@@ -145,6 +167,31 @@ class FilterContext:
             values[ProtocolFilterField.DESTINATION_ADDRESS.value] = record.destination_address
 
         fields = record.fields or {}
+        _copy_present(
+            fields,
+            values,
+            "declared_payload_length",
+            ProtocolFilterField.DECLARED_PAYLOAD_LENGTH,
+        )
+        _copy_present(
+            fields,
+            values,
+            "received_payload_length",
+            ProtocolFilterField.RECEIVED_PAYLOAD_LENGTH,
+        )
+        _copy_present(
+            fields,
+            values,
+            "declared_packet_count",
+            ProtocolFilterField.DECLARED_PACKET_COUNT,
+        )
+        _copy_present(
+            fields,
+            values,
+            "received_packet_count",
+            ProtocolFilterField.RECEIVED_PACKET_COUNT,
+        )
+
         _copy_present(fields, values, "service_id", ProtocolFilterField.SID)
         if fields.get("base_service_id") is not None:
             values[ProtocolFilterField.BASE_SID.value] = fields["base_service_id"]
@@ -155,6 +202,10 @@ class FilterContext:
         _copy_present(fields, values, "did", ProtocolFilterField.DID)
         _copy_present(fields, values, "routine_id", ProtocolFilterField.ROUTINE_ID)
         _copy_present(fields, values, "subfunction", ProtocolFilterField.SUBFUNCTION)
+
+        if str(record.protocol).strip().casefold() == "j1939":
+            _populate_j1939_values(record, fields, values)
+
         return cls(values)
 
     def resolve(self, field_name: FilterFieldName) -> tuple[bool, FilterScalar | None]:
@@ -369,6 +420,31 @@ class FilterCompiler:
                 float("inf"),
                 "Liczba ramek źródłowych nie może być ujemna.",
             ),
+            ProtocolFilterField.PAYLOAD_LENGTH: (
+                0,
+                float("inf"),
+                "Długość payloadu nie może być ujemna.",
+            ),
+            ProtocolFilterField.DECLARED_PAYLOAD_LENGTH: (
+                0,
+                float("inf"),
+                "Deklarowana długość payloadu nie może być ujemna.",
+            ),
+            ProtocolFilterField.RECEIVED_PAYLOAD_LENGTH: (
+                0,
+                float("inf"),
+                "Odebrana długość payloadu nie może być ujemna.",
+            ),
+            ProtocolFilterField.DECLARED_PACKET_COUNT: (
+                0,
+                float("inf"),
+                "Deklarowana liczba pakietów nie może być ujemna.",
+            ),
+            ProtocolFilterField.RECEIVED_PACKET_COUNT: (
+                0,
+                float("inf"),
+                "Odebrana liczba pakietów nie może być ujemna.",
+            ),
             ProtocolFilterField.PGN: (
                 0,
                 0x3FFFF,
@@ -383,6 +459,31 @@ class FilterCompiler:
                 0,
                 0xFF,
                 "Destination Address musi należeć do zakresu 0x00–0xFF.",
+            ),
+            ProtocolFilterField.PRIORITY: (
+                0,
+                7,
+                "Priorytet J1939 musi należeć do zakresu 0–7.",
+            ),
+            ProtocolFilterField.EXTENDED_DATA_PAGE: (
+                0,
+                1,
+                "Extended Data Page musi mieć wartość 0 albo 1.",
+            ),
+            ProtocolFilterField.DATA_PAGE: (
+                0,
+                1,
+                "Data Page musi mieć wartość 0 albo 1.",
+            ),
+            ProtocolFilterField.PDU_FORMAT: (
+                0,
+                0xFF,
+                "PDU Format musi należeć do zakresu 0x00–0xFF.",
+            ),
+            ProtocolFilterField.PDU_SPECIFIC: (
+                0,
+                0xFF,
+                "PDU Specific musi należeć do zakresu 0x00–0xFF.",
             ),
             ProtocolFilterField.SID: (
                 0,
@@ -480,6 +581,8 @@ class FilterCompiler:
 
     @staticmethod
     def _normalize_value(field_name: FilterFieldName, value: Any) -> FilterScalar:
+        if field_name == ProtocolFilterField.J1939_TRANSPORT:
+            return _normalize_j1939_transport(value)
         if field_name in _TEXT_FIELDS:
             normalized = str(value).strip().casefold()
             if field_name == FilterField.FRAME_FORMAT and normalized not in {"std", "ext"}:
@@ -503,9 +606,19 @@ _TEXT_FIELDS: frozenset[FilterFieldName] = frozenset(
         ProtocolFilterField.MESSAGE_NAME,
         ProtocolFilterField.ERROR,
         ProtocolFilterField.DIRECTION,
+        ProtocolFilterField.PGN_NAME,
+        ProtocolFilterField.PDU_TYPE,
+        ProtocolFilterField.J1939_TRANSPORT,
     }
 )
-_BOOLEAN_FIELDS: frozenset[FilterFieldName] = frozenset({ProtocolFilterField.COMPLETE})
+_BOOLEAN_FIELDS: frozenset[FilterFieldName] = frozenset(
+    {
+        ProtocolFilterField.COMPLETE,
+        ProtocolFilterField.BROADCAST,
+        ProtocolFilterField.DESTINATION_SPECIFIC,
+        ProtocolFilterField.J1939_IS_TP,
+    }
+)
 _FLOAT_FIELDS: frozenset[FilterFieldName] = frozenset({ProtocolFilterField.CONFIDENCE})
 
 
@@ -525,6 +638,89 @@ def _copy_present(
     value = source.get(source_key)
     if value is not None:
         target[target_field.value] = value
+
+
+def _populate_j1939_values(
+    record: LogicalMessageRecord,
+    fields: Mapping[str, Any],
+    values: dict[str, FilterScalar],
+) -> None:
+    _copy_present(fields, values, "pgn_name", ProtocolFilterField.PGN_NAME)
+    _copy_present(fields, values, "priority", ProtocolFilterField.PRIORITY)
+    _copy_present(
+        fields,
+        values,
+        "extended_data_page",
+        ProtocolFilterField.EXTENDED_DATA_PAGE,
+    )
+    _copy_present(fields, values, "data_page", ProtocolFilterField.DATA_PAGE)
+    _copy_present(fields, values, "pdu_format", ProtocolFilterField.PDU_FORMAT)
+    _copy_present(fields, values, "pdu_specific", ProtocolFilterField.PDU_SPECIFIC)
+    _copy_present(fields, values, "pdu_type", ProtocolFilterField.PDU_TYPE)
+
+    transport = _normalize_j1939_transport(record.transport)
+    values[ProtocolFilterField.J1939_TRANSPORT.value] = transport
+    values[ProtocolFilterField.J1939_IS_TP.value] = transport in {"bam", "rts-cts"}
+
+    if record.pgn is not None:
+        pgn = int(record.pgn)
+        extended_data_page = (pgn >> 17) & 0x1
+        data_page = (pgn >> 16) & 0x1
+        pdu_format = (pgn >> 8) & 0xFF
+        pdu1 = pdu_format < 240
+        if pdu1:
+            pdu_specific = record.destination_address
+        else:
+            pdu_specific = pgn & 0xFF
+
+        values.setdefault(
+            ProtocolFilterField.EXTENDED_DATA_PAGE.value,
+            extended_data_page,
+        )
+        values.setdefault(ProtocolFilterField.DATA_PAGE.value, data_page)
+        values.setdefault(ProtocolFilterField.PDU_FORMAT.value, pdu_format)
+        if pdu_specific is not None:
+            values.setdefault(ProtocolFilterField.PDU_SPECIFIC.value, pdu_specific)
+        values.setdefault(ProtocolFilterField.PDU_TYPE.value, "pdu1" if pdu1 else "pdu2")
+
+        broadcast = not pdu1 or record.destination_address in {None, 0xFF}
+        values[ProtocolFilterField.BROADCAST.value] = broadcast
+        values[ProtocolFilterField.DESTINATION_SPECIFIC.value] = not broadcast
+
+    if (
+        ProtocolFilterField.PRIORITY.value not in values
+        and transport == "single-frame"
+        and record.is_extended_id
+        and record.arbitration_id is not None
+    ):
+        identifier = decode_j1939_identifier(record.arbitration_id)
+        values[ProtocolFilterField.PRIORITY.value] = identifier.priority
+        values.setdefault(
+            ProtocolFilterField.EXTENDED_DATA_PAGE.value,
+            identifier.extended_data_page,
+        )
+        values.setdefault(ProtocolFilterField.DATA_PAGE.value, identifier.data_page)
+        values.setdefault(ProtocolFilterField.PDU_FORMAT.value, identifier.pdu_format)
+        values.setdefault(ProtocolFilterField.PDU_SPECIFIC.value, identifier.pdu_specific)
+        values.setdefault(
+            ProtocolFilterField.PDU_TYPE.value,
+            "pdu1" if identifier.is_pdu1 else "pdu2",
+        )
+
+
+def _normalize_j1939_transport(value: Any) -> str:
+    normalized = str(value).strip().casefold().replace("_", "-")
+    aliases = {
+        "bam": "bam",
+        "j1939-bam": "bam",
+        "rts/cts": "rts-cts",
+        "rts-cts": "rts-cts",
+        "j1939-rts-cts": "rts-cts",
+        "raw": "single-frame",
+        "single": "single-frame",
+        "single-frame": "single-frame",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _normalize_bool(value: Any) -> bool:
