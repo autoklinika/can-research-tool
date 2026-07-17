@@ -61,3 +61,83 @@ def test_disabled_filter_is_ignored() -> None:
 
     assert filters.active_count == 0
     assert filters.decide(frame(0x111)).visible is True
+
+
+def test_protocol_only_include_is_neutral_for_raw_frame_view() -> None:
+    item = FilterPreset.create("Only UDS")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "condition",
+        "field": "protocol",
+        "operator": "eq",
+        "values": ["uds"],
+    }
+    filters = ActiveFilterSet([item])
+
+    decision = filters.decide(frame(0x123))
+
+    assert decision.visible is True
+    assert decision.unavailable_reasons
+
+
+def test_logical_message_decision_uses_protocol_context() -> None:
+    from app.logical_records import LogicalMessageRecord
+
+    item = FilterPreset.create("UDS F190")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "group",
+        "operator": "and",
+        "children": [
+            {
+                "type": "condition",
+                "field": "protocol",
+                "operator": "eq",
+                "values": ["uds"],
+            },
+            {
+                "type": "condition",
+                "field": "did",
+                "operator": "eq",
+                "values": ["0xF190"],
+            },
+        ],
+    }
+    filters = ActiveFilterSet([item])
+    matching = LogicalMessageRecord(
+        sequence=1,
+        first_timestamp_ns=1_000,
+        last_timestamp_ns=2_000,
+        protocol="uds",
+        transport="isotp",
+        name="ReadDataByIdentifier",
+        arbitration_id=0x7E8,
+        is_extended_id=False,
+        pgn=None,
+        source_address=None,
+        destination_address=None,
+        complete=True,
+        frame_sequences=(1,),
+        payload=bytes.fromhex("62 F1 90"),
+        fields={"did": 0xF190},
+    )
+    other = LogicalMessageRecord(
+        sequence=2,
+        first_timestamp_ns=2_000,
+        last_timestamp_ns=3_000,
+        protocol="j1939",
+        transport="raw",
+        name="J1939",
+        arbitration_id=0x18FEEE30,
+        is_extended_id=True,
+        pgn=0xFEEE,
+        source_address=0x30,
+        destination_address=None,
+        complete=True,
+        frame_sequences=(2,),
+        payload=b"\x00" * 8,
+        fields={},
+    )
+
+    assert filters.decide_logical_message(matching).visible is True
+    assert filters.decide_logical_message(other).visible is False

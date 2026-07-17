@@ -50,20 +50,20 @@ from app.filters import (
     MatchState,
     ProjectFilterRepository,
 )
+from app.logical_records import LogicalMessageRecord
 from app.project import CrtProject
+
+from .filter_field_catalog import (
+    FIELD_DEFAULTS,
+    FIELD_HINTS,
+    FILTER_FIELD_CHOICES,
+)
 
 
 DEFAULT_TREE = {
     "type": "group",
     "operator": "and",
     "children": [default_condition()],
-}
-
-FIELD_LABELS = {
-    FilterField.CAN_ID.value: "CAN ID",
-    FilterField.FRAME_FORMAT.value: "STD / EXT",
-    FilterField.DLC.value: "DLC",
-    FilterField.RELATIVE_TIME_US.value: "Czas względny [µs]",
 }
 
 OPERATOR_LABELS = {
@@ -153,9 +153,13 @@ class FilterManagerWidget(QWidget):
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["✓", "Nazwa", "Skrót"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -287,8 +291,8 @@ class FilterManagerWidget(QWidget):
         condition_widget = QWidget()
         condition_form = QFormLayout(condition_widget)
         self.condition_field = QComboBox()
-        for field in FilterField:
-            self.condition_field.addItem(FIELD_LABELS[field.value], field.value)
+        for choice in FILTER_FIELD_CHOICES:
+            self.condition_field.addItem(choice.label, choice.field)
         self.condition_field.currentIndexChanged.connect(self._condition_field_changed)
         condition_form.addRow("Pole", self.condition_field)
         self.condition_operator = QComboBox()
@@ -310,8 +314,14 @@ class FilterManagerWidget(QWidget):
         return panel
 
     def _build_test_box(self) -> QGroupBox:
-        box = QGroupBox("Test na ramce")
+        box = QGroupBox("Test presetu")
         form = QFormLayout(box)
+        self.test_context = QComboBox()
+        self.test_context.addItem("Surowa ramka CAN", "raw")
+        self.test_context.addItem("Wiadomość logiczna", "logical")
+        self.test_context.currentIndexChanged.connect(self._test_context_changed)
+        form.addRow("Kontekst", self.test_context)
+
         self.test_can_id = QLineEdit("18FEAE30")
         form.addRow("CAN ID [HEX]", self.test_can_id)
         self.test_format = QComboBox()
@@ -323,12 +333,50 @@ class FilterManagerWidget(QWidget):
         form.addRow("DLC", self.test_dlc)
         self.test_time = QLineEdit("0")
         form.addRow("Czas [µs]", self.test_time)
+
+        self.test_logical_json = QPlainTextEdit()
+        self.test_logical_json.setMaximumHeight(210)
+        self.test_logical_json.setPlainText(
+            json.dumps(
+                {
+                    "sequence": 1,
+                    "first_timestamp_ns": 0,
+                    "last_timestamp_ns": 1000000,
+                    "protocol": "uds",
+                    "transport": "isotp",
+                    "name": "UDS ReadDataByIdentifier",
+                    "arbitration_id": "0x7E8",
+                    "is_extended_id": False,
+                    "pgn": None,
+                    "source_address": None,
+                    "destination_address": None,
+                    "complete": True,
+                    "frame_sequences": [1],
+                    "payload_hex": "62 F1 90",
+                    "error": "",
+                    "confidence": 1.0,
+                    "fields": {
+                        "service_id": "0x62",
+                        "base_service_id": "0x22",
+                        "direction": "positive-response",
+                        "response_type": "positive-response",
+                        "service_name": "ReadDataByIdentifier",
+                        "did": "0xF190",
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        form.addRow("Rekord JSON", self.test_logical_json)
+
         button = QPushButton("Sprawdź cały preset")
         button.clicked.connect(self._test_current)
         form.addRow("", button)
         self.test_result = QLabel()
         self.test_result.setWordWrap(True)
         form.addRow("Wynik", self.test_result)
+        self._test_context_changed()
         return box
 
     def _current_row(self) -> int:
@@ -345,7 +393,9 @@ class FilterManagerWidget(QWidget):
         for row, preset in enumerate(self.presets):
             active = QTableWidgetItem()
             active.setFlags(active.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            active.setCheckState(Qt.CheckState.Checked if preset.enabled else Qt.CheckState.Unchecked)
+            active.setCheckState(
+                Qt.CheckState.Checked if preset.enabled else Qt.CheckState.Unchecked
+            )
             self.table.setItem(row, 0, active)
             self.table.setItem(row, 1, QTableWidgetItem(preset.name))
             self.table.setItem(row, 2, QTableWidgetItem(preset.shortcut))
@@ -466,7 +516,9 @@ class FilterManagerWidget(QWidget):
             field = str(node.get("field", FilterField.CAN_ID.value))
             operator = str(node.get("operator", FilterOperator.EQ.value))
             self.condition_field.setCurrentIndex(max(0, self.condition_field.findData(field)))
-            self.condition_operator.setCurrentIndex(max(0, self.condition_operator.findData(operator)))
+            self.condition_operator.setCurrentIndex(
+                max(0, self.condition_operator.findData(operator))
+            )
             values = node.get("values", [])
             self.condition_values.setText(", ".join(str(value) for value in values))
             self._update_value_hint(field)
@@ -555,7 +607,11 @@ class FilterManagerWidget(QWidget):
         node = node_at(preset.root, self._selected_path)
         operator = str(self.group_operator.currentData())
         children = node.get("children")
-        if operator == LogicalOperator.NOT.value and isinstance(children, list) and len(children) > 1:
+        if (
+            operator == LogicalOperator.NOT.value
+            and isinstance(children, list)
+            and len(children) > 1
+        ):
             QMessageBox.warning(
                 self,
                 "Filtry",
@@ -575,9 +631,8 @@ class FilterManagerWidget(QWidget):
         node = node_at(preset.root, self._selected_path)
         field = str(self.condition_field.currentData())
         node["field"] = field
-        if field == FilterField.FRAME_FORMAT.value:
-            node["operator"] = FilterOperator.EQ.value
-            node["values"] = ["ext"]
+        node["operator"] = FilterOperator.EQ.value
+        node["values"] = [FIELD_DEFAULTS.get(field, "")]
         self._tree_mutated(self._selected_path)
 
     def _condition_property_changed(self) -> None:
@@ -593,13 +648,7 @@ class FilterManagerWidget(QWidget):
         self._tree_mutated(self._selected_path, restart_editor=False)
 
     def _update_value_hint(self, field: str) -> None:
-        hints = {
-            FilterField.CAN_ID.value: "HEX: 0x18FEAE30. Dla listy lub zakresu rozdziel wartości przecinkami.",
-            FilterField.FRAME_FORMAT.value: "Dozwolone wartości: std albo ext.",
-            FilterField.DLC.value: "Zakres 0–64.",
-            FilterField.RELATIVE_TIME_US.value: "Czas od początku sesji w mikrosekundach.",
-        }
-        self.value_hint.setText(hints.get(field, ""))
+        self.value_hint.setText(FIELD_HINTS.get(field, ""))
 
     def _tree_mutated(self, select_path: tuple[int, ...], *, restart_editor: bool = True) -> None:
         self._selected_path = select_path
@@ -718,9 +767,7 @@ class FilterManagerWidget(QWidget):
 
     def _save(self, _checked: bool = False, *, silent: bool = False) -> bool:
         invalid = [
-            (preset, self.compiler.validate(preset))
-            for preset in self.presets
-            if preset.enabled
+            (preset, self.compiler.validate(preset)) for preset in self.presets if preset.enabled
         ]
         invalid = [(preset, issues) for preset, issues in invalid if issues]
         if invalid:
@@ -749,6 +796,22 @@ class FilterManagerWidget(QWidget):
         self._update_status()
         return True
 
+    def _test_context_changed(self, *_args: object) -> None:
+        logical = (
+            getattr(self, "test_context", None) is not None
+            and self.test_context.currentData() == "logical"
+        )
+        for widget in (
+            getattr(self, "test_can_id", None),
+            getattr(self, "test_format", None),
+            getattr(self, "test_dlc", None),
+            getattr(self, "test_time", None),
+        ):
+            if widget is not None:
+                widget.setVisible(not logical)
+        if getattr(self, "test_logical_json", None) is not None:
+            self.test_logical_json.setVisible(logical)
+
     def _test_current(self) -> None:
         preset = self._current_preset()
         if preset is None:
@@ -758,23 +821,34 @@ class FilterManagerWidget(QWidget):
             self.test_result.setText(f"UNAVAILABLE — {issues[0].message}")
             return
         try:
-            text = self.test_can_id.text().strip().lower()
-            frame = CanFrameRecord(
-                can_id=int(text, 16),
-                extended=self.test_format.currentText() == "EXT",
-                dlc=self.test_dlc.value(),
-                relative_time_us=int(self.test_time.text().strip()),
-            )
-        except ValueError as exc:
-            self.test_result.setText(f"Błąd danych ramki: {exc}")
+            if self.test_context.currentData() == "logical":
+                payload = json.loads(self.test_logical_json.toPlainText())
+                record = _logical_record_from_test_payload(payload)
+                result = self.compiler.evaluate_logical_message(
+                    preset,
+                    record,
+                    relative_time_us=int(payload.get("relative_time_us", 0)),
+                )
+            else:
+                text = self.test_can_id.text().strip().lower()
+                frame = CanFrameRecord(
+                    can_id=int(text, 16),
+                    extended=self.test_format.currentText() == "EXT",
+                    dlc=self.test_dlc.value(),
+                    relative_time_us=int(self.test_time.text().strip()),
+                )
+                result = self.compiler.evaluate(preset, frame)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            self.test_result.setText(f"Błąd danych testowych: {exc}")
             return
-        result = self.compiler.evaluate(preset, frame)
         labels = {
             MatchState.MATCH: "MATCH",
             MatchState.NO_MATCH: "NO MATCH",
             MatchState.UNAVAILABLE: "UNAVAILABLE",
         }
-        self.test_result.setText(labels[result.state] + (f" — {result.reason}" if result.reason else ""))
+        self.test_result.setText(
+            labels[result.state] + (f" — {result.reason}" if result.reason else "")
+        )
 
     def _update_status(self) -> None:
         active = [preset.name for preset in self.presets if preset.enabled]
@@ -785,3 +859,40 @@ class FilterManagerWidget(QWidget):
             )
         else:
             self.status_label.setText("Zapis: wszystkie ramki | Widok: brak aktywnego filtra")
+
+
+def _logical_record_from_test_payload(payload: dict[str, object]) -> LogicalMessageRecord:
+    fields = payload.get("fields")
+    if fields is not None and not isinstance(fields, dict):
+        raise ValueError("fields musi być obiektem JSON")
+    frame_sequences = payload.get("frame_sequences", [1])
+    if not isinstance(frame_sequences, list):
+        raise ValueError("frame_sequences musi być listą")
+    return LogicalMessageRecord(
+        sequence=int(payload.get("sequence", 0)),
+        first_timestamp_ns=int(payload.get("first_timestamp_ns", 0)),
+        last_timestamp_ns=int(payload.get("last_timestamp_ns", 0)),
+        protocol=str(payload.get("protocol", "unknown")),
+        transport=str(payload.get("transport", "raw")),
+        name=str(payload.get("name", "")),
+        arbitration_id=_optional_int(payload.get("arbitration_id")),
+        is_extended_id=bool(payload.get("is_extended_id", False)),
+        pgn=_optional_int(payload.get("pgn")),
+        source_address=_optional_int(payload.get("source_address")),
+        destination_address=_optional_int(payload.get("destination_address")),
+        complete=bool(payload.get("complete", True)),
+        frame_sequences=tuple(int(value) for value in frame_sequences),
+        payload=bytes.fromhex(str(payload.get("payload_hex", ""))),
+        error=str(payload.get("error", "")),
+        confidence=float(payload.get("confidence", 1.0)),
+        fields=dict(fields or {}),
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower().replace("_", "")
+        return int(text, 16) if text.startswith("0x") else int(text, 10)
+    return int(value)

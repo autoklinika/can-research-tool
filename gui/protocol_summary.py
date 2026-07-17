@@ -31,21 +31,20 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
     if layout is None:
         return
 
+    display_model = table.model() or model
     label = QLabel()
     label.setObjectName("protocolMessageSummary")
     label.setTextInteractionFlags(label.textInteractionFlags())
     label.setStyleSheet("QLabel { padding: 3px 6px; font-weight: 600; }")
-    label.setToolTip(
-        "Podsumowanie dotyczy wiadomości logicznych aktualnie utrzymywanych w modelu widoku."
-    )
+    label.setToolTip("Podsumowanie dotyczy wiadomości logicznych aktualnie widocznych w tabeli.")
     layout.insertWidget(0, label)
 
     def refresh(*_args: object) -> None:
         protocol_counts: dict[str, int] = {}
         transport_counts: dict[str, int] = {}
         incomplete = 0
-        message_at = getattr(model, "message_at", None)
-        for row in range(model.rowCount()):
+        message_at = getattr(display_model, "message_at", None)
+        for row in range(display_model.rowCount()):
             message = message_at(row) if callable(message_at) else None
             if message is None:
                 continue
@@ -57,7 +56,7 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
                 incomplete += 1
 
         parts = [
-            f"Wiadomości: {model.rowCount():,}".replace(",", " "),
+            f"Wiadomości: {display_model.rowCount():,}".replace(",", " "),
             f"UDS: {protocol_counts.get('UDS', 0):,}".replace(",", " "),
             f"J1939: {protocol_counts.get('J1939', 0):,}".replace(",", " "),
             f"ISO-TP: {transport_counts.get('ISOTP', 0):,}".replace(",", " "),
@@ -70,8 +69,8 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
             parts.append(f"Niekompletne: {incomplete:,}".replace(",", " "))
         label.setText("  |  ".join(parts))
 
-    model.modelReset.connect(refresh)
-    model.rowsInserted.connect(refresh)
-    model.rowsRemoved.connect(refresh)
-    model.dataChanged.connect(refresh)
+    display_model.modelReset.connect(refresh)
+    display_model.rowsInserted.connect(refresh)
+    display_model.rowsRemoved.connect(refresh)
+    display_model.dataChanged.connect(refresh)
     refresh()

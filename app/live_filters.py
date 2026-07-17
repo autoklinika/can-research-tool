@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from .filters import (
     CanFrameRecord,
     FilterCompiler,
+    FilterContext,
     FilterMode,
     FilterPreset,
     MatchState,
 )
+
+if TYPE_CHECKING:
+    from .logical_records import LogicalMessageRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +33,12 @@ class ActiveFilterSet:
     ``scope`` prevents a preset intended for a stored session from accidentally
     affecting Live Capture (and vice versa). Passing ``None`` keeps the legacy
     behaviour and is useful for isolated engine tests.
+
+    A preset that is wholly unavailable in the evaluated context is neutral for
+    presentation. This allows one project filter set to be shared by raw-frame and
+    logical-message tables without a protocol-only condition blanking the raw view,
+    or a raw-only condition blanking the logical-message view. The compiler still
+    reports ``UNAVAILABLE`` and the reason remains available on the decision.
     """
 
     def __init__(
@@ -62,8 +72,7 @@ class ActiveFilterSet:
     @property
     def affects_visibility(self) -> bool:
         return any(
-            preset.mode in {FilterMode.INCLUDE, FilterMode.EXCLUDE}
-            for preset in self.presets
+            preset.mode in {FilterMode.INCLUDE, FilterMode.EXCLUDE} for preset in self.presets
         )
 
     @property
@@ -84,7 +93,21 @@ class ActiveFilterSet:
             ),
         )
 
-    def decide(self, frame: CanFrameRecord) -> LiveFilterDecision:
+    def decide(self, record: CanFrameRecord | FilterContext) -> LiveFilterDecision:
+        context = record if isinstance(record, FilterContext) else FilterContext.from_frame(record)
+        return self.decide_context(context)
+
+    def decide_logical_message(
+        self,
+        record: LogicalMessageRecord,
+        *,
+        relative_time_us: int | None = None,
+    ) -> LiveFilterDecision:
+        return self.decide_context(
+            FilterContext.from_logical_message(record, relative_time_us=relative_time_us)
+        )
+
+    def decide_context(self, context: FilterContext) -> LiveFilterDecision:
         if not self.presets:
             return LiveFilterDecision(True)
 
@@ -94,13 +117,12 @@ class ActiveFilterSet:
         unavailable: list[str] = []
 
         for preset in self.presets:
-            result = self._compiler.evaluate(preset, frame)
+            result = self._compiler.evaluate_context(preset, context)
             if result.state is MatchState.UNAVAILABLE:
                 unavailable.append(f"{preset.name}: {result.reason or 'warunek niedostępny'}")
-                matched = False
-            else:
-                matched = result.state is MatchState.MATCH
+                continue
 
+            matched = result.state is MatchState.MATCH
             if preset.mode is FilterMode.INCLUDE:
                 include_results.append(matched)
             elif preset.mode is FilterMode.EXCLUDE:

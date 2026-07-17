@@ -18,6 +18,13 @@ from app.filters import CanFrameRecord, ProjectFilterRepository
 from app.live_filters import ActiveFilterSet
 from app.models import CanFrame
 
+from .logical_filter_integration import (
+    LogicalFilterScanResult,
+    LogicalFilterScanTask,
+    LogicalMessageFilterProxy,
+)
+from .logical_message_model import format_logical_message_inspector
+
 if TYPE_CHECKING:
     from .live_capture import LiveCaptureWidget
 
@@ -147,37 +154,44 @@ class LiveFrameFilterProxy(QSortFilterProxyModel):
         if len(self._accepted_sequences) <= LIVE_FRAME_CAPACITY * 2:
             return
         self._accepted_sequences = {
-            sequence
-            for sequence in self._accepted_sequences
-            if sequence >= first_sequence
+            sequence for sequence in self._accepted_sequences if sequence >= first_sequence
         }
 
 
 class LiveFilterIntegration(QObject):
-    """Explicitly compose Live filtering into an already-built capture widget."""
+    """Compose one opt-in filter control into raw and logical Live views."""
 
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
         self.widget = widget
-        self._generation = 0
-        self._tasks: list[LiveFilterScanTask] = []
+        self._frame_generation = 0
+        self._message_generation = 0
+        self._frame_tasks: list[LiveFilterScanTask] = []
+        self._message_tasks: list[LogicalFilterScanTask] = []
 
         self.proxy = LiveFrameFilterProxy(widget)
         self.proxy.setSourceModel(widget.frame_model)
         widget.live_filter_proxy = self.proxy
         widget.frame_table.setModel(self.proxy)
-        widget.frame_table.selectionModel().selectionChanged.connect(
-            widget._frame_selected
-        )
-        widget.frame_model.modelReset.connect(self._source_model_reset)
-        widget.frame_model.rowsRemoved.connect(self._prune_filter_cache)
+        widget.frame_table.selectionModel().selectionChanged.connect(widget._frame_selected)
+        widget.frame_model.modelReset.connect(self._source_frame_model_reset)
+        widget.frame_model.rowsRemoved.connect(self._prune_frame_filter_cache)
+
+        self.message_proxy = LogicalMessageFilterProxy(widget)
+        self.message_proxy.set_filter_set(self.proxy.filter_set)
+        self.message_proxy.setSourceModel(widget.message_model)
+        widget.live_message_filter_proxy = self.message_proxy
+        widget.message_table.setModel(self.message_proxy)
+        widget.message_table.selectionModel().selectionChanged.connect(self._message_selected)
+        widget.message_model.modelReset.connect(self._source_message_model_reset)
+        widget.message_model.rowsRemoved.connect(self._prune_message_filter_cache)
 
         self.checkbox = QCheckBox("Zastosuj filtry")
         self.checkbox.setObjectName("applyLiveFilters")
         self.checkbox.setChecked(False)
         self.checkbox.setToolTip(
             "Filtry projektu są domyślnie wyłączone dla Live. Zaznacz, aby zastosować "
-            "aktywne presety przeznaczone dla Live Capture."
+            "aktywne presety do surowych ramek i wiadomości logicznych."
         )
         self.checkbox.toggled.connect(self._set_filter_application)
         widget.apply_live_filters = self.checkbox
@@ -203,131 +217,216 @@ class LiveFilterIntegration(QObject):
     def update_status(self, total_received: int) -> None:
         self._update_live_counts(total_received)
 
+    def _message_selected(self) -> None:
+        rows = self.widget.message_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        message = self.message_proxy.message_at(rows[0].row())
+        if message is not None:
+            self.widget.inspector_text.emit(format_logical_message_inspector(message))
+
     def _set_filter_application(self, checked: bool) -> None:
         self.proxy.set_filter_enabled(checked)
+        self.message_proxy.set_filter_enabled(checked)
         if checked and self.proxy.filter_enabled:
             names = ", ".join(self.proxy.filter_set.active_names)
-            self.widget.output_message.emit(f"Filtry Live włączone: {names}")
-            self._schedule_filter_scan()
+            self.widget.output_message.emit(f"Filtry Live włączone dla ramek i wiadomości: {names}")
+            self._schedule_frame_scan()
+            self._schedule_message_scan()
         else:
-            self._generation += 1
+            self._frame_generation += 1
+            self._message_generation += 1
             if checked and not self.proxy.filter_set.active_count:
                 self.checkbox.setChecked(False)
             self.widget.output_message.emit(
-                "Filtry Live wyłączone — pokazuję cały bufor surowych ramek"
+                "Filtry Live wyłączone — pokazuję pełne bufory ramek i wiadomości"
             )
         self._update_filter_control()
         self._update_live_counts()
 
     def _reload_and_update(self) -> None:
         changed = self.proxy.reload_project_filters()
+        logical_changed = self.message_proxy.set_filter_set(self.proxy.filter_set)
         if self.proxy.filter_set.active_count == 0:
             if self.checkbox.isChecked():
                 self.checkbox.blockSignals(True)
                 self.checkbox.setChecked(False)
                 self.checkbox.blockSignals(False)
-            self._generation += 1
+            self._frame_generation += 1
+            self._message_generation += 1
             self.proxy.set_filter_enabled(False)
-        elif changed and self.checkbox.isChecked():
-            self._schedule_filter_scan()
+            self.message_proxy.set_filter_enabled(False)
+        elif (changed or logical_changed) and self.checkbox.isChecked():
+            self._schedule_frame_scan()
+            self._schedule_message_scan()
         self._update_filter_control()
         self._update_live_counts()
 
-    def _source_model_reset(self) -> None:
+    def _source_frame_model_reset(self) -> None:
         if self.proxy.filter_enabled:
-            self._schedule_filter_scan()
+            self._schedule_frame_scan()
 
-    def _schedule_filter_scan(self) -> None:
+    def _source_message_model_reset(self) -> None:
+        if self.message_proxy.filter_enabled:
+            self._schedule_message_scan()
+
+    def _schedule_frame_scan(self) -> None:
         if not self.proxy.filter_enabled:
             return
-
-        self._generation += 1
-        generation = self._generation
+        self._frame_generation += 1
+        generation = self._frame_generation
         frames = self.widget.frame_model.snapshot_frames()
         self.proxy.begin_background_scan()
-
         if not frames:
             self.proxy.apply_background_result(set(), -1)
             self._update_filter_control()
             self._update_live_counts()
             return
-
         task = LiveFilterScanTask(generation, frames, self.proxy.filter_set)
-        self._tasks.append(task)
-        self._tasks = self._tasks[-3:]
-        task.signals.completed.connect(self._filter_scan_completed)
+        self._frame_tasks.append(task)
+        self._frame_tasks = self._frame_tasks[-3:]
+        task.signals.completed.connect(self._frame_scan_completed)
         task.signals.failed.connect(self._filter_scan_failed)
         QThreadPool.globalInstance().start(task)
         self._update_filter_control()
 
-    def _filter_scan_completed(
+    def _schedule_message_scan(self) -> None:
+        if not self.message_proxy.filter_enabled:
+            return
+        self._message_generation += 1
+        generation = self._message_generation
+        messages = self.message_proxy.snapshot_messages()
+        self.message_proxy.begin_background_scan()
+        if not messages:
+            self.message_proxy.apply_background_result(
+                LogicalFilterScanResult(frozenset(), frozenset())
+            )
+            self._update_filter_control()
+            self._update_live_counts()
+            return
+        task = LogicalFilterScanTask(generation, messages, self.message_proxy.filter_set)
+        self._message_tasks.append(task)
+        self._message_tasks = self._message_tasks[-3:]
+        task.signals.completed.connect(self._message_scan_completed)
+        task.signals.failed.connect(self._logical_filter_scan_failed)
+        QThreadPool.globalInstance().start(task)
+        self._update_filter_control()
+
+    def _frame_scan_completed(
         self,
         generation: int,
         accepted_sequences: object,
         evaluated_through_sequence: int,
     ) -> None:
-        if generation != self._generation or not self.proxy.filter_enabled:
+        if generation != self._frame_generation or not self.proxy.filter_enabled:
             return
         self.proxy.apply_background_result(
             set(accepted_sequences),
             evaluated_through_sequence,
         )
-        self._tasks = self._tasks[-2:]
+        self._frame_tasks = self._frame_tasks[-2:]
+        self._update_filter_control()
+        self._update_live_counts()
+
+    def _message_scan_completed(self, generation: int, result: object) -> None:
+        if generation != self._message_generation or not self.message_proxy.filter_enabled:
+            return
+        if not isinstance(result, LogicalFilterScanResult):
+            self._logical_filter_scan_failed(generation, "nieprawidłowy wynik workera")
+            return
+        self.message_proxy.apply_background_result(result)
+        self._message_tasks = self._message_tasks[-2:]
         self._update_filter_control()
         self._update_live_counts()
 
     def _filter_scan_failed(self, generation: int, error: str) -> None:
-        if generation != self._generation:
+        if generation != self._frame_generation:
             return
+        self._disable_after_error(f"Błąd filtrowania ramek Live: {error}")
+
+    def _logical_filter_scan_failed(self, generation: int, error: str) -> None:
+        if generation != self._message_generation:
+            return
+        self._disable_after_error(f"Błąd filtrowania wiadomości Live: {error}")
+
+    def _disable_after_error(self, message: str) -> None:
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(False)
         self.checkbox.blockSignals(False)
         self.proxy.set_filter_enabled(False)
-        self.widget.output_message.emit(f"Błąd filtrowania Live: {error}")
+        self.message_proxy.set_filter_enabled(False)
+        self.widget.output_message.emit(message)
         self._update_filter_control()
         self._update_live_counts()
 
-    def _prune_filter_cache(self, *_args: object) -> None:
+    def _prune_frame_filter_cache(self, *_args: object) -> None:
         first = self.widget.frame_model.frame_at(0)
         if first is not None:
             self.proxy.prune_before(int(first.sequence))
 
+    def _prune_message_filter_cache(self, *_args: object) -> None:
+        self.message_proxy.prune_to_messages(self.message_proxy.snapshot_messages())
+
     def _update_filter_control(self) -> None:
         count = self.proxy.filter_set.active_count
         self.checkbox.setEnabled(count > 0)
-        self.checkbox.setText(
-            f"Zastosuj filtry ({count})" if count else "Zastosuj filtry"
-        )
+        self.checkbox.setText(f"Zastosuj filtry ({count})" if count else "Zastosuj filtry")
         if count:
             names = ", ".join(self.proxy.filter_set.active_names)
-            if self.proxy.filter_scanning:
+            scanning = self.proxy.filter_scanning or self.message_proxy.filter_scanning
+            if scanning:
                 state = "PRZELICZANIE"
             else:
                 state = "WŁĄCZONE" if self.proxy.filter_enabled else "WYŁĄCZONE"
             self.checkbox.setToolTip(
-                f"Filtry Live: {state}. Aktywne presety dla Live: {names}. "
-                "Pełne przeliczenie bufora odbywa się poza wątkiem GUI."
+                f"Filtry Live: {state}. Aktywne presety: {names}. "
+                "Pełne przeliczenie ramek i wiadomości odbywa się poza wątkiem GUI."
             )
         else:
-            self.checkbox.setToolTip(
-                "Brak aktywnych presetów przeznaczonych dla Live Capture."
-            )
+            self.checkbox.setToolTip("Brak aktywnych presetów przeznaczonych dla Live Capture.")
 
     def _update_live_counts(self, total_received: int | None = None) -> None:
+        status = None
         visible = self.proxy.rowCount()
         retained = self.widget.frame_model.frame_count
-        suffix = " (przeliczanie)" if self.proxy.filter_scanning else ""
+        frame_suffix = " (przeliczanie)" if self.proxy.filter_scanning else ""
         self.widget.visible_label.setText(
-            (f"Widoczne: {visible:,} / bufor {retained:,}{suffix}").replace(",", " ")
+            (f"Widoczne: {visible:,} / bufor {retained:,}{frame_suffix}").replace(",", " ")
         )
         if total_received is None:
             try:
-                total_received = self.widget._controller.status().frame_count
+                status = self.widget._controller.status()
+                total_received = status.frame_count
             except Exception:
                 total_received = retained
+        else:
+            try:
+                status = self.widget._controller.status()
+            except Exception:
+                status = None
         self.widget.data_tabs.setTabText(
             self.widget.raw_tab_index,
             f"Surowe ramki ({visible:,}/{total_received:,})".replace(",", " "),
+        )
+
+        message_visible = self.message_proxy.rowCount()
+        message_retained = self.widget.message_model.message_count
+        message_total = (
+            int(status.logical_message_count) if status is not None else message_retained
+        )
+        message_suffix = " (przeliczanie)" if self.message_proxy.filter_scanning else ""
+        self.widget.messages_label.setText(
+            (
+                f"Wiadomości: {message_total:,} / widoczne {message_visible:,}{message_suffix}"
+            ).replace(",", " ")
+        )
+        self.widget.data_tabs.setTabText(
+            self.widget.message_tab_index,
+            (
+                f"Wiadomości logiczne ({message_visible:,}/{message_total:,})"
+                if self.message_proxy.filter_enabled
+                else f"Wiadomości logiczne ({message_total:,})"
+            ).replace(",", " "),
         )
 
 
