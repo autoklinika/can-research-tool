@@ -3,12 +3,6 @@ from __future__ import annotations
 from PySide6.QtCore import QAbstractItemModel
 from PySide6.QtWidgets import QLabel, QTableView
 
-from .live_capture import LiveCaptureWidget
-from .session_view import SessionViewWidget
-
-
-_installed = False
-
 
 _MESSAGE_COLUMN_WIDTHS = {
     0: 100,
@@ -28,30 +22,7 @@ _MESSAGE_COLUMN_WIDTHS = {
 }
 
 
-def install_protocol_view_integration() -> None:
-    """Attach protocol statistics to Live and saved-session message views."""
-
-    global _installed
-    if _installed:
-        return
-    _installed = True
-
-    live_init = LiveCaptureWidget.__init__
-    session_init = SessionViewWidget.__init__
-
-    def integrated_live_init(self: LiveCaptureWidget, *args, **kwargs) -> None:
-        live_init(self, *args, **kwargs)
-        _attach_protocol_summary(self.message_table, self.message_model)
-
-    def integrated_session_init(self: SessionViewWidget, *args, **kwargs) -> None:
-        session_init(self, *args, **kwargs)
-        _attach_protocol_summary(self.message_table, self.message_model)
-
-    LiveCaptureWidget.__init__ = integrated_live_init
-    SessionViewWidget.__init__ = integrated_session_init
-
-
-def _attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> None:
+def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> None:
     for column, width in _MESSAGE_COLUMN_WIDTHS.items():
         table.setColumnWidth(column, width)
 

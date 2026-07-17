@@ -39,6 +39,12 @@ lub:
 crt-gui
 ```
 
+Graf kompozycji kontrolerów, widoków i infrastruktury opisuje
+`docs/APPLICATION_DEPENDENCIES_PL.md`.
+
+Działający punkt bazowy po refaktoryzacji B–G oraz zasady bezpiecznego rozwoju
+filtrów opisuje `docs/REFACTORING_HANDOFF_FILTERS_PL.md`.
+
 ## Projekt CRT
 
 Każdy projekt jest samodzielnym folderem na dysku. Można go przenieść, skopiować lub spakować bez utraty relacji między sesjami, znacznikami, dekoderami i obszarami badań.

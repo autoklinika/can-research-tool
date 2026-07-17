@@ -1,243 +1,218 @@
 from __future__ import annotations
 
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
-from PySide6.QtCore import QDir, QItemSelectionModel, QPoint, QProcess, Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QItemSelectionModel, QObject, QPoint, Qt
 from PySide6.QtWidgets import QMenu, QMessageBox
 
-from app.project import SessionRecord
+from app.project import CrtProject, SessionRecord
 from app.session_management import remove_session, session_artifact_paths
+from infrastructure.desktop import reveal_path
 
-from .main_window import MainWindow
 from .project_explorer import ROLE_NODE_TYPE, ROLE_NODE_VALUE
 
-
-_PATCH_FLAG = "_crt_session_management_installed"
-
-
-def install_session_management_integration() -> None:
-    """Add safe session actions without coupling ProjectExplorer to disk writes."""
-
-    if getattr(MainWindow, _PATCH_FLAG, False):
-        return
-
-    original_build_docks = MainWindow._build_docks
-
-    def build_docks(self: MainWindow) -> None:
-        original_build_docks(self)
-
-        tree = self.explorer.tree
-        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        tree.customContextMenuRequested.connect(self._show_session_context_menu)
-        tree.selectionModel().selectionChanged.connect(self._session_selection_changed)
-        self.explorer.model.modelReset.connect(self._clear_session_selection)
-
-    MainWindow._build_docks = build_docks
-    MainWindow._session_selection_changed = _session_selection_changed
-    MainWindow._clear_session_selection = _clear_session_selection
-    MainWindow._selected_project_session = _selected_project_session
-    MainWindow._show_session_context_menu = _show_session_context_menu
-    MainWindow._build_session_context_menu = _build_session_context_menu
-    MainWindow._reveal_selected_session = _reveal_selected_session
-    MainWindow._remove_selected_session = _remove_selected_session
-    MainWindow._close_session_tab_for_path = _close_session_tab_for_path
-    setattr(MainWindow, _PATCH_FLAG, True)
+if TYPE_CHECKING:
+    from .main_window import MainWindow
 
 
-def _session_selection_changed(self: MainWindow, *_args: Any) -> None:
-    session = self._selected_project_session()
-    if session is None or self.project is None:
-        return
-    self.inspector.setPlainText(_format_session_inspector(self.project, session))
+class SessionManagementIntegration(QObject):
+    """Connect project-session actions without modifying ``MainWindow`` at runtime."""
 
-
-def _clear_session_selection(self: MainWindow, *_args: Any) -> None:
-    return
-
-
-def _selected_project_session(self: MainWindow) -> SessionRecord | None:
-    if self.project is None:
-        return None
-    selection_model = self.explorer.tree.selectionModel()
-    if selection_model is None:
-        return None
-    rows = selection_model.selectedRows()
-    if not rows:
-        return None
-    item = self.explorer.model.itemFromIndex(rows[0])
-    if item is None or item.data(ROLE_NODE_TYPE) != "session":
-        return None
-    value = item.data(ROLE_NODE_VALUE)
-    if not value:
-        return None
-    try:
-        return self.project.session_by_path(Path(str(value)).resolve())
-    except (OSError, ValueError):
-        return None
-
-
-def _show_session_context_menu(self: MainWindow, position: QPoint) -> None:
-    tree = self.explorer.tree
-    index = tree.indexAt(position)
-    if not index.isValid():
-        return
-    item = self.explorer.model.itemFromIndex(index)
-    if item is None or item.data(ROLE_NODE_TYPE) != "session":
-        return
-
-    selection_model = tree.selectionModel()
-    if selection_model is None:
-        return
-    selection_model.select(
-        index,
-        QItemSelectionModel.SelectionFlag.ClearAndSelect
-        | QItemSelectionModel.SelectionFlag.Rows,
-    )
-    tree.setCurrentIndex(index)
-
-    session = self._selected_project_session()
-    if session is None:
-        return
-    menu = self._build_session_context_menu(session)
-    menu.exec(tree.viewport().mapToGlobal(position))
-
-
-def _build_session_context_menu(self: MainWindow, session: SessionRecord) -> QMenu:
-    menu = QMenu(self.explorer.tree)
-
-    reveal_action = menu.addAction("Idź do pliku")
-    if self.project is None:
-        reveal_action.setEnabled(False)
-    else:
-        path = self.project.absolute_path(session.relative_path)
-        reveal_action.setEnabled(path.parent.is_dir())
-    reveal_action.triggered.connect(self._reveal_selected_session)
-
-    menu.addSeparator()
-    imported = session.source.startswith("imported")
-    remove_action = menu.addAction("Usuń z projektu" if imported else "Usuń log")
-    remove_action.setToolTip(
-        "Usuń wpis i wszystkie kopie oraz pliki pochodne zapisane w projekcie. "
-        "Oryginalny plik źródłowy poza projektem pozostanie bez zmian."
-        if imported
-        else "Usuń wpis oraz wszystkie pliki tej sesji Live z dysku."
-    )
-    remove_action.triggered.connect(self._remove_selected_session)
-    return menu
-
-
-def _reveal_selected_session(self: MainWindow) -> None:
-    session = self._selected_project_session()
-    if session is None or self.project is None:
-        return
-    path = self.project.absolute_path(session.relative_path)
-    if not path.parent.is_dir():
-        QMessageBox.warning(
-            self,
-            "Nie można otworzyć lokalizacji",
-            f"Folder sesji nie istnieje:\n{path.parent}",
-        )
-        return
-    _reveal_path(path)
-
-
-def _remove_selected_session(self: MainWindow) -> None:
-    session = self._selected_project_session()
-    if session is None or self.project is None:
-        return
-
-    imported = session.source.startswith("imported")
-    path = self.project.absolute_path(session.relative_path)
-    if session.status == "recording" and self._has_active_capture():
-        QMessageBox.information(
-            self,
-            "Aktywna rejestracja",
-            "Nie można usunąć sesji, która jest aktualnie rejestrowana.",
-        )
-        return
-
-    artifacts = session_artifact_paths(self.project, session)
-    existing_count = sum(candidate.exists() or candidate.is_symlink() for candidate in artifacts)
-    if imported:
-        title = "Usuń importowaną sesję z projektu"
-        text = (
-            f"Usunąć „{session.name}” z projektu?\n\n"
-            f"Pliki projektu do usunięcia: {existing_count}\n"
-            f"Lokalizacja sesji: {path}\n\n"
-            "Usunięte zostaną kopie i pliki pochodne znajdujące się w projekcie. "
-            "Oryginalny plik wybrany podczas importu, znajdujący się poza projektem, "
-            "pozostanie bez zmian.\n\n"
-            "Tej operacji nie można cofnąć."
-        )
-    else:
-        title = "Usuń log Live"
-        text = (
-            f"Usunąć „{session.name}” z projektu oraz z dysku?\n\n"
-            f"Lokalizacja: {path}\n"
-            f"Pliki do usunięcia: {existing_count}\n\n"
-            "Tej operacji nie można cofnąć."
-        )
-
-    answer = QMessageBox.question(
+    def __init__(
         self,
-        title,
-        text,
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    if answer != QMessageBox.StandardButton.Yes:
+        window: MainWindow,
+        *,
+        reveal_path_fn: Callable[[Path], bool] = reveal_path,
+    ) -> None:
+        super().__init__(window)
+        self._window = window
+        self._reveal_path = reveal_path_fn
+
+        tree = window.explorer.tree
+        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(self.show_context_menu)
+        tree.selectionModel().selectionChanged.connect(self.selection_changed)
+        window.explorer.model.modelReset.connect(self.clear_selection)
+
+    def selection_changed(self, *_args: Any) -> None:
+        session = self.selected_project_session()
+        project = self._window.project
+        if session is not None and project is not None:
+            self._window.inspector.setPlainText(
+                _format_session_inspector(project, session)
+            )
+
+    def clear_selection(self, *_args: Any) -> None:
         return
 
-    self._close_session_tab_for_path(path)
-    try:
-        result = remove_session(
-            self.project,
-            session.id,
-            delete_files=True,
-        )
-    except Exception as exc:
-        QMessageBox.critical(self, "Nie można usunąć sesji", str(exc))
-        return
+    def selected_project_session(self) -> SessionRecord | None:
+        window = self._window
+        if window.project is None:
+            return None
+        selection_model = window.explorer.tree.selectionModel()
+        if selection_model is None:
+            return None
+        rows = selection_model.selectedRows()
+        if not rows:
+            return None
+        item = window.explorer.model.itemFromIndex(rows[0])
+        if item is None or item.data(ROLE_NODE_TYPE) != "session":
+            return None
+        value = item.data(ROLE_NODE_VALUE)
+        if not value:
+            return None
+        try:
+            return window.project.session_by_path(Path(str(value)).resolve())
+        except (OSError, ValueError):
+            return None
 
-    self.explorer.refresh()
-    if imported:
-        self.inspector.setPlainText(
-            "IMPORTOWANA SESJA USUNIĘTA Z PROJEKTU\n\n"
-            f"Usunięto plików projektu: {len(result.removed_files)}\n"
-            "Oryginalny plik źródłowy poza projektem pozostawiono bez zmian."
+    def show_context_menu(self, position: QPoint) -> None:
+        window = self._window
+        tree = window.explorer.tree
+        index = tree.indexAt(position)
+        if not index.isValid():
+            return
+        item = window.explorer.model.itemFromIndex(index)
+        if item is None or item.data(ROLE_NODE_TYPE) != "session":
+            return
+
+        selection_model = tree.selectionModel()
+        if selection_model is None:
+            return
+        selection_model.select(
+            index,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect
+            | QItemSelectionModel.SelectionFlag.Rows,
         )
-        self._append_output(
-            f"Usunięto importowaną sesję z projektu: {session.name} | "
-            f"pliki={len(result.removed_files)}"
+        tree.setCurrentIndex(index)
+
+        session = self.selected_project_session()
+        if session is not None:
+            self.build_context_menu(session).exec(tree.viewport().mapToGlobal(position))
+
+    def build_context_menu(self, session: SessionRecord) -> QMenu:
+        window = self._window
+        menu = QMenu(window.explorer.tree)
+
+        reveal_action = menu.addAction("Idź do pliku")
+        if window.project is None:
+            reveal_action.setEnabled(False)
+        else:
+            path = window.project.absolute_path(session.relative_path)
+            reveal_action.setEnabled(path.parent.is_dir())
+        reveal_action.triggered.connect(self.reveal_selected_session)
+
+        menu.addSeparator()
+        imported = session.source.startswith("imported")
+        remove_action = menu.addAction("Usuń z projektu" if imported else "Usuń log")
+        remove_action.setToolTip(
+            "Usuń wpis i wszystkie kopie oraz pliki pochodne zapisane w projekcie. "
+            "Oryginalny plik źródłowy poza projektem pozostanie bez zmian."
+            if imported
+            else "Usuń wpis oraz wszystkie pliki tej sesji Live z dysku."
         )
-    else:
-        self.inspector.setPlainText(
-            "SESJA LIVE USUNIĘTA\n\n"
-            f"Usunięto plików: {len(result.removed_files)}\n"
-            f"Lokalizacja: {path.parent}"
+        remove_action.triggered.connect(self.remove_selected_session)
+        return menu
+
+    def reveal_selected_session(self) -> None:
+        session = self.selected_project_session()
+        project = self._window.project
+        if session is None or project is None:
+            return
+        path = project.absolute_path(session.relative_path)
+        if not path.parent.is_dir():
+            QMessageBox.warning(
+                self._window,
+                "Nie można otworzyć lokalizacji",
+                f"Folder sesji nie istnieje:\n{path.parent}",
+            )
+            return
+        self._reveal_path(path)
+
+    def remove_selected_session(self) -> None:
+        window = self._window
+        session = self.selected_project_session()
+        project = window.project
+        if session is None or project is None:
+            return
+
+        imported = session.source.startswith("imported")
+        path = project.absolute_path(session.relative_path)
+        if session.status == "recording" and window.navigator.has_active_capture():
+            QMessageBox.information(
+                window,
+                "Aktywna rejestracja",
+                "Nie można usunąć sesji, która jest aktualnie rejestrowana.",
+            )
+            return
+
+        artifacts = session_artifact_paths(project, session)
+        existing_count = sum(
+            candidate.exists() or candidate.is_symlink() for candidate in artifacts
         )
-        self._append_output(
-            f"Usunięto sesję Live: {session.name} | pliki={len(result.removed_files)}"
+        if imported:
+            title = "Usuń importowaną sesję z projektu"
+            text = (
+                f"Usunąć „{session.name}” z projektu?\n\n"
+                f"Pliki projektu do usunięcia: {existing_count}\n"
+                f"Lokalizacja sesji: {path}\n\n"
+                "Usunięte zostaną kopie i pliki pochodne znajdujące się w projekcie. "
+                "Oryginalny plik wybrany podczas importu, znajdujący się poza projektem, "
+                "pozostanie bez zmian.\n\n"
+                "Tej operacji nie można cofnąć."
+            )
+        else:
+            title = "Usuń log Live"
+            text = (
+                f"Usunąć „{session.name}” z projektu oraz z dysku?\n\n"
+                f"Lokalizacja: {path}\n"
+                f"Pliki do usunięcia: {existing_count}\n\n"
+                "Tej operacji nie można cofnąć."
+            )
+
+        answer = QMessageBox.question(
+            window,
+            title,
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        window.navigator.close_session(path)
+        try:
+            result = remove_session(project, session.id, delete_files=True)
+        except Exception as exc:
+            QMessageBox.critical(window, "Nie można usunąć sesji", str(exc))
+            return
+
+        window.explorer.refresh()
+        if imported:
+            window.inspector.setPlainText(
+                "IMPORTOWANA SESJA USUNIĘTA Z PROJEKTU\n\n"
+                f"Usunięto plików projektu: {len(result.removed_files)}\n"
+                "Oryginalny plik źródłowy poza projektem pozostawiono bez zmian."
+            )
+            window._append_output(
+                f"Usunięto importowaną sesję z projektu: {session.name} | "
+                f"pliki={len(result.removed_files)}"
+            )
+        else:
+            window.inspector.setPlainText(
+                "SESJA LIVE USUNIĘTA\n\n"
+                f"Usunięto plików: {len(result.removed_files)}\n"
+                f"Lokalizacja: {path.parent}"
+            )
+            window._append_output(
+                f"Usunięto sesję Live: {session.name} | "
+                f"pliki={len(result.removed_files)}"
+            )
 
 
-def _close_session_tab_for_path(self: MainWindow, path: Path) -> None:
-    key = f"session:{path.resolve()}"
-    widget = self._tab_keys.get(key)
-    if widget is None:
-        return
-    index = self.tabs.indexOf(widget)
-    if index >= 0:
-        self.tabs.removeTab(index)
-    self._tab_keys.pop(key, None)
-    widget.deleteLater()
-
-
-def _format_session_inspector(project, session: SessionRecord) -> str:
+def _format_session_inspector(project: CrtProject, session: SessionRecord) -> str:
     path = project.absolute_path(session.relative_path)
     imported = session.source.startswith("imported")
     created = _format_iso_datetime(session.created_at_utc)
@@ -298,15 +273,3 @@ def _format_size(size: int) -> str:
             return f"{value:.0f} {unit}" if unit == "B" else f"{value:.2f} {unit}"
         value /= 1024.0
     return f"{size} B"
-
-
-def _reveal_path(path: Path) -> None:
-    native = QDir.toNativeSeparators(str(path))
-    if sys.platform.startswith("win"):
-        QProcess.startDetached("explorer.exe", [f"/select,{native}"])
-        return
-    if sys.platform == "darwin":
-        QProcess.startDetached("open", ["-R", str(path)])
-        return
-    target = path.parent if path.parent.is_dir() else path
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSettings, QThreadPool, Qt
 from PySide6.QtGui import QAction, QCloseEvent
@@ -16,7 +17,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QStatusBar,
-    QTabBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -26,19 +26,18 @@ from PySide6.QtWidgets import (
 from app.project import CrtProject
 from app.project_dbc import active_project_dbc_paths, list_project_dbc
 
-from .dbc_manager import DbcManagerWidget
-from .import_task import ProjectImportTask
-from .live_capture import LiveCaptureWidget
-from .project_dialog import NewProjectDialog
-from .project_explorer import ProjectExplorer
-from .project_overview import ProjectOverviewWidget
-from .session_view import SessionViewWidget
-from .study_area_view import StudyAreaViewWidget
+from .project_navigator import CloseTabResult
+
+if TYPE_CHECKING:
+    from .application_container import ApplicationContainer
+    from .import_task import ProjectImportTask
+    from .project_dialog import NewProjectDialog
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, services: ApplicationContainer) -> None:
         super().__init__()
+        self.services = services
         self.setWindowTitle("CAN Research Tool")
         self.resize(1580, 920)
         self.setMinimumSize(1100, 700)
@@ -46,13 +45,15 @@ class MainWindow(QMainWindow):
         self.settings = QSettings()
         self.project: CrtProject | None = None
         self._import_tasks: list[ProjectImportTask] = []
-        self._tab_keys: dict[str, QWidget] = {}
 
         self._build_actions()
         self._build_menu()
         self._build_activity_bar()
         self._build_docks()
         self._build_central_tabs()
+        self.navigator = services.create_project_navigator(self.tabs)
+        self._tab_keys = self.navigator.widgets
+        self.session_management = services.create_session_management(self)
         self._build_status_bar()
         self._show_welcome()
 
@@ -107,6 +108,9 @@ class MainWindow(QMainWindow):
         )
         self.decoders_action = QAction("Dekodery", self)
         self.decoders_action.triggered.connect(self._open_decoders)
+        self.filters_action = QAction("Filtry", self)
+        self.filters_action.setObjectName("globalFiltersAction")
+        self.filters_action.triggered.connect(self._open_filters)
         self.settings_action = QAction("Ustawienia", self)
         self.settings_action.triggered.connect(
             lambda: self._open_placeholder(
@@ -125,6 +129,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("Widok")
         view_menu.addAction(self.toggle_explorer_action)
+        view_menu.addAction(self.filters_action)
 
     def _build_activity_bar(self) -> None:
         toolbar = QToolBar("Aktywność", self)
@@ -141,12 +146,13 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.signals_action)
         toolbar.addAction(self.decoders_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.filters_action)
         toolbar.addAction(self.settings_action)
         self.addToolBar(Qt.LeftToolBarArea, toolbar)
         self.activity_bar = toolbar
 
     def _build_docks(self) -> None:
-        self.explorer = ProjectExplorer()
+        self.explorer = self.services.create_project_explorer()
         self.explorer.open_overview.connect(self._open_overview)
         self.explorer.open_live_capture.connect(self._open_live_capture)
         self.explorer.open_session.connect(self._open_session)
@@ -245,7 +251,7 @@ class MainWindow(QMainWindow):
         self.inspector_dock.hide()
 
     def _new_project(self) -> None:
-        dialog = NewProjectDialog(self)
+        dialog = self.services.create_project_dialog(self)
         result = dialog.exec()
         if result != QDialog.DialogCode.Accepted:
             return
@@ -308,7 +314,7 @@ class MainWindow(QMainWindow):
         key = "project-overview"
         if self._activate_tab(key):
             return
-        widget = ProjectOverviewWidget(self.project)
+        widget = self.services.create_project_overview(self.project)
         widget.open_live_requested.connect(self._open_live_capture)
         widget.add_area_requested.connect(self._add_study_area)
         widget.import_requested.connect(self._import_log)
@@ -323,7 +329,7 @@ class MainWindow(QMainWindow):
         key = "live-capture"
         if self._activate_tab(key):
             return
-        widget = LiveCaptureWidget(self.project)
+        widget = self.services.create_live_capture_view(self.project)
         widget.inspector_text.connect(self.inspector.setPlainText)
         widget.output_message.connect(self._append_output)
         widget.status_text.connect(self.capture_status.setText)
@@ -339,20 +345,32 @@ class MainWindow(QMainWindow):
         key = "decoders"
         if self._activate_tab(key):
             return
-        widget = DbcManagerWidget(self.project)
+        widget = self.services.create_dbc_manager(self.project)
         widget.inspector_text.connect(self.inspector.setPlainText)
         widget.output_message.connect(self._append_output)
         widget.changed.connect(self._dbc_changed)
         self._add_tab(key, widget, "Dekodery")
+
+    def _open_filters(self) -> None:
+        if self.project is None:
+            QMessageBox.information(
+                self, "CRT", "Najpierw otwórz lub utwórz projekt."
+            )
+            return
+        key = "global-filters"
+        if self._activate_tab(key):
+            return
+        widget = self.services.create_filter_manager(self.project)
+        widget.output_message.connect(self._append_output)
+        widget.changed.connect(self.explorer.refresh)
+        self._add_tab(key, widget, "Filtry")
 
     def _dbc_changed(self) -> None:
         if self.project is None:
             return
         paths = active_project_dbc_paths(self.project)
         self.explorer.refresh()
-        for widget in tuple(self._tab_keys.values()):
-            if isinstance(widget, SessionViewWidget):
-                widget.reload_logical_messages(paths)
+        self.navigator.reload_session_dbc(paths)
         if self._has_active_capture():
             self._append_output(
                 "Zmieniono aktywne DBC. Trwająca rejestracja zachowuje zestaw wybrany przy Start; "
@@ -362,18 +380,11 @@ class MainWindow(QMainWindow):
             self._append_output(f"Aktywne dekodery DBC: {len(paths)}")
 
     def _open_session(self, path: str) -> None:
-        session_path = Path(path).resolve()
-        key = f"session:{session_path}"
-        if self._activate_tab(key):
-            return
-        dbc_paths = active_project_dbc_paths(self.project) if self.project else ()
-        widget = SessionViewWidget(session_path, dbc_paths=dbc_paths)
-        widget.inspector_text.connect(self.inspector.setPlainText)
-        widget.output_message.connect(self._append_output)
-        self._add_tab(
-            key,
-            widget,
-            session_path.name.removesuffix(".crt.jsonl"),
+        self.navigator.open_session(
+            path,
+            project=self.project,
+            inspector_sink=self.inspector.setPlainText,
+            output_sink=self._append_output,
         )
 
     def _open_area(self, area_id: str) -> None:
@@ -394,7 +405,7 @@ class MainWindow(QMainWindow):
             return
         self._add_tab(
             key,
-            StudyAreaViewWidget(self.project, area.id),
+            self.services.create_study_area_view(self.project, area.id),
             area.name,
         )
 
@@ -427,7 +438,7 @@ class MainWindow(QMainWindow):
             "Logi CRT/Kvaser (*.crt.jsonl *.csv);;Sesje CRT (*.crt.jsonl);;CSV (*.csv)",
         )
         for path in paths:
-            task = ProjectImportTask(self.project, path)
+            task = self.services.create_import_task(self.project, path)
             task.signals.completed.connect(self._import_completed)
             task.signals.failed.connect(self._import_failed)
             self._import_tasks.append(task)
@@ -479,64 +490,25 @@ class MainWindow(QMainWindow):
         *,
         closable: bool = True,
     ) -> None:
-        widget.setProperty("crtTabKey", key)
-        index = self.tabs.addTab(widget, title)
-        self._tab_keys[key] = widget
-        self.tabs.setCurrentIndex(index)
-        if not closable:
-            self.tabs.tabBar().setTabButton(
-                index,
-                QTabBar.ButtonPosition.RightSide,
-                None,
-            )
+        self.navigator.add_tab(key, widget, title, closable=closable)
 
     def _activate_tab(self, key: str) -> bool:
-        widget = self._tab_keys.get(key)
-        if widget is None:
-            return False
-        index = self.tabs.indexOf(widget)
-        if index < 0:
-            self._tab_keys.pop(key, None)
-            return False
-        self.tabs.setCurrentIndex(index)
-        return True
+        return self.navigator.activate(key)
 
     def _close_tab(self, index: int) -> None:
-        widget = self.tabs.widget(index)
-        if widget is None:
-            return
-        if isinstance(widget, LiveCaptureWidget) and widget.is_capturing:
+        result = self.navigator.close_at(index)
+        if result is CloseTabResult.ACTIVE_CAPTURE:
             QMessageBox.information(
                 self,
                 "CRT",
                 "Zatrzymaj rejestrację przed zamknięciem zakładki Live Capture.",
             )
-            return
-        key = str(widget.property("crtTabKey") or "")
-        if isinstance(widget, LiveCaptureWidget):
-            widget.shutdown()
-        self.tabs.removeTab(index)
-        if key:
-            self._tab_keys.pop(key, None)
-        widget.deleteLater()
 
     def _close_project_tabs(self) -> None:
-        for index in range(self.tabs.count() - 1, -1, -1):
-            widget = self.tabs.widget(index)
-            if widget is None:
-                continue
-            key = str(widget.property("crtTabKey") or "")
-            if isinstance(widget, LiveCaptureWidget):
-                widget.shutdown()
-            self.tabs.removeTab(index)
-            self._tab_keys.pop(key, None)
-            widget.deleteLater()
+        self.navigator.close_all()
 
     def _has_active_capture(self) -> bool:
-        for widget in self._tab_keys.values():
-            if isinstance(widget, LiveCaptureWidget) and widget.is_capturing:
-                return True
-        return False
+        return self.navigator.has_active_capture()
 
     def _toggle_explorer(self, visible: bool) -> None:
         self.explorer_dock.setVisible(visible)
@@ -553,4 +525,5 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        self.navigator.shutdown_sessions()
         event.accept()
