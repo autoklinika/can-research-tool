@@ -640,6 +640,7 @@ class FilterManagerWidget(QWidget):
     def _table_item_changed(self, item: QTableWidgetItem) -> None:
         if self._loading:
             return
+        activation_changed = item.column() == 0
         row = item.row()
         if not 0 <= row < len(self.presets):
             return
@@ -653,6 +654,8 @@ class FilterManagerWidget(QWidget):
         self._mark_dirty()
         self._selection_changed()
         self._update_status()
+        if activation_changed:
+            self._save(silent=True)
 
     def _preset_editor_changed(self, *_args: object) -> None:
         if self._loading:
@@ -660,6 +663,7 @@ class FilterManagerWidget(QWidget):
         preset = self._current_preset()
         if preset is None:
             return
+        previous_enabled = preset.enabled
         preset.name = self.name_edit.text().strip()
         preset.description = self.description_edit.text().strip()
         preset.shortcut = self.shortcut_edit.text().strip()
@@ -675,6 +679,8 @@ class FilterManagerWidget(QWidget):
         self._loading = False
         self._mark_dirty()
         self._update_status()
+        if preset.enabled != previous_enabled:
+            self._save(silent=True)
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -711,16 +717,21 @@ class FilterManagerWidget(QWidget):
         self.validation_label.setText("✓ poprawny" if not issues else f"⚠ {len(issues)} błędów")
 
     def _save(self, _checked: bool = False, *, silent: bool = False) -> bool:
-        invalid = [(preset, self.compiler.validate(preset)) for preset in self.presets]
+        invalid = [
+            (preset, self.compiler.validate(preset))
+            for preset in self.presets
+            if preset.enabled
+        ]
         invalid = [(preset, issues) for preset, issues in invalid if issues]
         if invalid:
             preset, issues = invalid[0]
-            self.save_state_label.setText("Błąd walidacji — nie zapisano")
+            self.save_state_label.setText("Błąd aktywnego filtra — nie zapisano")
             if not silent:
                 QMessageBox.warning(
                     self,
                     "Filtry",
-                    f"Preset „{preset.name}” jest niepoprawny:\n{issues[0].path}: {issues[0].message}",
+                    f"Aktywny preset „{preset.name}” jest niepoprawny:\n"
+                    f"{issues[0].path}: {issues[0].message}",
                 )
             return False
         try:
@@ -731,6 +742,7 @@ class FilterManagerWidget(QWidget):
                 QMessageBox.critical(self, "Nie można zapisać filtrów", str(exc))
             return False
         self._dirty = False
+        self.autosave_timer.stop()
         self.save_state_label.setText("Zapisano automatycznie" if silent else "Zapisano")
         self.output_message.emit(f"Zapisano presety filtrów: {len(self.presets)}")
         self.changed.emit()

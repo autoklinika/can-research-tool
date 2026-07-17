@@ -11,13 +11,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QApplication
 
+from app.models import CaptureSession
 from app.project import CrtProject
+from app.session_stream import SessionStreamWriter
+from gui.application_container import ApplicationContainer
 from gui.main_window import MainWindow
+from gui.project_navigator import CloseTabResult, ProjectNavigator
 from gui.project_explorer import ROLE_NODE_TYPE, ROLE_NODE_VALUE
-from gui.session_management_integration import (
-    _format_session_inspector,
-    install_session_management_integration,
-)
+from gui.session_management_integration import _format_session_inspector
 
 
 def _find_session_item(item: QStandardItem, path: Path) -> QStandardItem | None:
@@ -39,7 +40,7 @@ def _find_session_item(item: QStandardItem, path: Path) -> QStandardItem | None:
 def _menu_labels(window: MainWindow, path: Path) -> list[str]:
     session = window.project.session_by_path(path) if window.project is not None else None
     assert session is not None
-    menu = window._build_session_context_menu(session)
+    menu = window.session_management.build_context_menu(session)
     return [action.text() for action in menu.actions() if not action.isSeparator()]
 
 
@@ -47,14 +48,15 @@ def _run_phase(phase: str) -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("Autoklinika-tests")
     app.setApplicationName(f"CRT-session-management-{phase}")
-    install_session_management_integration()
-
     with tempfile.TemporaryDirectory() as directory:
         project = CrtProject.create(Path(directory) / "project", name="Session smoke")
 
         live_path = project.live_sessions_dir / "live_case.crt.jsonl"
-        live_path.parent.mkdir(parents=True, exist_ok=True)
-        live_path.write_text("live", encoding="utf-8")
+        with SessionStreamWriter(
+            CaptureSession(name="Live case", source="kvaser-live-stream"),
+            live_path,
+        ):
+            pass
         project.register_session(
             live_path,
             name="Live case",
@@ -63,8 +65,11 @@ def _run_phase(phase: str) -> None:
         )
 
         imported_path = project.imported_sessions_dir / "imported_case.crt.jsonl"
-        imported_path.parent.mkdir(parents=True, exist_ok=True)
-        imported_path.write_text("imported", encoding="utf-8")
+        with SessionStreamWriter(
+            CaptureSession(name="Imported case", source="imported-crt-session"),
+            imported_path,
+        ):
+            pass
         project.register_session(
             imported_path,
             name="Imported case",
@@ -72,7 +77,7 @@ def _run_phase(phase: str) -> None:
             status="ready",
         )
 
-        window = MainWindow()
+        window = ApplicationContainer().create_main_window()
         window._set_project(project)
 
         if phase == "tree":
@@ -86,6 +91,22 @@ def _run_phase(phase: str) -> None:
             assert root is not None
             assert _find_session_item(root, live_path) is not None
             assert _find_session_item(root, imported_path) is not None
+            first = window.navigator.open_session(
+                live_path,
+                project=project,
+                inspector_sink=window.inspector.setPlainText,
+                output_sink=window._append_output,
+            )
+            second = window.navigator.open_session(
+                live_path,
+                project=project,
+                inspector_sink=window.inspector.setPlainText,
+                output_sink=window._append_output,
+            )
+            assert first is second
+            assert window.navigator.widget(ProjectNavigator.session_key(live_path)) is first
+            assert window.navigator.close_session(live_path) is CloseTabResult.CLOSED
+            assert window.navigator.widget(ProjectNavigator.session_key(live_path)) is None
 
         elif phase == "live":
             live_record = project.session_by_path(live_path)

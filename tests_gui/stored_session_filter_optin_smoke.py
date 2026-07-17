@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tempfile import TemporaryDirectory
+from time import monotonic, sleep
 
 from PySide6.QtWidgets import QApplication
 
@@ -8,13 +9,21 @@ from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
-from gui.session_filter_integration import install_session_filter_integration
 from gui.session_view import SessionViewWidget
+
+
+def _wait_for_rows(app: QApplication, widget: SessionViewWidget, rows: int) -> None:
+    deadline = monotonic() + 5.0
+    while monotonic() < deadline:
+        app.processEvents()
+        if widget.frame_model.rowCount() == rows:
+            return
+        sleep(0.01)
+    raise AssertionError(f"expected {rows} stored-session rows")
 
 
 def main() -> None:
     app = QApplication.instance() or QApplication([])
-    install_session_filter_integration()
 
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(f"{temporary}/project", name="Filter opt-in")
@@ -42,14 +51,17 @@ def main() -> None:
 
         widget = SessionViewWidget(session_path)
         assert widget.stored_apply_filters.isChecked() is False
-        assert widget._stored_available_filter_set.active_count == 1
-        assert widget._stored_filter_set.active_count == 0
+        assert widget._stored_session_controller.available_filter_set.active_count == 1
+        assert widget._stored_session_controller.active_filter_set.active_count == 0
+        _wait_for_rows(app, widget, 2)
 
         widget.stored_apply_filters.setChecked(True)
-        assert widget._stored_filter_set.active_count == 1
+        assert widget._stored_session_controller.active_filter_set.active_count == 1
+        _wait_for_rows(app, widget, 1)
 
         widget.stored_apply_filters.setChecked(False)
-        assert widget._stored_filter_set.active_count == 0
+        assert widget._stored_session_controller.active_filter_set.active_count == 0
+        _wait_for_rows(app, widget, 2)
         widget.close()
 
     app.processEvents()

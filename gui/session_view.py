@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QThreadPool, Qt, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QLabel, QTableView, QTabWidget, QVBoxLayout, QWidget
 
 from app.marker_stream import iter_markers, marker_path_for_session
 from app.markers import CaptureMarker
-from app.session_stream import read_session_header
+from app.stored_session_controller import (
+    StoredSessionController,
+    StoredSessionPageState,
+)
 
 from .frame_model import FrameTableModel
 from .logical_message_loader import LogicalMessageLoadTask
@@ -15,7 +20,8 @@ from .logical_message_model import (
     LogicalMessageTableModel,
     format_logical_message_inspector,
 )
-from .session_loader import SessionLoadTask
+from .protocol_summary import attach_protocol_summary
+from .session_filter_integration import StoredSessionIntegration
 
 
 class MarkerHistoryModel(QAbstractTableModel):
@@ -71,11 +77,20 @@ class SessionViewWidget(QWidget):
         *,
         dbc_paths: tuple[Path, ...] = (),
         parent: QWidget | None = None,
+        controller: StoredSessionController | None = None,
+        stored_integration_factory: Callable[
+            [SessionViewWidget, StoredSessionController], StoredSessionIntegration
+        ] = StoredSessionIntegration,
+        protocol_summary_attacher: Callable[..., None] = attach_protocol_summary,
     ) -> None:
         super().__init__(parent)
         self.path = Path(path)
         self._dbc_paths = tuple(Path(item) for item in dbc_paths)
-        self._load_task: SessionLoadTask | None = None
+        self._stored_session_controller = controller or StoredSessionController(
+            self.path,
+            page_size=self.MAX_ROWS,
+        )
+        self._stored_rendered_generation = 0
         self._message_load_tasks: list[LogicalMessageLoadTask] = []
         self._message_load_generation = 0
         self.frame_model = FrameTableModel(capacity=self.MAX_ROWS, parent=self)
@@ -151,21 +166,18 @@ class SessionViewWidget(QWidget):
         marker_layout.addWidget(self.marker_table)
         self.tabs.addTab(marker_page, f"Znaczniki ({len(markers)})")
 
-        self._start_load()
+        self._stored_session_integration = stored_integration_factory(
+            self,
+            self._stored_session_controller,
+        )
         self._start_message_load()
+        protocol_summary_attacher(self.message_table, self.message_model)
 
     def reload_logical_messages(self, dbc_paths: tuple[Path, ...]) -> None:
         self._dbc_paths = tuple(Path(item) for item in dbc_paths)
         self.message_model.clear()
         self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — ładowanie…")
         self._start_message_load()
-
-    def _start_load(self) -> None:
-        task = SessionLoadTask(self.path, max_rows=self.MAX_ROWS)
-        task.signals.loaded.connect(self._loaded)
-        task.signals.failed.connect(self._failed)
-        self._load_task = task
-        QThreadPool.globalInstance().start(task)
 
     def _start_message_load(self) -> None:
         self._message_load_generation += 1
@@ -194,32 +206,50 @@ class SessionViewWidget(QWidget):
         self._message_load_tasks.append(task)
         QThreadPool.globalInstance().start(task)
 
-    def _loaded(self, path: str, frames: object, total_frames: int, start: int) -> None:
-        loaded = list(frames)
-        self.frame_model.replace_frames(loaded)
-        try:
-            session = read_session_header(path)
-            title = session.name
-        except Exception:
-            title = self.path.name
-        text = (
-            f"{title} — {path} | pokazano {len(loaded):,} z {total_frames:,} ramek "
-            f"(od {start:,})"
-        ).replace(",", " ")
-        self.header.setText(text)
-        self.tabs.setTabText(
-            self.raw_tab_index,
-            f"Surowe ramki ({total_frames:,})".replace(",", " "),
-        )
-        if loaded:
-            self.frame_table.scrollToBottom()
-        self.output_message.emit(f"Otwarto sesję {path}: {total_frames} ramek")
-        self._load_task = None
+    def _apply_stored_session_state(self, state: StoredSessionPageState) -> None:
+        if state.loading or state.generation == self._stored_rendered_generation:
+            return
+        self._stored_rendered_generation = state.generation
+        if state.error:
+            self.header.setText(
+                f"Nie udało się otworzyć sesji: {state.path}\n{state.error}"
+            )
+            self.output_message.emit(
+                f"Błąd filtrowania sesji {state.path}: {state.error}"
+            )
+            return
+        if state.page is None:
+            return
 
-    def _failed(self, path: str, error: str) -> None:
-        self.header.setText(f"Nie udało się otworzyć sesji: {path}\n{error}")
-        self.output_message.emit(f"Błąd otwierania sesji {path}: {error}")
-        self._load_task = None
+        page = state.page
+        loaded = list(page.frames)
+        self.frame_model.replace_frames(loaded)
+        start = page.loaded_from_visible_index
+        end = start + len(loaded)
+        if state.filter_affects_visibility:
+            text = (
+                f"{state.session_title} — {state.path} | wyniki "
+                f"{start + 1 if loaded else 0:,}–{end:,} z {page.visible_frames:,} "
+                f"| cały log: {page.total_frames:,} ramek"
+            ).replace(",", " ")
+            tab_text = (
+                f"Surowe ramki ({page.visible_frames:,}/{page.total_frames:,})"
+            ).replace(",", " ")
+        else:
+            text = (
+                f"{state.session_title} — {state.path} | ramki "
+                f"{start + 1 if loaded else 0:,}–{end:,} z {page.total_frames:,}"
+            ).replace(",", " ")
+            tab_text = f"Surowe ramki ({page.total_frames:,})".replace(",", " ")
+
+        self.header.setText(text)
+        self.tabs.setTabText(self.raw_tab_index, tab_text)
+        if loaded:
+            self.frame_table.scrollToTop()
+        self.output_message.emit(
+            f"Otwarto stronę sesji {state.path}: zakres={start}-{end}, "
+            f"widoczne={page.visible_frames}, wszystkie={page.total_frames}"
+        )
 
     def _messages_loaded(
         self,
@@ -320,3 +350,10 @@ class SessionViewWidget(QWidget):
                 )
             )
         )
+
+    def shutdown(self) -> None:
+        self._stored_session_integration.shutdown()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.shutdown()
+        super().closeEvent(event)

@@ -20,7 +20,7 @@ crt-capture = "app.capture_cli:main"
 crt-gui = "gui.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app", "kvaser", "gui"]
+packages = ["app", "kvaser", "gui", "infrastructure"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

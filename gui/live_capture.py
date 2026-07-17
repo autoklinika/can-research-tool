@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -24,21 +24,30 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.capture_service import CaptureConfig, CaptureService, CaptureState
+from app.capture_service import CaptureState
 from app.dbc import DbcDecoder
+from app.live_capture_controller import (
+    CaptureMode,
+    LiveCaptureController,
+)
 from app.logical_records import reinterpret_raw_record
 from app.markers import MarkerPreset
 from app.project import CrtProject
-from app.project_dbc import active_project_dbc_paths
 from app.protocols import ProtocolRegistry
-from kvaser.backend import KvaserReceiveMode, list_channels
 
 from .frame_model import FrameTableModel
+from .live_filter_integration import (
+    LIVE_FRAME_CAPACITY as DEFAULT_LIVE_FRAME_CAPACITY,
+    LIVE_MESSAGE_CAPACITY as DEFAULT_LIVE_MESSAGE_CAPACITY,
+    LiveFilterIntegration,
+)
+from .live_save_integration import LiveSaveIntegration
 from .logical_message_model import (
     LogicalMessageTableModel,
     format_logical_message_inspector,
 )
 from .marker_manager import MarkerManagerDialog
+from .protocol_summary import attach_protocol_summary
 
 
 class LiveCaptureWidget(QWidget):
@@ -47,14 +56,27 @@ class LiveCaptureWidget(QWidget):
     status_text = Signal(str)
     project_changed = Signal()
 
-    LIVE_CAPACITY = 20_000
-    LIVE_MESSAGE_CAPACITY = 5_000
+    LIVE_CAPACITY = DEFAULT_LIVE_FRAME_CAPACITY
+    LIVE_MESSAGE_CAPACITY = DEFAULT_LIVE_MESSAGE_CAPACITY
     GUI_REFRESH_MS = 100
 
-    def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        project: CrtProject,
+        parent: QWidget | None = None,
+        *,
+        controller: LiveCaptureController | None = None,
+        filter_integration_factory: Callable[..., LiveFilterIntegration] = (
+            LiveFilterIntegration
+        ),
+        save_integration_factory: Callable[..., LiveSaveIntegration] = (
+            LiveSaveIntegration
+        ),
+        protocol_summary_attacher: Callable[..., None] = attach_protocol_summary,
+    ) -> None:
         super().__init__(parent)
         self.project = project
-        self._capture = CaptureService()
+        self._controller = controller or LiveCaptureController()
         self._last_sequence: int | None = None
         self._last_message_sequence: int | None = None
         self._last_state = CaptureState.IDLE
@@ -72,6 +94,9 @@ class LiveCaptureWidget(QWidget):
             parent=self,
         )
         self._build_ui()
+        self._live_filter_integration = filter_integration_factory(self)
+        self._live_save_integration = save_integration_factory(self)
+        protocol_summary_attacher(self.message_table, self.message_model)
         self._update_marker_tile()
         self._refresh_channels()
 
@@ -82,12 +107,12 @@ class LiveCaptureWidget(QWidget):
 
     @property
     def is_capturing(self) -> bool:
-        return self._capture.is_active
+        return self._controller.is_active
 
     def shutdown(self) -> None:
-        if self._capture.is_active:
-            self._capture.stop()
-            self._capture.wait(3.0)
+        if self._controller.is_active:
+            self._controller.stop()
+            self._controller.wait(3.0)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -115,8 +140,8 @@ class LiveCaptureWidget(QWidget):
         can_row.addWidget(self.bitrate_combo)
         can_row.addWidget(QLabel("Tryb:"))
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("BENCH — ACK aktywny", KvaserReceiveMode.BENCH.value)
-        self.mode_combo.addItem("LISTEN ONLY — bez ACK", KvaserReceiveMode.LISTEN_ONLY.value)
+        self.mode_combo.addItem("BENCH — ACK aktywny", CaptureMode.BENCH.value)
+        self.mode_combo.addItem("LISTEN ONLY — bez ACK", CaptureMode.LISTEN_ONLY.value)
         mode_index = self.mode_combo.findData(self.project.manifest.default_receive_mode)
         self.mode_combo.setCurrentIndex(max(0, mode_index))
         can_row.addWidget(self.mode_combo)
@@ -273,14 +298,13 @@ class LiveCaptureWidget(QWidget):
     def _refresh_channels(self) -> None:
         self.channel_combo.clear()
         try:
-            channels = list_channels()
+            channels = self._controller.list_adapters()
         except Exception as exc:
             self.channel_combo.addItem(f"Błąd Kvaser: {exc}", None)
             self.start_button.setEnabled(False)
             return
         for channel in channels:
-            virtual = "Virtual CAN Driver" in channel.name
-            suffix = " [virtual]" if virtual else ""
+            suffix = " [virtual]" if channel.is_virtual else ""
             self.channel_combo.addItem(
                 f"{channel.number}: {channel.name}{suffix}",
                 channel.number,
@@ -292,7 +316,7 @@ class LiveCaptureWidget(QWidget):
         self.start_button.setEnabled(self.channel_combo.currentData() is not None)
 
     def _open_marker_manager(self) -> None:
-        if self._capture.is_active:
+        if self._controller.is_active:
             QMessageBox.information(
                 self,
                 "CRT",
@@ -313,70 +337,14 @@ class LiveCaptureWidget(QWidget):
         )
 
     def _start_capture(self) -> None:
-        channel_number = self.channel_combo.currentData()
-        if channel_number is None:
-            QMessageBox.warning(self, "CRT", "Nie wybrano poprawnego kanału Kvaser.")
-            return
-        name = self.session_name.text().strip()
-        if not name:
-            name = datetime.now().strftime("capture_%Y%m%d_%H%M%S")
-            self.session_name.setText(name)
-
-        presets = self.project.list_marker_presets()
-        active = [preset for preset in presets if preset.enabled]
-        shortcuts = [preset.shortcut.lower() for preset in active]
-        if len(shortcuts) != len(set(shortcuts)):
-            QMessageBox.warning(self, "CRT", "Aktywne znaczniki mają zduplikowane skróty.")
-            return
-
-        dbc_paths = active_project_dbc_paths(self.project)
-        try:
-            self._dbc_decoder = DbcDecoder(dbc_paths) if dbc_paths else None
-            paths = self._capture.start(
-                CaptureConfig(
-                    channel_number=int(channel_number),
-                    bitrate=int(self.bitrate_combo.currentData()),
-                    mode=KvaserReceiveMode(str(self.mode_combo.currentData())),
-                    session_name=name,
-                    output_dir=self.project.live_sessions_dir,
-                    live_buffer_capacity=self.LIVE_CAPACITY,
-                    live_message_capacity=self.LIVE_MESSAGE_CAPACITY,
-                    marker_presets=tuple(active),
-                )
-            )
-            self.project.register_session(
-                paths.session,
-                name=name,
-                source="kvaser-live-stream",
-                status="recording",
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Nie można rozpocząć rejestracji", str(exc))
-            return
-
-        self._current_session_path = paths.session
-        self._finalized_session_path = None
-        self._last_sequence = None
-        self._last_message_sequence = None
-        self._error_shown = ""
-        self.frame_model.clear()
-        self.message_model.clear()
-        self.marker_history.clear()
-        self.pause_view.setChecked(False)
-        self.path_label.setText(f"Sesja: {paths.session}")
-        self._install_marker_controls(active)
-        self._set_capture_controls(True)
-        self.output_message.emit(
-            f"Rozpoczęto rejestrację: {paths.session} | aktywne DBC={len(dbc_paths)}"
-        )
-        self.project_changed.emit()
+        self._live_save_integration.start_capture()
 
     def _stop_capture(self) -> None:
-        self._capture.stop()
+        self._controller.stop()
         self.stop_button.setEnabled(False)
 
     def _refresh_view(self) -> None:
-        status = self._capture.status()
+        status = self._controller.status()
         self._update_status(status)
 
         if not self.pause_view.isChecked() and status.state in (
@@ -384,7 +352,7 @@ class LiveCaptureWidget(QWidget):
             CaptureState.STOPPING,
             CaptureState.STOPPED,
         ):
-            snapshot = self._capture.live_snapshot_since(self._last_sequence)
+            snapshot = self._controller.frames_since(self._last_sequence)
             if snapshot.frames:
                 scrollbar = self.frame_table.verticalScrollBar()
                 was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
@@ -396,7 +364,7 @@ class LiveCaptureWidget(QWidget):
                 if self.auto_scroll.isChecked() and was_at_bottom:
                     self.frame_table.scrollToBottom()
 
-            message_snapshot = self._capture.live_messages_snapshot_since(
+            message_snapshot = self._controller.messages_since(
                 self._last_message_sequence
             )
             if message_snapshot.messages:
@@ -475,20 +443,25 @@ class LiveCaptureWidget(QWidget):
             f"{status.state.value.upper()} | {status.frame_count:,} ramek | "
             f"{status.live_retained:,}/{status.live_capacity:,} live".replace(",", " ")
         )
+        self._live_filter_integration.update_status(status.frame_count)
 
     def _set_capture_controls(self, active: bool) -> None:
         self.start_button.setEnabled(
             not active and self.channel_combo.currentData() is not None
         )
-        self.stop_button.setEnabled(active and self._capture.is_active)
+        self.stop_button.setEnabled(active and self._controller.is_active)
         self.channel_combo.setEnabled(not active)
         self.refresh_button.setEnabled(not active)
         self.bitrate_combo.setEnabled(not active)
         self.mode_combo.setEnabled(not active)
         self.session_name.setEnabled(not active)
         self.marker_setup_button.setEnabled(not active)
+        self._live_save_integration.update_controls(active)
 
     def _finalize_project_session(self, status) -> None:
+        self._live_save_integration.finalize(status)
+
+    def _finalize_persistent_session(self, status) -> None:
         path = self._current_session_path
         if path is None or path == self._finalized_session_path:
             return
@@ -553,7 +526,7 @@ class LiveCaptureWidget(QWidget):
 
     def _trigger_marker(self, preset: MarkerPreset, *, source: str) -> None:
         try:
-            marker = self._capture.add_marker(preset, source=source)
+            marker = self._controller.add_marker(preset, source=source)
         except Exception:
             return
         if self._current_session_path is not None:
@@ -580,10 +553,7 @@ class LiveCaptureWidget(QWidget):
         )
 
     def _frame_selected(self) -> None:
-        rows = self.frame_table.selectionModel().selectedRows()
-        if not rows:
-            return
-        frame = self.frame_model.frame_at(rows[0].row())
+        frame = self._live_filter_integration.selected_frame()
         if frame is None:
             return
         width = 8 if frame.is_extended_id else 3
