@@ -1,0 +1,31 @@
+name: Repair architecture branch history
+
+on:
+  push:
+    branches:
+      - agent/working-architecture-refactor-b-g-repaired
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repaired base
+        uses: actions/checkout@v4
+        with:
+          ref: agent/working-architecture-refactor-b-g-repaired
+          fetch-depth: 0
+
+      - name: Apply B-G refactor on the correct history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin agent/working-architecture-refactor-b-g-unrelated-backup-20260717
+          git cherry-pick c11ba16e52d8a8960615d6214d1a52f16ce45e21
+          git push origin HEAD:refs/heads/agent/working-architecture-refactor-b-g \
+            --force-with-lease=refs/heads/agent/working-architecture-refactor-b-g:c11ba16e52d8a8960615d6214d1a52f16ce45e21
