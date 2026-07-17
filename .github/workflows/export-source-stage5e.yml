@@ -23,10 +23,17 @@ jobs:
         shell: bash
         run: |
           cat .stage5e-part-* | base64 --decode | gzip --decompress > /tmp/stage5e.patch
-          git apply --check --exclude=.github/workflows/export-source-stage5e.yml /tmp/stage5e.patch
+          git apply --check \
+            --exclude=.github/workflows/export-source-stage5e.yml \
+            --exclude=.github/workflows/gui-regression.yml \
+            /tmp/stage5e.patch
       - name: Apply prepared patch
         shell: bash
-        run: git apply --index --exclude=.github/workflows/export-source-stage5e.yml /tmp/stage5e.patch
+        run: |
+          git apply --index \
+            --exclude=.github/workflows/export-source-stage5e.yml \
+            --exclude=.github/workflows/gui-regression.yml \
+            /tmp/stage5e.patch
       - name: Commit and push Stage 5E
         shell: bash
         run: |
