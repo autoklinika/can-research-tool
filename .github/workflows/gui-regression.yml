@@ -44,3 +44,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_filter_worker_smoke.py
+      - name: Verify protocol filters in GUI and logical Live view
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/protocol_filter_gui_smoke.py
