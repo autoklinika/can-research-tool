@@ -19,17 +19,17 @@ jobs:
         with:
           ref: agent/filter-gui-stage5e
           fetch-depth: 0
-      - name: Apply prepared patch
+      - name: Assemble prepared patch
         shell: bash
         run: |
-          if ! compgen -G '.stage5e-part-*' > /dev/null; then
-            echo 'No patch chunks yet.'
-            exit 0
-          fi
           cat .stage5e-part-* | base64 --decode | gzip --decompress > /tmp/stage5e.patch
-          git apply --index --exclude=.github/workflows/export-source-stage5e.yml /tmp/stage5e.patch
-          rm -f .stage5e-part-* .github/workflows/export-source-stage5e.yml
-          git add -A
+          git apply --check --exclude=.github/workflows/export-source-stage5e.yml /tmp/stage5e.patch
+      - name: Apply prepared patch
+        shell: bash
+        run: git apply --index --exclude=.github/workflows/export-source-stage5e.yml /tmp/stage5e.patch
+      - name: Commit and push Stage 5E
+        shell: bash
+        run: |
           git config user.name 'CRT Stage 5E automation'
           git config user.email 'stage5e@users.noreply.github.com'
           git commit -m 'Integrate protocol filters into GUI'
