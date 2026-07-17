@@ -9,13 +9,11 @@ from PySide6.QtWidgets import QApplication
 from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
 from app.models import CanFrame
 from app.project import CrtProject
-from gui.live_filter_integration import install_live_filter_integration
 from gui.live_capture import LiveCaptureWidget
 
 
 def main() -> None:
     app = QApplication.instance() or QApplication([])
-    install_live_filter_integration()
 
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(f"{temporary}/project", name="Live filter worker")
@@ -38,6 +36,7 @@ def main() -> None:
         ProjectFilterRepository(project.database_path).save_presets([preset])
 
         widget = LiveCaptureWidget(project)
+        assert widget._live_filter_integration.proxy is widget.live_filter_proxy
         frames = [
             CanFrame(
                 sequence=index,
