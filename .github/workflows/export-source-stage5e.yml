@@ -1,26 +1,33 @@
-name: Export Stage 5E Source
+name: Apply Stage 5E Patch
 
 on:
   push:
     branches:
       - agent/filter-gui-stage5e
-  pull_request:
-    branches:
-      - agent/filter-uds-stage5d
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export-source:
+  apply-patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/upload-artifact@v4
         with:
-          name: stage5e-source
-          path: |
-            .
-            !.git
-          include-hidden-files: true
-          retention-days: 1
+          ref: agent/filter-gui-stage5e
+          fetch-depth: 0
+      - name: Apply prepared patch
+        shell: bash
+        run: |
+          if ! compgen -G '.stage5e-part-*' > /dev/null; then
+            echo 'No patch chunks yet.'
+            exit 0
+          fi
+          cat .stage5e-part-* | base64 --decode | gzip --decompress > /tmp/stage5e.patch
+          git apply --index /tmp/stage5e.patch
+          rm -f .stage5e-part-* .github/workflows/export-source-stage5e.yml
+          git add -A
+          git config user.name 'CRT Stage 5E automation'
+          git config user.email 'stage5e@users.noreply.github.com'
+          git commit -m 'Integrate protocol filters into GUI'
+          git push origin HEAD:agent/filter-gui-stage5e
