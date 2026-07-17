@@ -155,7 +155,8 @@ jobs:
               assert live._live_save_integration.save_checkbox is live.save_session_button
               assert live.findChild(type(live.path_label), "protocolMessageSummary") is not None
               assert "1 aktywnych / 1" in live.marker_setup_button.text()
-              assert live.message_table.model() is live.message_model
+              assert live.message_table.model() is live.live_message_filter_proxy
+              assert live.live_message_filter_proxy.sourceModel() is live.message_model
               assert live.frame_table.model() is live.live_filter_proxy
               assert not hasattr(live, "live_filter_label")
               assert live.save_session_button.isChecked() is False
