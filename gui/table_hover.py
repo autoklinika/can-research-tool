@@ -132,12 +132,12 @@ class FastCellHoverTracker(QObject):
 
     def tooltips_suppressed(self) -> bool:
         predicate = self._suppress_tooltips_when
-        if predicate is None:
-            return False
-        try:
-            return bool(predicate())
-        except RuntimeError:
-            return False
+        if predicate is not None:
+            try:
+                return bool(predicate())
+            except RuntimeError:
+                return False
+        return self._ancestor_capture_active()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         viewport = self._valid_viewport()
@@ -172,6 +172,20 @@ class FastCellHoverTracker(QObject):
             return None
         viewport = self._table.viewport()
         return viewport if isValid(viewport) else None
+
+    def _ancestor_capture_active(self) -> bool:
+        if not isValid(self._table):
+            return False
+        parent = self._table.parentWidget()
+        while parent is not None and isValid(parent):
+            try:
+                active = getattr(parent, "is_capturing", None)
+            except RuntimeError:
+                return False
+            if isinstance(active, bool):
+                return active
+            parent = parent.parentWidget()
+        return False
 
 
 def enable_fast_cell_hover(
