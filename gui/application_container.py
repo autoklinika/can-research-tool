@@ -20,6 +20,7 @@ from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .session_management_integration import SessionManagementIntegration
 from .session_view import SessionViewWidget
+from .streaming_live_filter_integration import StreamingLiveFilterIntegration
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
