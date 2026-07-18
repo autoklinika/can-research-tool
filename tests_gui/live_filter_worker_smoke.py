@@ -99,7 +99,8 @@ def main() -> None:
                 }
             ],
         }
-        ProjectFilterRepository(project.database_path).save_presets([preset])
+        repository = ProjectFilterRepository(project.database_path)
+        repository.save_presets([preset])
 
         # When capture is stopped, the original background scan remains available.
         widget = LiveCaptureWidget(project)
@@ -204,6 +205,48 @@ def main() -> None:
             QThreadPool.globalInstance().waitForDone(5)
             sleep(0.001)
         assert active_widget.live_filter_proxy.rowCount() == 5_000
+
+        # Temporarily disabling every preset must not discard the user's intent to
+        # apply Live filters. Re-enabling a preset in the separate filter window must
+        # automatically resume the streaming filter without another checkbox click.
+        preset.enabled = False
+        repository.save_presets([preset])
+        active_widget._live_filter_integration._reload_and_update()
+        app.processEvents()
+
+        assert active_widget.apply_live_filters.isChecked()
+        assert active_widget.apply_live_filters.isEnabled()
+        assert not active_widget.live_filter_proxy.filter_enabled
+        assert active_widget.frame_table.model() is active_widget.frame_model
+        assert active_widget.frame_model.rowCount() == 0
+
+        preset.enabled = True
+        repository.save_presets([preset])
+        active_widget._live_filter_integration._reload_and_update()
+        app.processEvents()
+
+        assert active_widget.apply_live_filters.isChecked()
+        assert active_widget.live_filter_proxy.filter_enabled
+        assert active_widget.live_filter_proxy.filter_ready
+        assert active_widget.frame_table.model() is active_widget.live_filter_proxy
+        assert active_widget.live_filter_proxy.rowCount() == 0
+
+        reactivated = [
+            CanFrame(
+                sequence=40_000 + index,
+                timestamp_ns=(40_000 + index) * 1_000,
+                arbitration_id=0x100 if index % 2 == 0 else 0x200,
+                data=b"\x02",
+            )
+            for index in range(20)
+        ]
+        active_widget.frame_model.append_frames(reactivated)
+        deadline = monotonic() + 5.0
+        while active_widget.live_filter_proxy.rowCount() < 10 and monotonic() < deadline:
+            app.processEvents()
+            QThreadPool.globalInstance().waitForDone(5)
+            sleep(0.001)
+        assert active_widget.live_filter_proxy.rowCount() == 10
 
         active_widget.apply_live_filters.setChecked(False)
         app.processEvents()
