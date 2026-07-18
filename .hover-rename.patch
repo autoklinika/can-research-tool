@@ -1,0 +1,46 @@
+--- a/gui/live_capture.py
++++ b/gui/live_capture.py
+@@ -48,7 +48,7 @@
+ )
+ from .marker_manager import MarkerManagerDialog
+ from .protocol_summary import attach_protocol_summary
+-from .table_hover import install_fast_cell_hover
++from .table_hover import enable_fast_cell_hover
+@@ -220,7 +220,7 @@
+         self.frame_table.setSelectionMode(QTableView.SingleSelection)
+         self.frame_table.verticalHeader().setDefaultSectionSize(22)
+         self.frame_table.horizontalHeader().setStretchLastSection(True)
+-        install_fast_cell_hover(self.frame_table)
++        enable_fast_cell_hover(self.frame_table)
+@@ -251,7 +251,7 @@
+         self.message_table.setSelectionMode(QTableView.SingleSelection)
+         self.message_table.verticalHeader().setDefaultSectionSize(22)
+         self.message_table.horizontalHeader().setStretchLastSection(True)
+-        install_fast_cell_hover(self.message_table)
++        enable_fast_cell_hover(self.message_table)
+--- a/gui/session_view.py
++++ b/gui/session_view.py
+@@ -22,7 +22,7 @@
+ )
+ from .protocol_summary import attach_protocol_summary
+ from .session_filter_integration import StoredSessionIntegration
+-from .table_hover import install_fast_cell_hover
++from .table_hover import enable_fast_cell_hover
+@@ -119,7 +119,7 @@
+         self.frame_table.setSelectionMode(QTableView.SingleSelection)
+         self.frame_table.verticalHeader().setDefaultSectionSize(22)
+         self.frame_table.horizontalHeader().setStretchLastSection(True)
+-        install_fast_cell_hover(self.frame_table)
++        enable_fast_cell_hover(self.frame_table)
+@@ -134,7 +134,7 @@
+         self.message_table.setSelectionMode(QTableView.SingleSelection)
+         self.message_table.verticalHeader().setDefaultSectionSize(22)
+         self.message_table.horizontalHeader().setStretchLastSection(True)
+-        install_fast_cell_hover(self.message_table)
++        enable_fast_cell_hover(self.message_table)
+@@ -165,7 +165,7 @@
+         self.marker_table.setSelectionMode(QTableView.SingleSelection)
+         self.marker_table.verticalHeader().setDefaultSectionSize(22)
+         self.marker_table.horizontalHeader().setStretchLastSection(True)
+-        install_fast_cell_hover(self.marker_table)
++        enable_fast_cell_hover(self.marker_table)
