@@ -48,6 +48,7 @@ from .logical_message_model import (
 )
 from .marker_manager import MarkerManagerDialog
 from .protocol_summary import attach_protocol_summary
+from .table_hover import enable_fast_cell_hover
 
 
 class LiveCaptureWidget(QWidget):
@@ -96,7 +97,11 @@ class LiveCaptureWidget(QWidget):
         self._build_ui()
         self._live_filter_integration = filter_integration_factory(self)
         self._live_save_integration = save_integration_factory(self)
-        protocol_summary_attacher(self.message_table, self.message_model)
+        protocol_summary_attacher(
+            self.message_table,
+            self.message_model,
+            display_model=self._live_filter_integration.message_proxy,
+        )
         self._update_marker_tile()
         self._refresh_channels()
 
@@ -219,6 +224,7 @@ class LiveCaptureWidget(QWidget):
         self.frame_table.setSelectionMode(QTableView.SingleSelection)
         self.frame_table.verticalHeader().setDefaultSectionSize(22)
         self.frame_table.horizontalHeader().setStretchLastSection(True)
+        enable_fast_cell_hover(self.frame_table)
         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
         self.frame_table.setColumnWidth(0, 115)
         self.frame_table.setColumnWidth(1, 90)
@@ -249,6 +255,7 @@ class LiveCaptureWidget(QWidget):
         self.message_table.setSelectionMode(QTableView.SingleSelection)
         self.message_table.verticalHeader().setDefaultSectionSize(22)
         self.message_table.horizontalHeader().setStretchLastSection(True)
+        enable_fast_cell_hover(self.message_table)
         self.message_table.selectionModel().selectionChanged.connect(
             self._message_selected
         )
@@ -443,7 +450,10 @@ class LiveCaptureWidget(QWidget):
             f"{status.state.value.upper()} | {status.frame_count:,} ramek | "
             f"{status.live_retained:,}/{status.live_capacity:,} live".replace(",", " ")
         )
-        self._live_filter_integration.update_status(status.frame_count)
+        self._live_filter_integration.update_status(
+            status.frame_count,
+            status.logical_message_count,
+        )
 
     def _set_capture_controls(self, active: bool) -> None:
         self.start_button.setEnabled(

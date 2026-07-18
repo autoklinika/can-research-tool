@@ -119,18 +119,20 @@ def main() -> None:
         )
         widget.live_filter_proxy.reload_project_filters()
         widget.apply_live_filters.setChecked(True)
+        assert widget.frame_table.model() is widget.frame_model
+        assert widget.message_table.model() is widget.message_model
 
         deadline = monotonic() + 10.0
         while monotonic() < deadline:
             app.processEvents()
             QThreadPool.globalInstance().waitForDone(20)
-            if (
-                widget.live_filter_proxy.filter_ready
-                and widget.live_message_filter_proxy.filter_ready
-            ):
+            if widget.live_message_filter_proxy.filter_ready:
                 break
 
         app.processEvents()
+        assert widget.live_filter_proxy.filter_enabled is False
+        assert widget.frame_table.model() is widget.frame_model
+        assert widget.message_table.model() is widget.live_message_filter_proxy
         assert widget.live_filter_proxy.rowCount() == 2
         assert widget.live_message_filter_proxy.rowCount() == 1
 

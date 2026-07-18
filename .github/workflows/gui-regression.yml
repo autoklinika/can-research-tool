@@ -40,10 +40,22 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/stored_session_filter_optin_smoke.py
+      - name: Verify global filters use a separate non-modal window
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/filter_manager_window_smoke.py
       - name: Verify Live filters use the background worker
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_filter_worker_smoke.py
+      - name: Verify bounded Live models avoid per-refresh full-buffer work
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_buffer_performance_smoke.py
+      - name: Verify fast pastel table cell hover
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/table_hover_smoke.py
       - name: Verify protocol filters in GUI and logical Live view
         env:
           QT_QPA_PLATFORM: offscreen

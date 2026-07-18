@@ -5,13 +5,19 @@ from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtWidgets import QTabWidget, QWidget
 
+from app.enhanced_stored_session_controller import (
+    EnhancedStoredSessionController as StoredSessionController,
+)
 from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
-from app.stored_session_controller import StoredSessionController
 from infrastructure.desktop import reveal_path
 
 from .dbc_manager import DbcManagerWidget
-from .filter_manager import FilterManagerWidget
+from .enhanced_filter_manager import EnhancedFilterManagerWidget as FilterManagerWidget
+from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
+from .final_streaming_filter_integration import (
+    FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
+)
 from .import_task import ProjectImportTask
 from .live_capture import LiveCaptureWidget
 from .project_dialog import NewProjectDialog
@@ -45,7 +51,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .main_window import MainWindow
+        from .filter_manager_window import WindowedFilterMainWindow as MainWindow
 
         return MainWindow(self)
 
@@ -69,7 +75,11 @@ class ApplicationContainer:
 
     def create_live_capture_view(self, project: CrtProject) -> LiveCaptureWidget:
         controller = self._live_controller_factory()
-        return LiveCaptureWidget(project, controller=controller)
+        return LiveCaptureWidget(
+            project,
+            controller=controller,
+            filter_integration_factory=StreamingLiveFilterIntegration,
+        )
 
     def create_session_view(
         self,
@@ -86,6 +96,7 @@ class ApplicationContainer:
             session_path,
             dbc_paths=dbc_paths,
             controller=controller,
+            stored_integration_factory=EnhancedStoredSessionIntegration,
         )
 
     def create_project_overview(self, project: CrtProject) -> ProjectOverviewWidget:

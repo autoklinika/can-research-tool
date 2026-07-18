@@ -141,3 +141,53 @@ def test_logical_message_decision_uses_protocol_context() -> None:
 
     assert filters.decide_logical_message(matching).visible is True
     assert filters.decide_logical_message(other).visible is False
+
+
+def test_raw_hot_path_does_not_revalidate_or_reparse_presets(monkeypatch) -> None:
+    item = FilterPreset.create("Fast raw")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "group",
+        "operator": "and",
+        "children": [
+            condition("0x18DAF900"),
+            {
+                "type": "condition",
+                "field": "dlc",
+                "operator": "between",
+                "values": ["0", "8"],
+            },
+        ],
+    }
+    filters = ActiveFilterSet([item])
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("raw hot path must use the compiled preset")
+
+    monkeypatch.setattr(filters._compiler, "validate", fail)
+    monkeypatch.setattr(filters._compiler, "_normalize_value", fail)
+
+    for index in range(10_000):
+        decision = filters.decide(
+            CanFrameRecord(
+                can_id=0x18DAF900 if index % 2 == 0 else 0x123,
+                extended=True,
+                dlc=8,
+                relative_time_us=index,
+            )
+        )
+        assert decision.visible is (index % 2 == 0)
+
+
+def test_protocol_only_filter_does_not_request_raw_buffer_scan() -> None:
+    item = FilterPreset.create("Only UDS")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "condition",
+        "field": "did",
+        "operator": "eq",
+        "values": ["0xF190"],
+    }
+
+    assert ActiveFilterSet([item]).affects_raw_visibility is False
+    assert ActiveFilterSet([preset("Raw", FilterMode.INCLUDE, "0x123")]).affects_raw_visibility is True
