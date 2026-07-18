@@ -22,6 +22,7 @@ from .logical_message_model import (
 )
 from .protocol_summary import attach_protocol_summary
 from .session_filter_integration import StoredSessionIntegration
+from .table_hover import install_fast_cell_hover
 
 
 class MarkerHistoryModel(QAbstractTableModel):
@@ -118,6 +119,7 @@ class SessionViewWidget(QWidget):
         self.frame_table.setSelectionMode(QTableView.SingleSelection)
         self.frame_table.verticalHeader().setDefaultSectionSize(22)
         self.frame_table.horizontalHeader().setStretchLastSection(True)
+        install_fast_cell_hover(self.frame_table)
         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
         raw_layout.addWidget(self.frame_table)
         self.raw_tab_index = self.tabs.addTab(raw_page, "Surowe ramki")
@@ -132,6 +134,7 @@ class SessionViewWidget(QWidget):
         self.message_table.setSelectionMode(QTableView.SingleSelection)
         self.message_table.verticalHeader().setDefaultSectionSize(22)
         self.message_table.horizontalHeader().setStretchLastSection(True)
+        install_fast_cell_hover(self.message_table)
         self.message_table.selectionModel().selectionChanged.connect(
             self._message_selected
         )
@@ -162,6 +165,7 @@ class SessionViewWidget(QWidget):
         self.marker_table.setSelectionMode(QTableView.SingleSelection)
         self.marker_table.verticalHeader().setDefaultSectionSize(22)
         self.marker_table.horizontalHeader().setStretchLastSection(True)
+        install_fast_cell_hover(self.marker_table)
         self.marker_table.selectionModel().selectionChanged.connect(self._marker_selected)
         marker_layout.addWidget(self.marker_table)
         self.tabs.addTab(marker_page, f"Znaczniki ({len(markers)})")
