@@ -37,6 +37,7 @@ def main() -> None:
 
         widget = LiveCaptureWidget(project)
         assert widget._live_filter_integration.proxy is widget.live_filter_proxy
+        assert widget.frame_table.model() is widget.frame_model
         frames = [
             CanFrame(
                 sequence=index,
@@ -53,6 +54,7 @@ def main() -> None:
         # is scheduled in QThreadPool; the proxy shows the raw buffer until ready.
         widget.live_filter_proxy.reload_project_filters()
         widget.apply_live_filters.setChecked(True)
+        assert widget.frame_table.model() is widget.live_filter_proxy
         assert widget.live_filter_proxy.filter_scanning is True
 
         deadline = monotonic() + 10.0
@@ -87,6 +89,7 @@ def main() -> None:
 
         widget.apply_live_filters.setChecked(False)
         app.processEvents()
+        assert widget.frame_table.model() is widget.frame_model
         assert widget.live_filter_proxy.rowCount() == 20_002
         widget.close()
 

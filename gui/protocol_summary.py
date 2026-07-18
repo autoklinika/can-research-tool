@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractItemModel
+from PySide6.QtCore import QAbstractItemModel, QTimer
 from PySide6.QtWidgets import QLabel, QTableView
 
 
@@ -39,24 +39,11 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
     label.setToolTip("Podsumowanie dotyczy wiadomości logicznych aktualnie widocznych w tabeli.")
     layout.insertWidget(0, label)
 
-    def refresh(*_args: object) -> None:
-        protocol_counts: dict[str, int] = {}
-        transport_counts: dict[str, int] = {}
-        incomplete = 0
-        message_at = getattr(display_model, "message_at", None)
-        for row in range(display_model.rowCount()):
-            message = message_at(row) if callable(message_at) else None
-            if message is None:
-                continue
-            protocol = str(message.protocol).upper()
-            transport = str(message.transport).upper()
-            protocol_counts[protocol] = protocol_counts.get(protocol, 0) + 1
-            transport_counts[transport] = transport_counts.get(transport, 0) + 1
-            if not message.complete:
-                incomplete += 1
-
+    def refresh() -> None:
+        protocol_counts, transport_counts, incomplete = _summary_counts(display_model)
+        row_count = sum(protocol_counts.values())
         parts = [
-            f"Wiadomości: {display_model.rowCount():,}".replace(",", " "),
+            f"Wiadomości: {row_count:,}".replace(",", " "),
             f"UDS: {protocol_counts.get('UDS', 0):,}".replace(",", " "),
             f"J1939: {protocol_counts.get('J1939', 0):,}".replace(",", " "),
             f"ISO-TP: {transport_counts.get('ISOTP', 0):,}".replace(",", " "),
@@ -69,8 +56,47 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
             parts.append(f"Niekompletne: {incomplete:,}".replace(",", " "))
         label.setText("  |  ".join(parts))
 
-    display_model.modelReset.connect(refresh)
-    display_model.rowsInserted.connect(refresh)
-    display_model.rowsRemoved.connect(refresh)
-    display_model.dataChanged.connect(refresh)
+    # Model insert/remove signals may arrive several times during one GUI refresh.
+    # Coalesce them and update the label from O(1) maintained counters rather than
+    # iterating over every retained logical message after each batch.
+    refresh_timer = QTimer(table)
+    refresh_timer.setSingleShot(True)
+    refresh_timer.setInterval(100)
+    refresh_timer.timeout.connect(refresh)
+
+    def schedule_refresh(*_args: object) -> None:
+        if not refresh_timer.isActive():
+            refresh_timer.start()
+
+    display_model.modelReset.connect(schedule_refresh)
+    display_model.rowsInserted.connect(schedule_refresh)
+    display_model.rowsRemoved.connect(schedule_refresh)
+    display_model.dataChanged.connect(schedule_refresh)
     refresh()
+
+
+def _summary_counts(
+    display_model: QAbstractItemModel,
+) -> tuple[dict[str, int], dict[str, int], int]:
+    maintained = getattr(display_model, "summary_counts", None)
+    if callable(maintained):
+        protocol_counts, transport_counts, incomplete = maintained()
+        return dict(protocol_counts), dict(transport_counts), int(incomplete)
+
+    # Compatibility fallback for a third-party model. CRT models implement
+    # summary_counts(), so the Live path never takes this O(n) branch.
+    protocol_counts: dict[str, int] = {}
+    transport_counts: dict[str, int] = {}
+    incomplete = 0
+    message_at = getattr(display_model, "message_at", None)
+    for row in range(display_model.rowCount()):
+        message = message_at(row) if callable(message_at) else None
+        if message is None:
+            continue
+        protocol = str(message.protocol).upper()
+        transport = str(message.transport).upper()
+        protocol_counts[protocol] = protocol_counts.get(protocol, 0) + 1
+        transport_counts[transport] = transport_counts.get(transport, 0) + 1
+        if not message.complete:
+            incomplete += 1
+    return protocol_counts, transport_counts, incomplete

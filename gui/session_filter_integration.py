@@ -224,7 +224,7 @@ class StoredSessionIntegration(QObject):
         self._update_message_counts()
 
     def _prune_message_filter_cache(self, *_args: object) -> None:
-        self.message_proxy.prune_to_messages(self.message_proxy.snapshot_messages())
+        self.message_proxy.prune_source_cache_if_needed(40_000)
 
     def _update_filter_label(self, state: StoredSessionPageState) -> None:
         if state.error:

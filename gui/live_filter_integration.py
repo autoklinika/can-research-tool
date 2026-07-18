@@ -172,8 +172,9 @@ class LiveFilterIntegration(QObject):
         self.proxy = LiveFrameFilterProxy(widget)
         self.proxy.setSourceModel(widget.frame_model)
         widget.live_filter_proxy = self.proxy
-        widget.frame_table.setModel(self.proxy)
-        widget.frame_table.selectionModel().selectionChanged.connect(widget._frame_selected)
+        # Keep the high-volume raw table directly on its source model until the
+        # user explicitly enables filters. An identity QSortFilterProxyModel over
+        # hundreds of thousands of rows caused progressive Live GUI slowdown.
         widget.frame_model.modelReset.connect(self._source_frame_model_reset)
         widget.frame_model.rowsRemoved.connect(self._prune_frame_filter_cache)
 
@@ -211,11 +212,17 @@ class LiveFilterIntegration(QObject):
         rows = self.widget.frame_table.selectionModel().selectedRows()
         if not rows:
             return None
-        source_index = self.proxy.mapToSource(rows[0])
+        source_index = rows[0]
+        if self.widget.frame_table.model() is self.proxy:
+            source_index = self.proxy.mapToSource(source_index)
         return self.widget.frame_model.frame_at(source_index.row())
 
-    def update_status(self, total_received: int) -> None:
-        self._update_live_counts(total_received)
+    def update_status(
+        self,
+        total_received: int,
+        logical_total: int | None = None,
+    ) -> None:
+        self._update_live_counts(total_received, logical_total)
 
     def _message_selected(self) -> None:
         rows = self.widget.message_table.selectionModel().selectedRows()
@@ -226,8 +233,14 @@ class LiveFilterIntegration(QObject):
             self.widget.inspector_text.emit(format_logical_message_inspector(message))
 
     def _set_filter_application(self, checked: bool) -> None:
+        if not checked:
+            # Detach the expensive proxy before invalidating it over the full
+            # retained frame window.
+            self._set_frame_display_model(False)
         self.proxy.set_filter_enabled(checked)
         self.message_proxy.set_filter_enabled(checked)
+        if self.proxy.filter_enabled:
+            self._set_frame_display_model(True)
         if checked and self.proxy.filter_enabled:
             names = ", ".join(self.proxy.filter_set.active_names)
             self.widget.output_message.emit(f"Filtry Live włączone dla ramek i wiadomości: {names}")
@@ -254,6 +267,7 @@ class LiveFilterIntegration(QObject):
                 self.checkbox.blockSignals(False)
             self._frame_generation += 1
             self._message_generation += 1
+            self._set_frame_display_model(False)
             self.proxy.set_filter_enabled(False)
             self.message_proxy.set_filter_enabled(False)
         elif (changed or logical_changed) and self.checkbox.isChecked():
@@ -353,6 +367,7 @@ class LiveFilterIntegration(QObject):
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(False)
         self.checkbox.blockSignals(False)
+        self._set_frame_display_model(False)
         self.proxy.set_filter_enabled(False)
         self.message_proxy.set_filter_enabled(False)
         self.widget.output_message.emit(message)
@@ -365,7 +380,16 @@ class LiveFilterIntegration(QObject):
             self.proxy.prune_before(int(first.sequence))
 
     def _prune_message_filter_cache(self, *_args: object) -> None:
-        self.message_proxy.prune_to_messages(self.message_proxy.snapshot_messages())
+        self.message_proxy.prune_source_cache_if_needed(LIVE_MESSAGE_CAPACITY * 2)
+
+    def _set_frame_display_model(self, filtered: bool) -> None:
+        target = self.proxy if filtered else self.widget.frame_model
+        if self.widget.frame_table.model() is target:
+            return
+        self.widget.frame_table.setModel(target)
+        self.widget.frame_table.selectionModel().selectionChanged.connect(
+            self.widget._frame_selected
+        )
 
     def _update_filter_control(self) -> None:
         count = self.proxy.filter_set.active_count
@@ -385,47 +409,59 @@ class LiveFilterIntegration(QObject):
         else:
             self.checkbox.setToolTip("Brak aktywnych presetów przeznaczonych dla Live Capture.")
 
-    def _update_live_counts(self, total_received: int | None = None) -> None:
-        status = None
-        visible = self.proxy.rowCount()
+    def _update_live_counts(
+        self,
+        total_received: int | None = None,
+        logical_total: int | None = None,
+    ) -> None:
         retained = self.widget.frame_model.frame_count
+        visible = (
+            self.proxy.rowCount()
+            if self.proxy.filter_enabled and self.proxy.filter_ready
+            else retained
+        )
         frame_suffix = " (przeliczanie)" if self.proxy.filter_scanning else ""
         self.widget.visible_label.setText(
             (f"Widoczne: {visible:,} / bufor {retained:,}{frame_suffix}").replace(",", " ")
         )
-        if total_received is None:
-            try:
-                status = self.widget._controller.status()
-                total_received = status.frame_count
-            except Exception:
-                total_received = retained
-        else:
+
+        if total_received is None or logical_total is None:
             try:
                 status = self.widget._controller.status()
             except Exception:
                 status = None
+            if total_received is None:
+                total_received = int(status.frame_count) if status is not None else retained
+            if logical_total is None:
+                logical_total = (
+                    int(status.logical_message_count)
+                    if status is not None
+                    else self.widget.message_model.message_count
+                )
+
         self.widget.data_tabs.setTabText(
             self.widget.raw_tab_index,
             f"Surowe ramki ({visible:,}/{total_received:,})".replace(",", " "),
         )
 
-        message_visible = self.message_proxy.rowCount()
         message_retained = self.widget.message_model.message_count
-        message_total = (
-            int(status.logical_message_count) if status is not None else message_retained
+        message_visible = (
+            self.message_proxy.rowCount()
+            if self.message_proxy.filter_enabled and self.message_proxy.filter_ready
+            else message_retained
         )
         message_suffix = " (przeliczanie)" if self.message_proxy.filter_scanning else ""
         self.widget.messages_label.setText(
             (
-                f"Wiadomości: {message_total:,} / widoczne {message_visible:,}{message_suffix}"
+                f"Wiadomości: {logical_total:,} / widoczne {message_visible:,}{message_suffix}"
             ).replace(",", " ")
         )
         self.widget.data_tabs.setTabText(
             self.widget.message_tab_index,
             (
-                f"Wiadomości logiczne ({message_visible:,}/{message_total:,})"
+                f"Wiadomości logiczne ({message_visible:,}/{logical_total:,})"
                 if self.message_proxy.filter_enabled
-                else f"Wiadomości logiczne ({message_total:,})"
+                else f"Wiadomości logiczne ({logical_total:,})"
             ).replace(",", " "),
         )
 

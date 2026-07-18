@@ -443,7 +443,10 @@ class LiveCaptureWidget(QWidget):
             f"{status.state.value.upper()} | {status.frame_count:,} ramek | "
             f"{status.live_retained:,}/{status.live_capacity:,} live".replace(",", " ")
         )
-        self._live_filter_integration.update_status(status.frame_count)
+        self._live_filter_integration.update_status(
+            status.frame_count,
+            status.logical_message_count,
+        )
 
     def _set_capture_controls(self, active: bool) -> None:
         self.start_button.setEnabled(
