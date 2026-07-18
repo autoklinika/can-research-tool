@@ -49,17 +49,38 @@ na każde odświeżenie GUI ani na każdą ramkę CAN.
 
 ## Uruchomienie na Windows PowerShell
 
+Zalecane uruchomienie korzysta ze skryptu, który ustawia zmienne środowiskowe w tym
+samym procesie PowerShell co aplikacja i wypisuje potwierdzenie aktywacji:
+
+```powershell
+.\tools\run_stage_h.ps1
+```
+
+Inny interwał próbkowania:
+
+```powershell
+.\tools\run_stage_h.ps1 -IntervalSeconds 2.0
+```
+
+Uruchomienie ręczne pozostaje dostępne:
+
 ```powershell
 $env:CRT_LIVE_PERF = "1"
 $env:CRT_LIVE_PERF_INTERVAL_S = "1.0"
 python .\crt_gui.py
 ```
 
+Ważne: aplikacja musi zostać uruchomiona z tego samego terminala, w którym ustawiono
+zmienne. Uruchomienie później przez skrót, osobny terminal albo przycisk Run w innym
+procesie może nie odziedziczyć `CRT_LIVE_PERF`.
+
 Po otwarciu projektu i rozpoczęciu Capture raport zostanie zapisany w:
 
 ```text
 <projekt>\reports\live-performance-YYYYMMDD_HHMMSS-<sesja>.jsonl
 ```
+
+Katalog i raport powstają dopiero po kliknięciu `Start` dla Live Capture.
 
 Wyłączenie trybu diagnostycznego:
 
