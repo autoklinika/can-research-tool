@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import (
     QEvent,
     QModelIndex,
@@ -21,6 +23,8 @@ from shiboken6 import isValid
 
 
 PASTEL_BLUE_HOVER = QColor("#DCEEFF")
+PASTEL_BLUE_SELECTION = QColor("#F4FAFF")
+SELECTION_TEXT = QColor("#102033")
 
 
 class FastCellHoverDelegate(QStyledItemDelegate):
@@ -93,10 +97,17 @@ class FastCellHoverDelegate(QStyledItemDelegate):
 class FastCellHoverTracker(QObject):
     """Track the cursor synchronously and repaint only the old and new cell."""
 
-    def __init__(self, table: QTableView, delegate: FastCellHoverDelegate) -> None:
+    def __init__(
+        self,
+        table: QTableView,
+        delegate: FastCellHoverDelegate,
+        *,
+        suppress_tooltips_when: Callable[[], bool] | None = None,
+    ) -> None:
         super().__init__(table)
         self._table = table
         self._delegate = delegate
+        self._suppress_tooltips_when = suppress_tooltips_when
         viewport = table.viewport()
         table.setMouseTracking(True)
         viewport.setMouseTracking(True)
@@ -119,10 +130,21 @@ class FastCellHoverTracker(QObject):
     def clear(self) -> None:
         self._delegate.clear_hover()
 
+    def tooltips_suppressed(self) -> bool:
+        predicate = self._suppress_tooltips_when
+        if predicate is None:
+            return False
+        try:
+            return bool(predicate())
+        except RuntimeError:
+            return False
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         viewport = self._valid_viewport()
         if viewport is not None and watched is viewport:
             event_type = event.type()
+            if event_type == QEvent.Type.ToolTip and self.tooltips_suppressed():
+                return True
             if event_type == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
                 self.update_from_position(event.position().toPoint())
             elif event_type == QEvent.Type.HoverMove and isinstance(event, QHoverEvent):
@@ -156,12 +178,37 @@ def enable_fast_cell_hover(
     table: QTableView,
     *,
     color: QColor | str = PASTEL_BLUE_HOVER,
+    selection_background: QColor | str = PASTEL_BLUE_SELECTION,
+    selection_foreground: QColor | str = SELECTION_TEXT,
+    suppress_tooltips_when: Callable[[], bool] | None = None,
 ) -> FastCellHoverDelegate:
-    """Enable low-overhead cell hover tracking and retain Qt object ownership."""
+    """Enable low-overhead hover tracking and readable row selection."""
 
     delegate = FastCellHoverDelegate(table, color)
-    tracker = FastCellHoverTracker(table, delegate)
+    tracker = FastCellHoverTracker(
+        table,
+        delegate,
+        suppress_tooltips_when=suppress_tooltips_when,
+    )
     table.setItemDelegate(delegate)
+    _apply_selection_palette(table, selection_background, selection_foreground)
     table._crt_hover_delegate = delegate  # type: ignore[attr-defined]
     table._crt_hover_tracker = tracker  # type: ignore[attr-defined]
     return delegate
+
+
+def _apply_selection_palette(
+    table: QTableView,
+    background: QColor | str,
+    foreground: QColor | str,
+) -> None:
+    background_name = QColor(background).name()
+    foreground_name = QColor(foreground).name()
+    selection_style = (
+        "QTableView::item:selected {"
+        f" background-color: {background_name};"
+        f" color: {foreground_name};"
+        "}"
+    )
+    existing = table.styleSheet().strip()
+    table.setStyleSheet(f"{existing}\n{selection_style}".strip())
