@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QApplication, QTableView
 
-from gui.table_hover import PASTEL_BLUE_HOVER, install_fast_cell_hover
+from gui.table_hover import PASTEL_BLUE_HOVER, enable_fast_cell_hover
 
 
 def main() -> None:
@@ -15,7 +15,7 @@ def main() -> None:
     table.show()
     app.processEvents()
 
-    delegate = install_fast_cell_hover(table)
+    delegate = enable_fast_cell_hover(table)
     tracker = table._crt_hover_tracker
 
     first = model.index(0, 0)
