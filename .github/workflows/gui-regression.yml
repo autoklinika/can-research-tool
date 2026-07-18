@@ -40,6 +40,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/stored_session_filter_optin_smoke.py
+      - name: Verify global filters use a separate non-modal window
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/filter_manager_window_smoke.py
       - name: Verify Live filters use the background worker
         env:
           QT_QPA_PLATFORM: offscreen
