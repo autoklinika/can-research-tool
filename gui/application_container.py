@@ -27,6 +27,7 @@ from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .session_management_integration import SessionManagementIntegration
 from .session_view import SessionViewWidget
+from .stage_h_live_capture import live_capture_widget_type
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
@@ -80,7 +81,8 @@ class ApplicationContainer:
             controller,
             report_dir=project.root / "reports",
         )
-        return LiveCaptureWidget(
+        widget_type = live_capture_widget_type()
+        return widget_type(
             project,
             controller=controller,
             filter_integration_factory=StreamingLiveFilterIntegration,
