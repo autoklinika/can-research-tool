@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/live-buffer-performance-fix
+  pull_request:
+    branches:
+      - agent/filter-gui-stage5e
 
 permissions:
   contents: read
