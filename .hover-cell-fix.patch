@@ -1,0 +1,60 @@
+--- a/gui/live_capture.py
++++ b/gui/live_capture.py
+@@ -48,6 +48,7 @@
+ )
+ from .marker_manager import MarkerManagerDialog
+ from .protocol_summary import attach_protocol_summary
++from .table_hover import install_fast_cell_hover
+ 
+ 
+ class LiveCaptureWidget(QWidget):
+@@ -219,6 +220,7 @@
+         self.frame_table.setSelectionMode(QTableView.SingleSelection)
+         self.frame_table.verticalHeader().setDefaultSectionSize(22)
+         self.frame_table.horizontalHeader().setStretchLastSection(True)
++        install_fast_cell_hover(self.frame_table)
+         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
+         self.frame_table.setColumnWidth(0, 115)
+         self.frame_table.setColumnWidth(1, 90)
+@@ -249,6 +251,7 @@
+         self.message_table.setSelectionMode(QTableView.SingleSelection)
+         self.message_table.verticalHeader().setDefaultSectionSize(22)
+         self.message_table.horizontalHeader().setStretchLastSection(True)
++        install_fast_cell_hover(self.message_table)
+         self.message_table.selectionModel().selectionChanged.connect(
+             self._message_selected
+         )
+--- a/gui/session_view.py
++++ b/gui/session_view.py
+@@ -22,6 +22,7 @@
+ )
+ from .protocol_summary import attach_protocol_summary
+ from .session_filter_integration import StoredSessionIntegration
++from .table_hover import install_fast_cell_hover
+ 
+ 
+ class MarkerHistoryModel(QAbstractTableModel):
+@@ -118,6 +119,7 @@
+         self.frame_table.setSelectionMode(QTableView.SingleSelection)
+         self.frame_table.verticalHeader().setDefaultSectionSize(22)
+         self.frame_table.horizontalHeader().setStretchLastSection(True)
++        install_fast_cell_hover(self.frame_table)
+         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
+         raw_layout.addWidget(self.frame_table)
+         self.raw_tab_index = self.tabs.addTab(raw_page, "Surowe ramki")
+@@ -132,6 +134,7 @@
+         self.message_table.setSelectionMode(QTableView.SingleSelection)
+         self.message_table.verticalHeader().setDefaultSectionSize(22)
+         self.message_table.horizontalHeader().setStretchLastSection(True)
++        install_fast_cell_hover(self.message_table)
+         self.message_table.selectionModel().selectionChanged.connect(
+             self._message_selected
+         )
+@@ -162,6 +165,7 @@
+         self.marker_table.setSelectionMode(QTableView.SingleSelection)
+         self.marker_table.verticalHeader().setDefaultSectionSize(22)
+         self.marker_table.horizontalHeader().setStretchLastSection(True)
++        install_fast_cell_hover(self.marker_table)
+         self.marker_table.selectionModel().selectionChanged.connect(self._marker_selected)
+         marker_layout.addWidget(self.marker_table)
+         self.tabs.addTab(marker_page, f"Znaczniki ({len(markers)})")
