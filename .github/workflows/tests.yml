@@ -169,8 +169,11 @@ jobs:
               assert live.save_session_button.text() == "Zapisz"
               assert live.session_name.isEnabled() is True
 
+              filter_tab_count = window.tabs.count()
               window.filters_action.trigger()
-              filters = window._tab_keys["global-filters"]
+              assert window._filter_window is not None
+              assert window.tabs.count() == filter_tab_count
+              filters = window._filter_window.manager
               filters._add_preset()
               preset = filters.presets[0]
               preset.enabled = False
