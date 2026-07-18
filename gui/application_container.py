@@ -5,13 +5,19 @@ from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtWidgets import QTabWidget, QWidget
 
+from app.enhanced_stored_session_controller import (
+    EnhancedStoredSessionController as StoredSessionController,
+)
 from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
-from app.stored_session_controller import StoredSessionController
 from infrastructure.desktop import reveal_path
 
 from .dbc_manager import DbcManagerWidget
-from .filter_manager import FilterManagerWidget
+from .enhanced_filter_manager import EnhancedFilterManagerWidget as FilterManagerWidget
+from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
+from .final_streaming_filter_integration import (
+    FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
+)
 from .import_task import ProjectImportTask
 from .live_capture import LiveCaptureWidget
 from .project_dialog import NewProjectDialog
@@ -20,7 +26,6 @@ from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .session_management_integration import SessionManagementIntegration
 from .session_view import SessionViewWidget
-from .streaming_live_filter_integration import StreamingLiveFilterIntegration
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
@@ -91,6 +96,7 @@ class ApplicationContainer:
             session_path,
             dbc_paths=dbc_paths,
             controller=controller,
+            stored_integration_factory=EnhancedStoredSessionIntegration,
         )
 
     def create_project_overview(self, project: CrtProject) -> ProjectOverviewWidget:
