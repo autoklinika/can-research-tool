@@ -130,12 +130,12 @@ class FastCellHoverTracker(QObject):
         self.update_from_position(viewport.mapFromGlobal(QCursor.pos()))
 
 
-def install_fast_cell_hover(
+def enable_fast_cell_hover(
     table: QTableView,
     *,
     color: QColor | str = PASTEL_BLUE_HOVER,
 ) -> FastCellHoverDelegate:
-    """Install low-overhead cell hover tracking and retain Qt object ownership."""
+    """Enable low-overhead cell hover tracking and retain Qt object ownership."""
 
     delegate = FastCellHoverDelegate(table, color)
     tracker = FastCellHoverTracker(table, delegate)
