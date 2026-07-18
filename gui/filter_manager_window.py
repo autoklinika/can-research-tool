@@ -106,7 +106,6 @@ class WindowedFilterMainWindow(MainWindow):
         if window is None:
             return
         self._filter_window = None
-        window.flush_pending_changes()
         window.close()
         window.deleteLater()
 
