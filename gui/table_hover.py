@@ -10,7 +10,14 @@ from PySide6.QtCore import (
     QTimer,
 )
 from PySide6.QtGui import QBrush, QColor, QCursor, QHoverEvent, QMouseEvent, QPainter
-from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView
+from PySide6.QtWidgets import (
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableView,
+    QWidget,
+)
+from shiboken6 import isValid
 
 
 PASTEL_BLUE_HOVER = QColor("#DCEEFF")
@@ -39,6 +46,9 @@ class FastCellHoverDelegate(QStyledItemDelegate):
         return QColor(self._hover_color)
 
     def set_hovered_index(self, index: QModelIndex) -> None:
+        if not isValid(self._table):
+            self._hovered = QPersistentModelIndex()
+            return
         if index.isValid() and index.model() is not self._table.model():
             index = QModelIndex()
         old_index = QModelIndex(self._hovered)
@@ -71,6 +81,8 @@ class FastCellHoverDelegate(QStyledItemDelegate):
         super().paint(painter, adjusted, index)
 
     def _update_cell(self, index: QModelIndex) -> None:
+        if not isValid(self._table):
+            return
         if not index.isValid() or index.model() is not self._table.model():
             return
         rect = self._table.visualRect(index)
@@ -94,7 +106,9 @@ class FastCellHoverTracker(QObject):
         table.verticalScrollBar().valueChanged.connect(self._schedule_cursor_sync)
 
     def update_from_position(self, position: QPoint) -> None:
-        viewport = self._table.viewport()
+        viewport = self._valid_viewport()
+        if viewport is None:
+            return
         index = (
             self._table.indexAt(position)
             if viewport.rect().contains(position)
@@ -106,7 +120,8 @@ class FastCellHoverTracker(QObject):
         self._delegate.clear_hover()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if watched is self._table.viewport():
+        viewport = self._valid_viewport()
+        if viewport is not None and watched is viewport:
             event_type = event.type()
             if event_type == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
                 self.update_from_position(event.position().toPoint())
@@ -126,8 +141,15 @@ class FastCellHoverTracker(QObject):
         QTimer.singleShot(0, self._sync_from_cursor)
 
     def _sync_from_cursor(self) -> None:
+        viewport = self._valid_viewport()
+        if viewport is not None:
+            self.update_from_position(viewport.mapFromGlobal(QCursor.pos()))
+
+    def _valid_viewport(self) -> QWidget | None:
+        if not isValid(self._table):
+            return None
         viewport = self._table.viewport()
-        self.update_from_position(viewport.mapFromGlobal(QCursor.pos()))
+        return viewport if isValid(viewport) else None
 
 
 def enable_fast_cell_hover(
