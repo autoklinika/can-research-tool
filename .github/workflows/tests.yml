@@ -157,7 +157,8 @@ jobs:
               assert "1 aktywnych / 1" in live.marker_setup_button.text()
               assert live.message_table.model() is live.live_message_filter_proxy
               assert live.live_message_filter_proxy.sourceModel() is live.message_model
-              assert live.frame_table.model() is live.live_filter_proxy
+              assert live.frame_table.model() is live.frame_model
+              assert live.live_filter_proxy.sourceModel() is live.frame_model
               assert not hasattr(live, "live_filter_label")
               assert live.save_session_button.isChecked() is False
               assert live.save_session_button.text() == "Zapisz"
