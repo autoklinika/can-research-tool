@@ -22,7 +22,12 @@ _MESSAGE_COLUMN_WIDTHS = {
 }
 
 
-def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> None:
+def attach_protocol_summary(
+    table: QTableView,
+    model: QAbstractItemModel,
+    *,
+    display_model: QAbstractItemModel | None = None,
+) -> None:
     for column, width in _MESSAGE_COLUMN_WIDTHS.items():
         table.setColumnWidth(column, width)
 
@@ -31,7 +36,7 @@ def attach_protocol_summary(table: QTableView, model: QAbstractItemModel) -> Non
     if layout is None:
         return
 
-    display_model = table.model() or model
+    display_model = display_model or table.model() or model
     label = QLabel()
     label.setObjectName("protocolMessageSummary")
     label.setTextInteractionFlags(label.textInteractionFlags())

@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
+    QAbstractTableModel,
     QModelIndex,
     QObject,
     QRunnable,
-    QSortFilterProxyModel,
     QThreadPool,
     QTimer,
+    Qt,
     Signal,
     Slot,
 )
@@ -56,11 +57,11 @@ class LiveFilterScanTask(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
-            accepted: set[int] = set()
+            accepted: list[CanFrame] = []
             evaluated_through = -1
             for frame in self.frames:
                 if self.filter_set.decide(_frame_record(frame)).visible:
-                    accepted.add(frame.sequence)
+                    accepted.append(frame)
                 evaluated_through = max(evaluated_through, frame.sequence)
             self.signals.completed.emit(
                 self.generation,
@@ -71,8 +72,14 @@ class LiveFilterScanTask(QRunnable):
             self.signals.failed.emit(self.generation, str(exc))
 
 
-class LiveFrameFilterProxy(QSortFilterProxyModel):
-    """Filter only the Live table; capture and source buffer keep raw frames."""
+class LiveFrameFilterProxy(QAbstractTableModel):
+    """Projection model populated from background-filtered frame snapshots.
+
+    The model deliberately does not inherit ``QSortFilterProxyModel``. Building a
+    proxy mapping for a 250k-row source blocked the GUI twice whenever filters were
+    enabled: once before the worker scan and once after it. This projection receives
+    already accepted frame references and exposes them directly.
+    """
 
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
@@ -82,9 +89,12 @@ class LiveFrameFilterProxy(QSortFilterProxyModel):
         self.filter_ready = False
         self.filter_scanning = False
         self._signature: tuple[object, ...] = self.filter_set.signature
-        self._accepted_sequences: set[int] = set()
-        self._evaluated_through_sequence = -1
-        self.setDynamicSortFilter(True)
+        self._frames: list[CanFrame] = []
+
+    def sourceModel(self):  # noqa: N802
+        """Compatibility accessor for code that inspects the backing frame model."""
+
+        return self.widget.frame_model
 
     def reload_project_filters(self) -> bool:
         repository = ProjectFilterRepository(self.widget.project.database_path)
@@ -95,67 +105,117 @@ class LiveFrameFilterProxy(QSortFilterProxyModel):
         self._signature = candidate.signature
         return True
 
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        if parent.isValid():
+            return 0
+        if not self.filter_enabled or not self.filter_ready:
+            return self.widget.frame_model.frame_count
+        return len(self._frames)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return self.widget.frame_model.columnCount(parent)
+
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.DisplayRole,
+    ):  # noqa: N802
+        return self.widget.frame_model.headerData(section, orientation, role)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        if not self.filter_enabled or not self.filter_ready:
+            source = self.widget.frame_model.index(index.row(), index.column())
+            return self.widget.frame_model.data(source, role)
+        frame = self.frame_at(index.row())
+        if frame is None:
+            return None
+        return _frame_data(frame, index.column(), role)
+
+    def frame_at(self, row: int) -> CanFrame | None:
+        if not self.filter_enabled or not self.filter_ready:
+            return self.widget.frame_model.frame_at(row)
+        if 0 <= row < len(self._frames):
+            return self._frames[row]
+        return None
+
     def set_filter_enabled(self, enabled: bool) -> None:
         normalized = bool(enabled and self.filter_set.active_count)
         if normalized == self.filter_enabled:
             return
+        self.beginResetModel()
         self.filter_enabled = normalized
-        if not normalized:
-            self.filter_ready = False
-            self.filter_scanning = False
-            self._accepted_sequences.clear()
-            self._evaluated_through_sequence = -1
-        self.invalidateFilter()
+        self.filter_ready = False
+        self.filter_scanning = False
+        self._frames.clear()
+        self.endResetModel()
 
     def begin_background_scan(self) -> None:
         if not self.filter_enabled:
             return
+        self.beginResetModel()
         self.filter_scanning = True
         self.filter_ready = False
-        self._accepted_sequences.clear()
-        self._evaluated_through_sequence = -1
-        self.invalidateFilter()
+        self._frames.clear()
+        self.endResetModel()
 
     def apply_background_result(
         self,
-        accepted_sequences: set[int],
+        accepted_frames: tuple[CanFrame, ...],
         evaluated_through_sequence: int,
     ) -> None:
         if not self.filter_enabled:
             return
-        self._accepted_sequences = accepted_sequences
-        self._evaluated_through_sequence = evaluated_through_sequence
+        first = self.widget.frame_model.frame_at(0)
+        first_sequence = int(first.sequence) if first is not None else None
+        retained = [
+            frame
+            for frame in accepted_frames
+            if first_sequence is None or int(frame.sequence) >= first_sequence
+        ][-LIVE_FRAME_CAPACITY:]
+        self.beginResetModel()
+        self._frames = retained
         self.filter_scanning = False
         self.filter_ready = True
-        self.invalidateFilter()
+        self.endResetModel()
 
-    def filterAcceptsRow(
-        self,
-        source_row: int,
-        source_parent: QModelIndex,
-    ) -> bool:  # noqa: N802
-        if not self.filter_enabled or not self.filter_ready:
-            return True
-        frame = self.widget.frame_model.frame_at(source_row)
-        if frame is None:
-            return False
-
-        sequence = int(frame.sequence)
-        if sequence <= self._evaluated_through_sequence:
-            return sequence in self._accepted_sequences
-
-        visible = self.filter_set.decide(_frame_record(frame)).visible
-        self._evaluated_through_sequence = sequence
-        if visible:
-            self._accepted_sequences.add(sequence)
-        return visible
+    def append_source_frames(self, frames: tuple[CanFrame, ...]) -> None:
+        if not frames or not self.filter_enabled or not self.filter_ready:
+            return
+        visible = [
+            frame
+            for frame in frames
+            if self.filter_set.decide(_frame_record(frame)).visible
+        ]
+        if not visible:
+            return
+        overflow = max(0, len(self._frames) + len(visible) - LIVE_FRAME_CAPACITY)
+        if overflow:
+            trim_chunk = max(1, LIVE_FRAME_CAPACITY // 10)
+            remove_count = min(len(self._frames), max(overflow, trim_chunk))
+            self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+            del self._frames[:remove_count]
+            self.endRemoveRows()
+        first_row = len(self._frames)
+        self.beginInsertRows(QModelIndex(), first_row, first_row + len(visible) - 1)
+        self._frames.extend(visible)
+        self.endInsertRows()
 
     def prune_before(self, first_sequence: int) -> None:
-        if len(self._accepted_sequences) <= LIVE_FRAME_CAPACITY * 2:
+        if not self._frames:
             return
-        self._accepted_sequences = {
-            sequence for sequence in self._accepted_sequences if sequence >= first_sequence
-        }
+        remove_count = 0
+        for frame in self._frames:
+            if int(frame.sequence) >= first_sequence:
+                break
+            remove_count += 1
+        if not remove_count:
+            return
+        self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+        del self._frames[:remove_count]
+        self.endRemoveRows()
 
 
 class LiveFilterIntegration(QObject):
@@ -168,22 +228,23 @@ class LiveFilterIntegration(QObject):
         self._message_generation = 0
         self._frame_tasks: list[LiveFilterScanTask] = []
         self._message_tasks: list[LogicalFilterScanTask] = []
+        self._pending_frames: list[CanFrame] = []
 
         self.proxy = LiveFrameFilterProxy(widget)
-        self.proxy.setSourceModel(widget.frame_model)
         widget.live_filter_proxy = self.proxy
         # Keep the high-volume raw table directly on its source model until the
         # user explicitly enables filters. An identity QSortFilterProxyModel over
         # hundreds of thousands of rows caused progressive Live GUI slowdown.
         widget.frame_model.modelReset.connect(self._source_frame_model_reset)
+        widget.frame_model.rowsInserted.connect(self._source_frame_rows_inserted)
         widget.frame_model.rowsRemoved.connect(self._prune_frame_filter_cache)
 
         self.message_proxy = LogicalMessageFilterProxy(widget)
         self.message_proxy.set_filter_set(self.proxy.filter_set)
         self.message_proxy.setSourceModel(widget.message_model)
         widget.live_message_filter_proxy = self.message_proxy
-        widget.message_table.setModel(self.message_proxy)
-        widget.message_table.selectionModel().selectionChanged.connect(self._message_selected)
+        # Keep the logical table on its source model until the worker has produced
+        # a complete result. This avoids synchronously invalidating 100k rows on click.
         widget.message_model.modelReset.connect(self._source_message_model_reset)
         widget.message_model.rowsRemoved.connect(self._prune_message_filter_cache)
 
@@ -212,10 +273,10 @@ class LiveFilterIntegration(QObject):
         rows = self.widget.frame_table.selectionModel().selectedRows()
         if not rows:
             return None
-        source_index = rows[0]
+        row = rows[0].row()
         if self.widget.frame_table.model() is self.proxy:
-            source_index = self.proxy.mapToSource(source_index)
-        return self.widget.frame_model.frame_at(source_index.row())
+            return self.proxy.frame_at(row)
+        return self.widget.frame_model.frame_at(row)
 
     def update_status(
         self,
@@ -228,27 +289,31 @@ class LiveFilterIntegration(QObject):
         rows = self.widget.message_table.selectionModel().selectedRows()
         if not rows:
             return
-        message = self.message_proxy.message_at(rows[0].row())
+        if self.widget.message_table.model() is self.message_proxy:
+            message = self.message_proxy.message_at(rows[0].row())
+        else:
+            message = self.widget.message_model.message_at(rows[0].row())
         if message is not None:
             self.widget.inspector_text.emit(format_logical_message_inspector(message))
 
     def _set_filter_application(self, checked: bool) -> None:
         if not checked:
-            # Detach the expensive proxy before invalidating it over the full
-            # retained frame window.
+            # Detach filtered presentation models before clearing their state.
             self._set_frame_display_model(False)
+            self._set_message_display_model(False)
         self.proxy.set_filter_enabled(checked)
         self.message_proxy.set_filter_enabled(checked)
-        if self.proxy.filter_enabled:
-            self._set_frame_display_model(True)
         if checked and self.proxy.filter_enabled:
             names = ", ".join(self.proxy.filter_set.active_names)
-            self.widget.output_message.emit(f"Filtry Live włączone dla ramek i wiadomości: {names}")
+            self.widget.output_message.emit(
+                f"Filtry Live włączone — obliczam widok w tle: {names}"
+            )
             self._schedule_frame_scan()
             self._schedule_message_scan()
         else:
             self._frame_generation += 1
             self._message_generation += 1
+            self._pending_frames.clear()
             if checked and not self.proxy.filter_set.active_count:
                 self.checkbox.setChecked(False)
             self.widget.output_message.emit(
@@ -268,6 +333,7 @@ class LiveFilterIntegration(QObject):
             self._frame_generation += 1
             self._message_generation += 1
             self._set_frame_display_model(False)
+            self._set_message_display_model(False)
             self.proxy.set_filter_enabled(False)
             self.message_proxy.set_filter_enabled(False)
         elif (changed or logical_changed) and self.checkbox.isChecked():
@@ -278,7 +344,28 @@ class LiveFilterIntegration(QObject):
 
     def _source_frame_model_reset(self) -> None:
         if self.proxy.filter_enabled:
+            self._set_frame_display_model(False)
             self._schedule_frame_scan()
+
+    def _source_frame_rows_inserted(
+        self,
+        _parent: QModelIndex,
+        first: int,
+        last: int,
+    ) -> None:
+        if not self.proxy.filter_enabled or first < 0 or last < first:
+            return
+        frames = tuple(
+            frame
+            for row in range(first, last + 1)
+            if (frame := self.widget.frame_model.frame_at(row)) is not None
+        )
+        if not frames:
+            return
+        if self.proxy.filter_scanning:
+            self._pending_frames.extend(frames)
+        elif self.proxy.filter_ready:
+            self.proxy.append_source_frames(frames)
 
     def _source_message_model_reset(self) -> None:
         if self.message_proxy.filter_enabled:
@@ -290,9 +377,12 @@ class LiveFilterIntegration(QObject):
         self._frame_generation += 1
         generation = self._frame_generation
         frames = self.widget.frame_model.snapshot_frames()
+        self._pending_frames.clear()
+        self._set_frame_display_model(False)
         self.proxy.begin_background_scan()
         if not frames:
-            self.proxy.apply_background_result(set(), -1)
+            self.proxy.apply_background_result((), -1)
+            self._set_frame_display_model(True)
             self._update_filter_control()
             self._update_live_counts()
             return
@@ -310,11 +400,13 @@ class LiveFilterIntegration(QObject):
         self._message_generation += 1
         generation = self._message_generation
         messages = self.message_proxy.snapshot_messages()
+        self._set_message_display_model(False)
         self.message_proxy.begin_background_scan()
         if not messages:
             self.message_proxy.apply_background_result(
                 LogicalFilterScanResult(frozenset(), frozenset())
             )
+            self._set_message_display_model(True)
             self._update_filter_control()
             self._update_live_counts()
             return
@@ -329,15 +421,24 @@ class LiveFilterIntegration(QObject):
     def _frame_scan_completed(
         self,
         generation: int,
-        accepted_sequences: object,
+        accepted_frames: object,
         evaluated_through_sequence: int,
     ) -> None:
         if generation != self._frame_generation or not self.proxy.filter_enabled:
             return
-        self.proxy.apply_background_result(
-            set(accepted_sequences),
-            evaluated_through_sequence,
+        result_frames = tuple(
+            frame for frame in accepted_frames if isinstance(frame, CanFrame)
         )
+        self.proxy.apply_background_result(result_frames, evaluated_through_sequence)
+        pending = tuple(
+            frame
+            for frame in self._pending_frames
+            if int(frame.sequence) > evaluated_through_sequence
+        )
+        self._pending_frames.clear()
+        self.proxy.append_source_frames(pending)
+        self._prune_frame_filter_cache()
+        self._set_frame_display_model(True)
         self._frame_tasks = self._frame_tasks[-2:]
         self._update_filter_control()
         self._update_live_counts()
@@ -349,6 +450,7 @@ class LiveFilterIntegration(QObject):
             self._logical_filter_scan_failed(generation, "nieprawidłowy wynik workera")
             return
         self.message_proxy.apply_background_result(result)
+        self._set_message_display_model(True)
         self._message_tasks = self._message_tasks[-2:]
         self._update_filter_control()
         self._update_live_counts()
@@ -368,8 +470,10 @@ class LiveFilterIntegration(QObject):
         self.checkbox.setChecked(False)
         self.checkbox.blockSignals(False)
         self._set_frame_display_model(False)
+        self._set_message_display_model(False)
         self.proxy.set_filter_enabled(False)
         self.message_proxy.set_filter_enabled(False)
+        self._pending_frames.clear()
         self.widget.output_message.emit(message)
         self._update_filter_control()
         self._update_live_counts()
@@ -390,6 +494,14 @@ class LiveFilterIntegration(QObject):
         self.widget.frame_table.selectionModel().selectionChanged.connect(
             self.widget._frame_selected
         )
+
+    def _set_message_display_model(self, filtered: bool) -> None:
+        target = self.message_proxy if filtered else self.widget.message_model
+        if self.widget.message_table.model() is target:
+            return
+        self.widget.message_table.setModel(target)
+        callback = self._message_selected if filtered else self.widget._message_selected
+        self.widget.message_table.selectionModel().selectionChanged.connect(callback)
 
     def _update_filter_control(self) -> None:
         count = self.proxy.filter_set.active_count
@@ -464,6 +576,40 @@ class LiveFilterIntegration(QObject):
                 else f"Wiadomości logiczne ({logical_total:,})"
             ).replace(",", " "),
         )
+
+
+def _frame_data(frame: CanFrame, column: int, role: int):
+    if role == Qt.TextAlignmentRole:
+        if column in (0, 1, 2, 4, 6):
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        return int(Qt.AlignLeft | Qt.AlignVCenter)
+    if role != Qt.DisplayRole:
+        return None
+    if column == 0:
+        return f"{frame.timestamp_ns / 1_000_000:.3f}"
+    if column == 1:
+        return frame.sequence
+    if column == 2:
+        width = 8 if frame.is_extended_id else 3
+        return f"0x{frame.arbitration_id:0{width}X}"
+    if column == 3:
+        return "EXT" if frame.is_extended_id else "STD"
+    if column == 4:
+        return frame.dlc
+    if column == 5:
+        return frame.data_hex
+    if column == 6:
+        return frame.channel
+    if column == 7:
+        flags: list[str] = []
+        if frame.is_remote_frame:
+            flags.append("RTR")
+        if frame.is_error_frame:
+            flags.append("ERR")
+        if frame.source_flags:
+            flags.append(f"0x{frame.source_flags:X}")
+        return ", ".join(flags)
+    return None
 
 
 def _frame_record(frame: CanFrame) -> CanFrameRecord:

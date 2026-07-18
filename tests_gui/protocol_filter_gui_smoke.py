@@ -119,6 +119,8 @@ def main() -> None:
         )
         widget.live_filter_proxy.reload_project_filters()
         widget.apply_live_filters.setChecked(True)
+        assert widget.frame_table.model() is widget.frame_model
+        assert widget.message_table.model() is widget.message_model
 
         deadline = monotonic() + 10.0
         while monotonic() < deadline:
@@ -131,6 +133,8 @@ def main() -> None:
                 break
 
         app.processEvents()
+        assert widget.frame_table.model() is widget.live_filter_proxy
+        assert widget.message_table.model() is widget.live_message_filter_proxy
         assert widget.live_filter_proxy.rowCount() == 2
         assert widget.live_message_filter_proxy.rowCount() == 1
 

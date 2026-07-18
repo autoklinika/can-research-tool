@@ -54,7 +54,7 @@ def main() -> None:
         # is scheduled in QThreadPool; the proxy shows the raw buffer until ready.
         widget.live_filter_proxy.reload_project_filters()
         widget.apply_live_filters.setChecked(True)
-        assert widget.frame_table.model() is widget.live_filter_proxy
+        assert widget.frame_table.model() is widget.frame_model
         assert widget.live_filter_proxy.filter_scanning is True
 
         deadline = monotonic() + 10.0
@@ -65,6 +65,7 @@ def main() -> None:
         app.processEvents()
         assert widget.live_filter_proxy.filter_ready is True
         assert widget.live_filter_proxy.filter_scanning is False
+        assert widget.frame_table.model() is widget.live_filter_proxy
         assert widget.live_filter_proxy.rowCount() == 10_000
 
         # New rows after the worker snapshot are evaluated incrementally.

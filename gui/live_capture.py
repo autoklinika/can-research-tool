@@ -97,7 +97,11 @@ class LiveCaptureWidget(QWidget):
         self._build_ui()
         self._live_filter_integration = filter_integration_factory(self)
         self._live_save_integration = save_integration_factory(self)
-        protocol_summary_attacher(self.message_table, self.message_model)
+        protocol_summary_attacher(
+            self.message_table,
+            self.message_model,
+            display_model=self._live_filter_integration.message_proxy,
+        )
         self._update_marker_tile()
         self._refresh_channels()
 

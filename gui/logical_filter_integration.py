@@ -146,7 +146,12 @@ class LogicalMessageFilterProxy(QSortFilterProxyModel):
         self.filter_enabled = normalized
         if not normalized:
             self._clear_filter_cache()
-        self.invalidateFilter()
+            self.invalidateFilter()
+        else:
+            # The Live table remains attached to its source model until the worker
+            # result is ready. Do not synchronously remap the full source here.
+            self.filter_ready = False
+            self.filter_scanning = False
 
     def begin_background_scan(self) -> None:
         if not self.filter_enabled:
@@ -154,7 +159,8 @@ class LogicalMessageFilterProxy(QSortFilterProxyModel):
         self.filter_scanning = True
         self.filter_ready = False
         self._clear_filter_cache(keep_state=True)
-        self.invalidateFilter()
+        # Applying the completed worker result performs the single required
+        # invalidation. Avoid a second full pass before any filter result exists.
 
     def apply_background_result(self, result: LogicalFilterScanResult) -> None:
         if not self.filter_enabled:
