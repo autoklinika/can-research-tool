@@ -1,0 +1,27 @@
+name: Stage H
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  preview-capacity-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI
+        run: python -m pip install -q -e ".[gui]"
+      - name: Verify Stage H bounded preview without extra GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CRT_LIVE_PERF: "1"
+        run: python tests_gui/stage_h_preview_capacity_smoke.py
