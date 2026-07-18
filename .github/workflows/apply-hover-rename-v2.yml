@@ -1,0 +1,40 @@
+name: Apply Hover Rename V2
+
+on:
+  push:
+    branches:
+      - agent/live-buffer-performance-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply-rename:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/live-buffer-performance-fix
+          fetch-depth: 0
+      - name: Rename hover configurator references
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          for name in ("gui/live_capture.py", "gui/session_view.py"):
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              text = text.replace("install_fast_cell_hover", "enable_fast_cell_hover")
+              path.write_text(text, encoding="utf-8")
+          PY
+          rm -f .hover-rename.patch
+          git add gui/live_capture.py gui/session_view.py .hover-rename.patch
+          if git diff --cached --quiet; then
+            echo 'Rename already applied.'
+            exit 0
+          fi
+          git config user.name 'CRT hover automation'
+          git config user.email 'hover-automation@users.noreply.github.com'
+          git commit -m 'Rename hover configurator references'
+          git push origin HEAD:agent/live-buffer-performance-fix
