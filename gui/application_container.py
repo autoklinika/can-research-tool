@@ -20,6 +20,7 @@ from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .session_management_integration import SessionManagementIntegration
 from .session_view import SessionViewWidget
+from .streaming_live_filter_integration import StreamingLiveFilterIntegration
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
@@ -69,7 +70,11 @@ class ApplicationContainer:
 
     def create_live_capture_view(self, project: CrtProject) -> LiveCaptureWidget:
         controller = self._live_controller_factory()
-        return LiveCaptureWidget(project, controller=controller)
+        return LiveCaptureWidget(
+            project,
+            controller=controller,
+            filter_integration_factory=StreamingLiveFilterIntegration,
+        )
 
     def create_session_view(
         self,
