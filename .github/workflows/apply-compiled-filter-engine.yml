@@ -31,3 +31,4 @@ jobs:
           git config user.email 'filter-compiler@users.noreply.github.com'
           git commit -m 'Compile active filters once for fast activation'
           git push origin HEAD:agent/live-buffer-performance-fix
+# trigger
