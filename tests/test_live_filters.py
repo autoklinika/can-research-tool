@@ -143,58 +143,51 @@ def test_logical_message_decision_uses_protocol_context() -> None:
     assert filters.decide_logical_message(other).visible is False
 
 
-def test_protocol_only_visibility_filter_does_not_require_raw_scan() -> None:
-    item = FilterPreset.create("Only protocol messages")
+def test_raw_hot_path_does_not_revalidate_or_reparse_presets(monkeypatch) -> None:
+    item = FilterPreset.create("Fast raw")
     item.mode = FilterMode.INCLUDE
     item.root = {
         "type": "group",
         "operator": "and",
         "children": [
+            condition("0x18DAF900"),
             {
                 "type": "condition",
-                "field": "protocol",
-                "operator": "eq",
-                "values": ["uds"],
-            },
-            {
-                "type": "condition",
-                "field": "did",
-                "operator": "eq",
-                "values": ["0xF190"],
+                "field": "dlc",
+                "operator": "between",
+                "values": ["0", "8"],
             },
         ],
     }
-
     filters = ActiveFilterSet([item])
 
-    assert filters.affects_visibility is True
-    assert filters.affects_raw_visibility is False
+    def fail(*_args, **_kwargs):
+        raise AssertionError("raw hot path must use the compiled preset")
+
+    monkeypatch.setattr(filters._compiler, "validate", fail)
+    monkeypatch.setattr(filters._compiler, "_normalize_value", fail)
+
+    for index in range(10_000):
+        decision = filters.decide(
+            CanFrameRecord(
+                can_id=0x18DAF900 if index % 2 == 0 else 0x123,
+                extended=True,
+                dlc=8,
+                relative_time_us=index,
+            )
+        )
+        assert decision.visible is (index % 2 == 0)
 
 
-def test_mixed_visibility_filter_requires_raw_scan() -> None:
-    item = FilterPreset.create("CAN or UDS")
+def test_protocol_only_filter_does_not_request_raw_buffer_scan() -> None:
+    item = FilterPreset.create("Only UDS")
     item.mode = FilterMode.INCLUDE
     item.root = {
-        "type": "group",
-        "operator": "or",
-        "children": [
-            condition("0x123"),
-            {
-                "type": "condition",
-                "field": "protocol",
-                "operator": "eq",
-                "values": ["uds"],
-            },
-        ],
+        "type": "condition",
+        "field": "did",
+        "operator": "eq",
+        "values": ["0xF190"],
     }
 
-    filters = ActiveFilterSet([item])
-
-    assert filters.affects_raw_visibility is True
-
-
-def test_highlight_only_raw_filter_does_not_require_visibility_scan() -> None:
-    filters = ActiveFilterSet([preset("Highlight", FilterMode.HIGHLIGHT, "0x123")])
-
-    assert filters.affects_visibility is False
-    assert filters.affects_raw_visibility is False
+    assert ActiveFilterSet([item]).affects_raw_visibility is False
+    assert ActiveFilterSet([preset("Raw", FilterMode.INCLUDE, "0x123")]).affects_raw_visibility is True
