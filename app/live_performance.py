@@ -243,10 +243,11 @@ class InstrumentedLiveCaptureController:
         self._report_dir.mkdir(parents=True, exist_ok=True)
         now = self._utc_now()
         safe_session = _safe_component(request.session_name) or "capture"
-        self._report_path = self._report_dir / (
+        requested_path = self._report_dir / (
             f"live-performance-{now:%Y%m%d_%H%M%S}-{safe_session}.jsonl"
         )
-        self._handle = self._report_path.open("w", encoding="utf-8", buffering=1)
+        self._report_path = _unique_path(requested_path)
+        self._handle = self._report_path.open("x", encoding="utf-8", buffering=1)
         started_ns = self._clock_ns()
         process_cpu_ns = self._process_clock_ns()
         self._report_started_ns = started_ns
@@ -437,7 +438,19 @@ def _read_process_memory() -> tuple[int | None, str]:
         return None, "unavailable"
 
 
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 10_000):
+        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"cannot allocate unique performance report path: {path}")
+
+
 def _read_windows_working_set() -> tuple[int | None, str]:
+    from ctypes import wintypes
+
     class ProcessMemoryCounters(ctypes.Structure):
         _fields_ = [
             ("cb", ctypes.c_ulong),
@@ -455,8 +468,17 @@ def _read_windows_working_set() -> tuple[int | None, str]:
     counters = ProcessMemoryCounters()
     counters.cb = ctypes.sizeof(counters)
     try:
-        process = ctypes.windll.kernel32.GetCurrentProcess()
-        success = ctypes.windll.psapi.GetProcessMemoryInfo(
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(ProcessMemoryCounters),
+            wintypes.DWORD,
+        )
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        process = kernel32.GetCurrentProcess()
+        success = psapi.GetProcessMemoryInfo(
             process,
             ctypes.byref(counters),
             counters.cb,
