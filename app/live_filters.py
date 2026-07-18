@@ -7,6 +7,7 @@ from .filters import (
     CanFrameRecord,
     FilterCompiler,
     FilterContext,
+    FilterField,
     FilterMode,
     FilterPreset,
     MatchState,
@@ -76,6 +77,23 @@ class ActiveFilterSet:
         )
 
     @property
+    def affects_raw_visibility(self) -> bool:
+        """Whether any visibility preset can change the raw-frame table.
+
+        Protocol-only conditions are deliberately neutral for raw frames. Detecting
+        that case before scheduling a 250k-row scan avoids wasting CPU and contending
+        with the GUI thread for the Python GIL when the user only wants UDS/J1939/
+        ISO-TP filtering in the logical-message table.
+        """
+
+        raw_fields = {field.value for field in FilterField}
+        return any(
+            preset.mode in {FilterMode.INCLUDE, FilterMode.EXCLUDE}
+            and _tree_uses_any_field(preset.root, raw_fields)
+            for preset in self.presets
+        )
+
+    @property
     def signature(self) -> tuple[object, ...]:
         return (
             self.scope,
@@ -136,3 +154,14 @@ class ActiveFilterSet:
             highlighted=highlighted,
             unavailable_reasons=tuple(unavailable),
         )
+
+
+def _tree_uses_any_field(node: object, fields: set[str]) -> bool:
+    if not isinstance(node, dict):
+        return False
+    if node.get("type") == "condition":
+        return str(node.get("field", "")) in fields
+    children = node.get("children", ())
+    if not isinstance(children, (list, tuple)):
+        return False
+    return any(_tree_uses_any_field(child, fields) for child in children)

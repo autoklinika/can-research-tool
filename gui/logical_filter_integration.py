@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import sleep
 from typing import Iterable
 
 from PySide6.QtCore import (
@@ -17,6 +18,10 @@ from app.live_filters import ActiveFilterSet
 from app.logical_records import LogicalMessageRecord
 
 from .logical_message_model import LogicalMessageTableModel
+
+
+LOGICAL_FILTER_WORKER_YIELD_EVERY = 256
+LOGICAL_FILTER_WORKER_YIELD_SECONDS = 0.001
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +61,7 @@ class LogicalFilterScanTask(QRunnable):
             protocol_counts: dict[str, int] = {}
             transport_counts: dict[str, int] = {}
             incomplete_count = 0
-            for message in self.messages:
+            for index, message in enumerate(self.messages, start=1):
                 key = logical_message_key(message)
                 evaluated.add(key)
                 if self.filter_set.decide_logical_message(
@@ -68,6 +73,8 @@ class LogicalFilterScanTask(QRunnable):
                     _increment_count(transport_counts, str(message.transport).upper())
                     if not message.complete:
                         incomplete_count += 1
+                if index % LOGICAL_FILTER_WORKER_YIELD_EVERY == 0:
+                    sleep(LOGICAL_FILTER_WORKER_YIELD_SECONDS)
             self.signals.completed.emit(
                 self.generation,
                 LogicalFilterScanResult(

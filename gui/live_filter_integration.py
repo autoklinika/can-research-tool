@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import deque
+from time import sleep
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
@@ -32,6 +34,10 @@ if TYPE_CHECKING:
 
 LIVE_FRAME_CAPACITY = 250_000
 LIVE_MESSAGE_CAPACITY = 100_000
+FILTER_WORKER_YIELD_EVERY = 512
+FILTER_WORKER_YIELD_SECONDS = 0.001
+INCREMENTAL_FILTER_BATCH_SIZE = 4_096
+INCREMENTAL_FILTER_DELAY_MS = 10
 
 
 class LiveFilterScanSignals(QObject):
@@ -59,15 +65,51 @@ class LiveFilterScanTask(QRunnable):
         try:
             accepted: list[CanFrame] = []
             evaluated_through = -1
-            for frame in self.frames:
+            for index, frame in enumerate(self.frames, start=1):
                 if self.filter_set.decide(_frame_record(frame)).visible:
                     accepted.append(frame)
                 evaluated_through = max(evaluated_through, frame.sequence)
+                if index % FILTER_WORKER_YIELD_EVERY == 0:
+                    sleep(FILTER_WORKER_YIELD_SECONDS)
             self.signals.completed.emit(
                 self.generation,
                 accepted,
                 evaluated_through,
             )
+        except Exception as exc:
+            self.signals.failed.emit(self.generation, str(exc))
+
+
+class LiveIncrementalFilterSignals(QObject):
+    completed = Signal(int, object)
+    failed = Signal(int, str)
+
+
+class LiveIncrementalFilterTask(QRunnable):
+    """Filter one bounded batch of newly arrived frames outside the GUI thread."""
+
+    def __init__(
+        self,
+        generation: int,
+        frames: tuple[CanFrame, ...],
+        filter_set: ActiveFilterSet,
+    ) -> None:
+        super().__init__()
+        self.generation = generation
+        self.frames = frames
+        self.filter_set = filter_set
+        self.signals = LiveIncrementalFilterSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            accepted: list[CanFrame] = []
+            for index, frame in enumerate(self.frames, start=1):
+                if self.filter_set.decide(_frame_record(frame)).visible:
+                    accepted.append(frame)
+                if index % FILTER_WORKER_YIELD_EVERY == 0:
+                    sleep(FILTER_WORKER_YIELD_SECONDS)
+            self.signals.completed.emit(self.generation, accepted)
         except Exception as exc:
             self.signals.failed.emit(self.generation, str(exc))
 
@@ -181,17 +223,10 @@ class LiveFrameFilterProxy(QAbstractTableModel):
         self.filter_ready = True
         self.endResetModel()
 
-    def append_source_frames(self, frames: tuple[CanFrame, ...]) -> None:
+    def append_accepted_frames(self, frames: tuple[CanFrame, ...]) -> None:
         if not frames or not self.filter_enabled or not self.filter_ready:
             return
-        visible = [
-            frame
-            for frame in frames
-            if self.filter_set.decide(_frame_record(frame)).visible
-        ]
-        if not visible:
-            return
-        overflow = max(0, len(self._frames) + len(visible) - LIVE_FRAME_CAPACITY)
+        overflow = max(0, len(self._frames) + len(frames) - LIVE_FRAME_CAPACITY)
         if overflow:
             trim_chunk = max(1, LIVE_FRAME_CAPACITY // 10)
             remove_count = min(len(self._frames), max(overflow, trim_chunk))
@@ -199,8 +234,8 @@ class LiveFrameFilterProxy(QAbstractTableModel):
             del self._frames[:remove_count]
             self.endRemoveRows()
         first_row = len(self._frames)
-        self.beginInsertRows(QModelIndex(), first_row, first_row + len(visible) - 1)
-        self._frames.extend(visible)
+        self.beginInsertRows(QModelIndex(), first_row, first_row + len(frames) - 1)
+        self._frames.extend(frames)
         self.endInsertRows()
 
     def prune_before(self, first_sequence: int) -> None:
@@ -227,8 +262,10 @@ class LiveFilterIntegration(QObject):
         self._frame_generation = 0
         self._message_generation = 0
         self._frame_tasks: list[LiveFilterScanTask] = []
+        self._incremental_tasks: list[LiveIncrementalFilterTask] = []
         self._message_tasks: list[LogicalFilterScanTask] = []
-        self._pending_frames: list[CanFrame] = []
+        self._pending_frames: deque[CanFrame] = deque(maxlen=LIVE_FRAME_CAPACITY)
+        self._incremental_running_generation: int | None = None
 
         self.proxy = LiveFrameFilterProxy(widget)
         widget.live_filter_proxy = self.proxy
@@ -267,6 +304,11 @@ class LiveFilterIntegration(QObject):
         self._reload_timer.setInterval(750)
         self._reload_timer.timeout.connect(self._reload_and_update)
         self._reload_timer.start()
+
+        self._incremental_timer = QTimer(widget)
+        self._incremental_timer.setSingleShot(True)
+        self._incremental_timer.setInterval(INCREMENTAL_FILTER_DELAY_MS)
+        self._incremental_timer.timeout.connect(self._start_incremental_scan)
         self._reload_and_update()
 
     def selected_frame(self) -> CanFrame | None:
@@ -301,19 +343,28 @@ class LiveFilterIntegration(QObject):
             # Detach filtered presentation models before clearing their state.
             self._set_frame_display_model(False)
             self._set_message_display_model(False)
-        self.proxy.set_filter_enabled(checked)
-        self.message_proxy.set_filter_enabled(checked)
-        if checked and self.proxy.filter_enabled:
+        applied = bool(checked and self.proxy.filter_set.active_count)
+        self.proxy.set_filter_enabled(applied and self.proxy.filter_set.affects_raw_visibility)
+        self.message_proxy.set_filter_enabled(applied and self.proxy.filter_set.affects_visibility)
+        if applied:
             names = ", ".join(self.proxy.filter_set.active_names)
             self.widget.output_message.emit(
                 f"Filtry Live włączone — obliczam widok w tle: {names}"
             )
-            self._schedule_frame_scan()
-            self._schedule_message_scan()
+            if self.proxy.filter_enabled:
+                self._schedule_frame_scan()
+            else:
+                self._set_frame_display_model(False)
+            if self.message_proxy.filter_enabled:
+                self._schedule_message_scan()
+            else:
+                self._set_message_display_model(False)
         else:
             self._frame_generation += 1
             self._message_generation += 1
             self._pending_frames.clear()
+            self._incremental_running_generation = None
+            self._incremental_timer.stop()
             if checked and not self.proxy.filter_set.active_count:
                 self.checkbox.setChecked(False)
             self.widget.output_message.emit(
@@ -336,9 +387,22 @@ class LiveFilterIntegration(QObject):
             self._set_message_display_model(False)
             self.proxy.set_filter_enabled(False)
             self.message_proxy.set_filter_enabled(False)
+            self._pending_frames.clear()
+            self._incremental_running_generation = None
+            self._incremental_timer.stop()
         elif (changed or logical_changed) and self.checkbox.isChecked():
-            self._schedule_frame_scan()
-            self._schedule_message_scan()
+            self._set_frame_display_model(False)
+            self._set_message_display_model(False)
+            self.proxy.set_filter_enabled(self.proxy.filter_set.affects_raw_visibility)
+            self.message_proxy.set_filter_enabled(self.proxy.filter_set.affects_visibility)
+            if self.proxy.filter_enabled:
+                self._schedule_frame_scan()
+            else:
+                self._pending_frames.clear()
+                self._incremental_running_generation = None
+                self._incremental_timer.stop()
+            if self.message_proxy.filter_enabled:
+                self._schedule_message_scan()
         self._update_filter_control()
         self._update_live_counts()
 
@@ -362,10 +426,9 @@ class LiveFilterIntegration(QObject):
         )
         if not frames:
             return
-        if self.proxy.filter_scanning:
-            self._pending_frames.extend(frames)
-        elif self.proxy.filter_ready:
-            self.proxy.append_source_frames(frames)
+        self._pending_frames.extend(frames)
+        if self.proxy.filter_ready and not self.proxy.filter_scanning:
+            self._schedule_incremental_scan()
 
     def _source_message_model_reset(self) -> None:
         if self.message_proxy.filter_enabled:
@@ -378,6 +441,8 @@ class LiveFilterIntegration(QObject):
         generation = self._frame_generation
         frames = self.widget.frame_model.snapshot_frames()
         self._pending_frames.clear()
+        self._incremental_running_generation = None
+        self._incremental_timer.stop()
         self._set_frame_display_model(False)
         self.proxy.begin_background_scan()
         if not frames:
@@ -418,6 +483,75 @@ class LiveFilterIntegration(QObject):
         QThreadPool.globalInstance().start(task)
         self._update_filter_control()
 
+    def _schedule_incremental_scan(self) -> None:
+        if (
+            not self.proxy.filter_enabled
+            or not self.proxy.filter_ready
+            or self.proxy.filter_scanning
+            or not self._pending_frames
+            or self._incremental_running_generation is not None
+        ):
+            return
+        if not self._incremental_timer.isActive():
+            self._incremental_timer.start()
+
+    def _start_incremental_scan(self) -> None:
+        if (
+            not self.proxy.filter_enabled
+            or not self.proxy.filter_ready
+            or self.proxy.filter_scanning
+            or self._incremental_running_generation is not None
+        ):
+            return
+        self._prune_frame_filter_cache()
+        if not self._pending_frames:
+            return
+
+        batch_size = min(INCREMENTAL_FILTER_BATCH_SIZE, len(self._pending_frames))
+        frames = tuple(self._pending_frames.popleft() for _ in range(batch_size))
+        generation = self._frame_generation
+        task = LiveIncrementalFilterTask(generation, frames, self.proxy.filter_set)
+        self._incremental_running_generation = generation
+        self._incremental_tasks.append(task)
+        self._incremental_tasks = self._incremental_tasks[-3:]
+        task.signals.completed.connect(self._incremental_scan_completed)
+        task.signals.failed.connect(self._incremental_scan_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _incremental_scan_completed(
+        self,
+        generation: int,
+        accepted_frames: object,
+    ) -> None:
+        if generation != self._frame_generation:
+            return
+        self._incremental_running_generation = None
+        if not self.proxy.filter_enabled or not self.proxy.filter_ready:
+            return
+        result_frames = tuple(
+            frame for frame in accepted_frames if isinstance(frame, CanFrame)
+        )
+        first = self.widget.frame_model.frame_at(0)
+        if first is not None:
+            first_sequence = int(first.sequence)
+            result_frames = tuple(
+                frame for frame in result_frames if int(frame.sequence) >= first_sequence
+            )
+        scrollbar = self.widget.frame_table.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
+        self.proxy.append_accepted_frames(result_frames)
+        if result_frames and self.widget.auto_scroll.isChecked() and was_at_bottom:
+            self.widget.frame_table.scrollToBottom()
+        self._incremental_tasks = self._incremental_tasks[-2:]
+        self._update_live_counts()
+        self._schedule_incremental_scan()
+
+    def _incremental_scan_failed(self, generation: int, error: str) -> None:
+        if generation != self._frame_generation:
+            return
+        self._incremental_running_generation = None
+        self._disable_after_error(f"Błąd przyrostowego filtrowania ramek Live: {error}")
+
     def _frame_scan_completed(
         self,
         generation: int,
@@ -430,15 +564,14 @@ class LiveFilterIntegration(QObject):
             frame for frame in accepted_frames if isinstance(frame, CanFrame)
         )
         self.proxy.apply_background_result(result_frames, evaluated_through_sequence)
-        pending = tuple(
-            frame
-            for frame in self._pending_frames
-            if int(frame.sequence) > evaluated_through_sequence
-        )
-        self._pending_frames.clear()
-        self.proxy.append_source_frames(pending)
+        while (
+            self._pending_frames
+            and int(self._pending_frames[0].sequence) <= evaluated_through_sequence
+        ):
+            self._pending_frames.popleft()
         self._prune_frame_filter_cache()
         self._set_frame_display_model(True)
+        self._schedule_incremental_scan()
         self._frame_tasks = self._frame_tasks[-2:]
         self._update_filter_control()
         self._update_live_counts()
@@ -474,6 +607,8 @@ class LiveFilterIntegration(QObject):
         self.proxy.set_filter_enabled(False)
         self.message_proxy.set_filter_enabled(False)
         self._pending_frames.clear()
+        self._incremental_running_generation = None
+        self._incremental_timer.stop()
         self.widget.output_message.emit(message)
         self._update_filter_control()
         self._update_live_counts()
@@ -481,7 +616,13 @@ class LiveFilterIntegration(QObject):
     def _prune_frame_filter_cache(self, *_args: object) -> None:
         first = self.widget.frame_model.frame_at(0)
         if first is not None:
-            self.proxy.prune_before(int(first.sequence))
+            first_sequence = int(first.sequence)
+            self.proxy.prune_before(first_sequence)
+            while (
+                self._pending_frames
+                and int(self._pending_frames[0].sequence) < first_sequence
+            ):
+                self._pending_frames.popleft()
 
     def _prune_message_filter_cache(self, *_args: object) -> None:
         self.message_proxy.prune_source_cache_if_needed(LIVE_MESSAGE_CAPACITY * 2)
@@ -509,11 +650,15 @@ class LiveFilterIntegration(QObject):
         self.checkbox.setText(f"Zastosuj filtry ({count})" if count else "Zastosuj filtry")
         if count:
             names = ", ".join(self.proxy.filter_set.active_names)
-            scanning = self.proxy.filter_scanning or self.message_proxy.filter_scanning
+            scanning = (
+                self.proxy.filter_scanning
+                or self.message_proxy.filter_scanning
+                or self._incremental_running_generation is not None
+            )
             if scanning:
                 state = "PRZELICZANIE"
             else:
-                state = "WŁĄCZONE" if self.proxy.filter_enabled else "WYŁĄCZONE"
+                state = "WŁĄCZONE" if self.checkbox.isChecked() else "WYŁĄCZONE"
             self.checkbox.setToolTip(
                 f"Filtry Live: {state}. Aktywne presety: {names}. "
                 "Pełne przeliczenie ramek i wiadomości odbywa się poza wątkiem GUI."

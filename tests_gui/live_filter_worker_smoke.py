@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from tempfile import TemporaryDirectory
-from time import monotonic
+from time import monotonic, sleep
 
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import QApplication
 
 from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
@@ -53,6 +53,16 @@ def main() -> None:
         # Reload the saved preset and enable filtering. Full predicate evaluation
         # is scheduled in QThreadPool; the proxy shows the raw buffer until ready.
         widget.live_filter_proxy.reload_project_filters()
+        heartbeat_count = 0
+
+        def heartbeat() -> None:
+            nonlocal heartbeat_count
+            heartbeat_count += 1
+
+        heartbeat_timer = QTimer()
+        heartbeat_timer.setInterval(1)
+        heartbeat_timer.timeout.connect(heartbeat)
+        heartbeat_timer.start()
         widget.apply_live_filters.setChecked(True)
         assert widget.frame_table.model() is widget.frame_model
         assert widget.live_filter_proxy.filter_scanning is True
@@ -60,38 +70,41 @@ def main() -> None:
         deadline = monotonic() + 10.0
         while not widget.live_filter_proxy.filter_ready and monotonic() < deadline:
             app.processEvents()
-            QThreadPool.globalInstance().waitForDone(20)
+            sleep(0.001)
 
         app.processEvents()
         assert widget.live_filter_proxy.filter_ready is True
         assert widget.live_filter_proxy.filter_scanning is False
         assert widget.frame_table.model() is widget.live_filter_proxy
         assert widget.live_filter_proxy.rowCount() == 10_000
+        assert heartbeat_count >= 3
 
-        # New rows after the worker snapshot are evaluated incrementally.
-        widget.frame_model.append_frames(
-            [
-                CanFrame(
-                    sequence=20_000,
-                    timestamp_ns=20_000_000,
-                    arbitration_id=0x100,
-                    data=b"\x01",
-                ),
-                CanFrame(
-                    sequence=20_001,
-                    timestamp_ns=20_001_000,
-                    arbitration_id=0x200,
-                    data=b"\x02",
-                ),
-            ]
-        )
-        app.processEvents()
-        assert widget.live_filter_proxy.rowCount() == 10_001
+        # New rows are queued immediately and evaluated by a separate worker.
+        incoming = [
+            CanFrame(
+                sequence=20_000 + index,
+                timestamp_ns=(20_000 + index) * 1_000,
+                arbitration_id=0x100 if index % 2 == 0 else 0x200,
+                data=b"\x01",
+            )
+            for index in range(10_000)
+        ]
+        widget.frame_model.append_frames(incoming)
+        assert widget.live_filter_proxy.rowCount() == 10_000
+        assert widget._live_filter_integration._pending_frames
+        deadline = monotonic() + 10.0
+        while widget.live_filter_proxy.rowCount() < 15_000 and monotonic() < deadline:
+            app.processEvents()
+            QThreadPool.globalInstance().waitForDone(5)
+            sleep(0.001)
+        heartbeat_timer.stop()
+        assert widget.live_filter_proxy.rowCount() == 15_000
+        assert not widget._live_filter_integration._pending_frames
 
         widget.apply_live_filters.setChecked(False)
         app.processEvents()
         assert widget.frame_table.model() is widget.frame_model
-        assert widget.live_filter_proxy.rowCount() == 20_002
+        assert widget.live_filter_proxy.rowCount() == 30_000
         widget.close()
 
     app.processEvents()

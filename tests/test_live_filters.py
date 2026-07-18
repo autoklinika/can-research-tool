@@ -141,3 +141,60 @@ def test_logical_message_decision_uses_protocol_context() -> None:
 
     assert filters.decide_logical_message(matching).visible is True
     assert filters.decide_logical_message(other).visible is False
+
+
+def test_protocol_only_visibility_filter_does_not_require_raw_scan() -> None:
+    item = FilterPreset.create("Only protocol messages")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "group",
+        "operator": "and",
+        "children": [
+            {
+                "type": "condition",
+                "field": "protocol",
+                "operator": "eq",
+                "values": ["uds"],
+            },
+            {
+                "type": "condition",
+                "field": "did",
+                "operator": "eq",
+                "values": ["0xF190"],
+            },
+        ],
+    }
+
+    filters = ActiveFilterSet([item])
+
+    assert filters.affects_visibility is True
+    assert filters.affects_raw_visibility is False
+
+
+def test_mixed_visibility_filter_requires_raw_scan() -> None:
+    item = FilterPreset.create("CAN or UDS")
+    item.mode = FilterMode.INCLUDE
+    item.root = {
+        "type": "group",
+        "operator": "or",
+        "children": [
+            condition("0x123"),
+            {
+                "type": "condition",
+                "field": "protocol",
+                "operator": "eq",
+                "values": ["uds"],
+            },
+        ],
+    }
+
+    filters = ActiveFilterSet([item])
+
+    assert filters.affects_raw_visibility is True
+
+
+def test_highlight_only_raw_filter_does_not_require_visibility_scan() -> None:
+    filters = ActiveFilterSet([preset("Highlight", FilterMode.HIGHLIGHT, "0x123")])
+
+    assert filters.affects_visibility is False
+    assert filters.affects_raw_visibility is False
