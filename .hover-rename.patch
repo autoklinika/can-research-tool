@@ -44,3 +44,4 @@
          self.marker_table.horizontalHeader().setStretchLastSection(True)
 -        install_fast_cell_hover(self.marker_table)
 +        enable_fast_cell_hover(self.marker_table)
+
