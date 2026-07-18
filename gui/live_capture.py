@@ -48,7 +48,7 @@ from .logical_message_model import (
 )
 from .marker_manager import MarkerManagerDialog
 from .protocol_summary import attach_protocol_summary
-from .table_hover import install_fast_cell_hover
+from .table_hover import enable_fast_cell_hover
 
 
 class LiveCaptureWidget(QWidget):
@@ -220,7 +220,7 @@ class LiveCaptureWidget(QWidget):
         self.frame_table.setSelectionMode(QTableView.SingleSelection)
         self.frame_table.verticalHeader().setDefaultSectionSize(22)
         self.frame_table.horizontalHeader().setStretchLastSection(True)
-        install_fast_cell_hover(self.frame_table)
+        enable_fast_cell_hover(self.frame_table)
         self.frame_table.selectionModel().selectionChanged.connect(self._frame_selected)
         self.frame_table.setColumnWidth(0, 115)
         self.frame_table.setColumnWidth(1, 90)
@@ -251,7 +251,7 @@ class LiveCaptureWidget(QWidget):
         self.message_table.setSelectionMode(QTableView.SingleSelection)
         self.message_table.verticalHeader().setDefaultSectionSize(22)
         self.message_table.horizontalHeader().setStretchLastSection(True)
-        install_fast_cell_hover(self.message_table)
+        enable_fast_cell_hover(self.message_table)
         self.message_table.selectionModel().selectionChanged.connect(
             self._message_selected
         )
