@@ -32,7 +32,8 @@ def test_container_constructs_capture_and_stored_session_controllers() -> None:
     source = (ROOT / "gui" / "application_container.py").read_text(encoding="utf-8")
 
     assert "controller = self._live_controller_factory()" in source
-    assert "return LiveCaptureWidget(" in source
+    assert "widget_type = live_capture_widget_type()" in source
+    assert "return widget_type(" in source
     assert "controller=controller" in source
     assert "filter_integration_factory=StreamingLiveFilterIntegration" in source
     assert "controller = self._stored_controller_factory(" in source
