@@ -51,11 +51,12 @@ class StreamingLiveFilterIntegration(LiveFilterIntegration):
             self.widget.output_message.emit(
                 f"Filtry Live włączone od bieżącego momentu: {names}"
             )
+        elif checked:
+            self.widget.output_message.emit(
+                "Filtry Live oczekują — brak aktywnych presetów; "
+                "pierwszy ponownie aktywowany preset zostanie zastosowany automatycznie"
+            )
         else:
-            if checked and not self.proxy.filter_set.active_count:
-                self.checkbox.blockSignals(True)
-                self.checkbox.setChecked(False)
-                self.checkbox.blockSignals(False)
             self.widget.output_message.emit(
                 "Filtry Live wyłączone — widok od bieżącego momentu pokazuje wszystkie ramki"
             )
@@ -72,16 +73,22 @@ class StreamingLiveFilterIntegration(LiveFilterIntegration):
         logical_changed = self.message_proxy.set_filter_set(self.proxy.filter_set)
 
         if self.proxy.filter_set.active_count == 0:
-            was_checked = self.checkbox.isChecked()
-            if was_checked:
-                self.checkbox.blockSignals(True)
-                self.checkbox.setChecked(False)
-                self.checkbox.blockSignals(False)
+            was_filtering = bool(
+                self.proxy.filter_enabled
+                or self.message_proxy.filter_enabled
+                or self._streaming_filter_view
+            )
             self.proxy.set_filter_enabled(False)
             self.message_proxy.set_filter_enabled(False)
-            if was_checked:
+            if self.checkbox.isChecked() and (
+                changed or logical_changed or was_filtering
+            ):
                 self._streaming_filter_view = False
                 self._reset_streaming_presentation()
+                self.widget.output_message.emit(
+                    "Brak aktywnych presetów Live — pokazuję pełny strumień; "
+                    "filtrowanie wznowi się automatycznie po aktywacji presetu"
+                )
         elif (changed or logical_changed) and self.checkbox.isChecked():
             self.proxy.set_filter_enabled(
                 self.proxy.filter_set.affects_raw_visibility
@@ -183,4 +190,16 @@ class StreamingLiveFilterIntegration(LiveFilterIntegration):
             self.checkbox.setToolTip(
                 f"Filtry Live: WŁĄCZONE. Aktywne presety: {names}. "
                 "Widok działa strumieniowo od momentu aktywacji; pełny zapis sesji trwa nadal."
+            )
+        elif (
+            self.widget.is_capturing
+            and self.checkbox.isChecked()
+            and not self.proxy.filter_set.active_count
+        ):
+            # Preserve the user's application intent while no preset is active.
+            # Keeping the control enabled also lets the user explicitly cancel it.
+            self.checkbox.setEnabled(True)
+            self.checkbox.setToolTip(
+                "Filtry Live: OCZEKIWANIE. Brak aktywnych presetów. "
+                "Pierwszy aktywowany preset zostanie zastosowany automatycznie."
             )
