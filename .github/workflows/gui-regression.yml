@@ -44,6 +44,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_filter_worker_smoke.py
+      - name: Verify bounded Live models avoid per-refresh full-buffer work
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_buffer_performance_smoke.py
       - name: Verify protocol filters in GUI and logical Live view
         env:
           QT_QPA_PLATFORM: offscreen
