@@ -102,6 +102,42 @@ def iter_logical_message_csv(path: str | Path) -> Iterator[LogicalMessageRecord]
                 ) from exc
 
 
+def _load_recent_logical_message_csv(
+    path: str | Path,
+    *,
+    max_rows: int,
+) -> tuple[list[LogicalMessageRecord], int]:
+    """Count the CSV but deserialize only the retained interactive window.
+
+    The previous implementation converted payload hex, decoded JSON fields and
+    re-ran protocol decoders for every row before discarding all but the recent
+    window. Large logs therefore monopolised the Python GIL even though the work
+    ran in a QThreadPool. Retaining raw CSV dictionaries first keeps the full
+    count while moving expensive conversion to at most ``max_rows`` records.
+    """
+
+    source = Path(path)
+    retained_rows: deque[tuple[int, dict[str, str | None]]] = deque(maxlen=max_rows)
+    total = 0
+    with source.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter=";")
+        if reader.fieldnames is None:
+            raise ValueError("logical message CSV does not contain a header")
+        for line_number, row in enumerate(reader, start=2):
+            retained_rows.append((line_number, dict(row)))
+            total += 1
+
+    records: list[LogicalMessageRecord] = []
+    for line_number, row in retained_rows:
+        try:
+            records.append(_record_from_csv_row(row))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"invalid logical message row at line {line_number}: {exc}"
+            ) from exc
+    return records, total
+
+
 def reinterpret_raw_record(
     record: LogicalMessageRecord,
     *,
@@ -172,7 +208,11 @@ def load_recent_logical_messages(
     total = 0
 
     if message_path.is_file():
-        for record in iter_logical_message_csv(message_path):
+        cached_records, total = _load_recent_logical_message_csv(
+            message_path,
+            max_rows=max_rows,
+        )
+        for record in cached_records:
             retained.append(
                 reinterpret_raw_record(
                     record,
@@ -180,7 +220,6 @@ def load_recent_logical_messages(
                     dbc_decoder=dbc_decoder,
                 )
             )
-            total += 1
         source = "messages-csv+dbc" if dbc_decoder is not None else "messages-csv"
         return list(retained), total, source
 
