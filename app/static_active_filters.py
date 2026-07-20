@@ -103,9 +103,7 @@ class StaticCombinedActiveFilterSet:
             issues = tuple(self._compiler.validate(preset))
             if issues:
                 validation_issues.append((preset.name, issues))
-                compiled.append(
-                    _CompiledPreset(preset, None, issues[0].message)
-                )
+                compiled.append(_CompiledPreset(preset, None, issues[0].message))
             else:
                 compiled.append(
                     _CompiledPreset(
@@ -414,19 +412,23 @@ def _match_state(
 
 
 def _resolve_raw(field_name: str, record: StaticCanFrameRecord) -> tuple[bool, Any]:
-    values = {
-        FilterField.CAN_ID.value: record.can_id,
-        FilterField.FRAME_FORMAT.value: "ext" if record.extended else "std",
-        FilterField.DLC.value: record.dlc,
-        FilterField.RELATIVE_TIME_US.value: record.relative_time_us,
-        StaticFilterField.CHANNEL.value: record.channel,
-        StaticFilterField.RTR.value: record.rtr,
-        StaticFilterField.ERROR_FRAME.value: record.error_frame,
-        StaticFilterField.PAYLOAD.value: record.payload,
-    }
-    if field_name not in values:
-        return False, None
-    return True, values[field_name]
+    if field_name == FilterField.CAN_ID.value:
+        return True, record.can_id
+    if field_name == FilterField.FRAME_FORMAT.value:
+        return True, "ext" if record.extended else "std"
+    if field_name == FilterField.DLC.value:
+        return True, record.dlc
+    if field_name == FilterField.RELATIVE_TIME_US.value:
+        return True, record.relative_time_us
+    if field_name == StaticFilterField.CHANNEL.value:
+        return True, record.channel
+    if field_name == StaticFilterField.RTR.value:
+        return True, record.rtr
+    if field_name == StaticFilterField.ERROR_FRAME.value:
+        return True, record.error_frame
+    if field_name == StaticFilterField.PAYLOAD.value:
+        return True, record.payload
+    return False, None
 
 
 def _compare(actual: Any, operator: str, condition: _CompiledCondition) -> bool:
