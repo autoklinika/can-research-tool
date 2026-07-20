@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from gc import collect
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
@@ -113,7 +114,14 @@ def main() -> None:
             widget.live_filter_proxy.frame_at(index).sequence
             for index in range(widget.live_filter_proxy.rowCount())
         ) == (1, 3)
+
+        widget.shutdown()
         widget.close()
+        widget.deleteLater()
+        QThreadPool.globalInstance().waitForDone(5_000)
+        app.processEvents()
+        del widget
+        collect()
 
         session_path = project.root / "sessions" / "static-smoke.crt.jsonl"
         session_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +144,8 @@ def main() -> None:
         assert state.page.visible_frames == 2
         assert session_path.read_bytes() == original_bytes
         controller.shutdown()
+        del controller
+        collect()
 
     app.processEvents()
 
