@@ -10,7 +10,7 @@ from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferenc
 from app.filters import ProjectFilterRepository
 from app.project import CrtProject
 from app.static_filter_engine import StaticFilterField, StaticFilterOperator
-from gui.ergonomic_filter_manager import ErgonomicFilterManagerWidget
+from gui.compact_filter_manager import CompactFilterManagerWidget
 
 
 def _combo_data(combo) -> tuple[str, ...]:
@@ -24,18 +24,13 @@ def main() -> None:
         project = CrtProject.create(f"{temporary}/project", name="Static filter editor")
         repository = ProjectFilterRepository(project.database_path)
         preferences = ProjectFilterPreferences(project.database_path)
-        manager = ErgonomicFilterManagerWidget(project)
+        manager = CompactFilterManagerWidget(project)
         manager._add_preset()
         manager._select_tree_path((0,))
         app.processEvents()
 
-        # Primary actions are fixed in a global footer, not buried in the preset column.
         transaction_bar = manager.findChild(QWidget, "filterTransactionBar")
-        transaction_footer = manager.findChild(QWidget, "filterTransactionFooter")
         assert transaction_bar is not None
-        assert transaction_footer is not None
-        assert transaction_bar.parentWidget() is transaction_footer
-        assert manager.save_state_label.parentWidget() is transaction_footer
         assert manager.apply_button.text() == "Zastosuj zmiany"
         assert manager.discard_button.text() == "Odrzuć zmiany"
         assert manager.has_pending_changes
@@ -43,16 +38,8 @@ def main() -> None:
         assert manager.discard_button.isEnabled()
         assert repository.list_presets() == []
 
-        # Rare global options are collapsed but their current state remains in the title.
         combination_bar = manager.findChild(QWidget, "filterCombinationBar")
         assert combination_bar is not None
-        assert manager.global_settings_box.isCheckable()
-        assert not manager.global_settings_box.isChecked()
-        assert manager.global_settings_content.isHidden()
-        assert "AND" in manager.global_settings_box.title()
-        manager.global_settings_box.setChecked(True)
-        app.processEvents()
-        assert not manager.global_settings_content.isHidden()
         assert manager.combination_combo.parentWidget() is combination_bar
         assert manager.combination_combo.maximumWidth() == 260
         assert manager.combination_combo.itemText(
@@ -65,31 +52,9 @@ def main() -> None:
         manager.combination_combo.setCurrentIndex(
             manager.combination_combo.findData(FilterCombinationMode.OR.value)
         )
-        assert "OR" in manager.global_settings_box.title()
         manager._autosave()
         assert repository.list_presets() == []
         assert preferences.combination_mode() is FilterCombinationMode.AND
-
-        # Preset list stays compact; description and shortcut are available on demand.
-        assert manager.table.isColumnHidden(2)
-        assert manager.description_edit.isHidden()
-        assert manager.shortcut_edit.isHidden()
-        assert manager.preset_advanced_toggle.text() == "Pokaż opis i skrót"
-        manager.preset_advanced_toggle.setChecked(True)
-        app.processEvents()
-        assert not manager.description_edit.isHidden()
-        assert not manager.shortcut_edit.isHidden()
-        assert manager.preset_advanced_toggle.text() == "Ukryj opis i skrót"
-        manager.preset_advanced_toggle.setChecked(False)
-
-        # Advanced tree actions and diagnostic JSON stay out of the primary workflow.
-        assert manager.tree_tools_box.isCheckable()
-        assert not manager.tree_tools_box.isChecked()
-        assert manager.tree_tools_content.isHidden()
-        assert manager.json_box.parentWidget() is manager.tree_tools_content
-        manager.tree_tools_box.setChecked(True)
-        app.processEvents()
-        assert not manager.tree_tools_content.isHidden()
 
         for field_name in (
             StaticFilterField.CHANNEL.value,
@@ -122,7 +87,8 @@ def main() -> None:
             == StaticFilterOperator.PAYLOAD_EXACT.value
         )
 
-        # Typing at the beginning must not rebuild the editor or move the cursor.
+        # Typing at the beginning must not rebuild the editor or move the cursor
+        # to the end of the value string.
         manager.condition_values.setText("62 F1 ??")
         manager.condition_values.setCursorPosition(0)
         manager.condition_values.setFocus()
