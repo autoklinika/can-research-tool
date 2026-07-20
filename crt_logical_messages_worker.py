@@ -7,7 +7,10 @@ import sys
 import traceback
 from pathlib import Path
 
-from app.logical_cache import ensure_logical_cache
+import app.logical_cache as logical_cache
+
+
+ANALYSIS_DECODER_SIGNATURE = "transport-v2;protocol-v4;uds-data-v1;dbc-v3"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -33,9 +36,13 @@ def main() -> int:
     args = _parse_args()
     temporary_output = args.output.with_suffix(args.output.suffix + ".tmp")
     try:
+        # The worker is the production entry point for stored logical analysis.
+        # Keep the cache signature next to the executable decoder contract so a
+        # changed UDS interpretation invalidates old snapshots automatically.
+        logical_cache.DECODER_SIGNATURE = ANALYSIS_DECODER_SIGNATURE
         _status("Sprawdzanie zapisanego obrazu analitycznego…")
         _progress(2)
-        info = ensure_logical_cache(
+        info = logical_cache.ensure_logical_cache(
             args.session,
             dbc_paths=tuple(args.dbc),
             force=bool(args.force),
