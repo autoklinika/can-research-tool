@@ -23,9 +23,8 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
     the action's incoming ``checked`` value.
     """
 
-    # Stage 1 layout revision 2 removes the left activity toolbar. Reject saved
-    # revision-1 state so Qt cannot restore an obsolete empty strip.
-    WORKSPACE_STATE_VERSION = 2
+    # Revision 3 rejects workspace state saved by the crash-prone shell build.
+    WORKSPACE_STATE_VERSION = 3
 
     def __init__(self, services) -> None:
         super().__init__(services)
@@ -33,6 +32,45 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         self._table_tooltip_suppressor = _LogicalMessageTooltipSuppressor(self)
         self.tabs.currentChanged.connect(self._schedule_tooltip_suppressor_scan)
         QTimer.singleShot(0, self._install_logical_message_tooltip_suppressors)
+
+    def _set_capture_status(self, text: str) -> None:
+        """Update the indicator without manually unpolishing a Fusion widget.
+
+        Calling QStyle.unpolish()/polish() during construction can abort Qt on
+        native Windows builds. A small local stylesheet gives the same visual
+        result without rebuilding the widget's style internals.
+        """
+
+        normalized = (text or "STOPPED").strip()
+        upper = normalized.upper()
+        if "ERROR" in upper or "BŁĄD" in upper:
+            state = "error"
+            foreground, background = "#a32121", "#fbe8e8"
+        elif "CONNECT" in upper or "ŁĄCZ" in upper:
+            state = "connecting"
+            foreground, background = "#8a5a00", "#fff4d6"
+        elif (
+            "CAPTUR" in upper
+            or "RECORD" in upper
+            or "RUNNING" in upper
+            or "AKTYW" in upper
+        ):
+            state = "running"
+            foreground, background = "#176b35", "#e5f4ea"
+        else:
+            state = "stopped"
+            foreground, background = "#5c636b", "transparent"
+
+        self.capture_status.setText(normalized)
+        self.capture_indicator.setText(normalized)
+        self.capture_indicator.setProperty("state", state)
+        self.capture_indicator.setStyleSheet(
+            "QLabel#captureIndicator {"
+            f"color: {foreground}; background: {background};"
+            "border-left: 1px solid #c9cdd2; padding: 2px 10px;"
+            "min-width: 78px; font-weight: 600;"
+            "}"
+        )
 
     def _build_docks(self) -> None:
         super()._build_docks()
