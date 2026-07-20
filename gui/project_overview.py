@@ -32,6 +32,8 @@ class ProjectOverviewWidget(QWidget):
         super().__init__(parent)
         self.project = project
         self._session_paths: list[str] = []
+        self._visible_sessions: list[SessionRecord] = []
+        self._session_detail_values: dict[str, QLabel] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -78,6 +80,7 @@ class ProjectOverviewWidget(QWidget):
         root.addLayout(actions)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter.setObjectName("projectOverviewSplitter")
         splitter.setChildrenCollapsible(False)
 
         sessions_group = QGroupBox("Ostatnie sesje", splitter)
@@ -109,11 +112,19 @@ class ProjectOverviewWidget(QWidget):
         header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.recent_sessions.currentCellChanged.connect(
+            self._update_selected_session_details
+        )
         self.recent_sessions.cellDoubleClicked.connect(self._open_session_row)
         sessions_layout.addWidget(self.recent_sessions)
         splitter.addWidget(sessions_group)
 
-        config_group = QGroupBox("Konfiguracja projektu", splitter)
+        right_splitter = QSplitter(Qt.Orientation.Vertical, splitter)
+        right_splitter.setObjectName("projectOverviewDetailsSplitter")
+        right_splitter.setChildrenCollapsible(False)
+
+        config_group = QGroupBox("Konfiguracja projektu", right_splitter)
+        config_group.setObjectName("projectConfigurationGroup")
         config = QFormLayout(config_group)
         config.setContentsMargins(9, 12, 9, 9)
         config.setHorizontalSpacing(16)
@@ -154,7 +165,37 @@ class ProjectOverviewWidget(QWidget):
             QLabel(project.manifest.default_receive_mode.upper()),
         )
         config.addRow("Utworzono:", QLabel(project.manifest.created_at_utc))
-        splitter.addWidget(config_group)
+        right_splitter.addWidget(config_group)
+
+        session_group = QGroupBox("Szczegóły sesji", right_splitter)
+        session_group.setObjectName("selectedSessionDetailsGroup")
+        session_form = QFormLayout(session_group)
+        session_form.setContentsMargins(9, 12, 9, 9)
+        session_form.setHorizontalSpacing(16)
+        session_form.setVerticalSpacing(5)
+
+        for key, caption in (
+            ("name", "Nazwa:"),
+            ("created", "Data UTC:"),
+            ("source", "Źródło:"),
+            ("status", "Status:"),
+            ("frames", "Ramki:"),
+            ("markers", "Markery:"),
+            ("duration", "Czas:"),
+            ("path", "Plik:"),
+        ):
+            value = QLabel("—", session_group)
+            value.setObjectName(f"selectedSession{key.title()}Value")
+            value.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            value.setWordWrap(key == "path")
+            self._session_detail_values[key] = value
+            session_form.addRow(caption, value)
+
+        right_splitter.addWidget(session_group)
+        right_splitter.setSizes([420, 420])
+        splitter.addWidget(right_splitter)
 
         splitter.setSizes([780, 360])
         root.addWidget(splitter, 1)
@@ -162,14 +203,14 @@ class ProjectOverviewWidget(QWidget):
         self._populate_recent_sessions(sessions)
 
     def _populate_recent_sessions(self, sessions: list[SessionRecord]) -> None:
-        visible = sessions[:15]
-        self.recent_sessions.setRowCount(len(visible))
+        self._visible_sessions = sessions[:15]
+        self.recent_sessions.setRowCount(len(self._visible_sessions))
         self._session_paths = []
 
-        for row, session in enumerate(visible):
+        for row, session in enumerate(self._visible_sessions):
             path = str(self.project.absolute_path(session.relative_path))
             self._session_paths.append(path)
-            source = "Import" if session.source.startswith("imported") else "Live"
+            source = self._source_label(session)
             created = session.created_at_utc.replace("T", " ")[:19]
             values = (
                 session.name,
@@ -186,6 +227,46 @@ class ProjectOverviewWidget(QWidget):
                         | Qt.AlignmentFlag.AlignVCenter
                     )
                 self.recent_sessions.setItem(row, column, item)
+
+        if self._visible_sessions:
+            self.recent_sessions.selectRow(0)
+            self._show_session_details(self._visible_sessions[0])
+        else:
+            self._clear_session_details()
+
+    def _update_selected_session_details(
+        self,
+        current_row: int,
+        _current_column: int,
+        _previous_row: int,
+        _previous_column: int,
+    ) -> None:
+        if 0 <= current_row < len(self._visible_sessions):
+            self._show_session_details(self._visible_sessions[current_row])
+        else:
+            self._clear_session_details()
+
+    def _show_session_details(self, session: SessionRecord) -> None:
+        values = {
+            "name": session.name,
+            "created": session.created_at_utc.replace("T", " ")[:19],
+            "source": self._source_label(session),
+            "status": session.status,
+            "frames": f"{session.frame_count:,}".replace(",", " "),
+            "markers": f"{session.marker_count:,}".replace(",", " "),
+            "duration": f"{session.duration_s:.3f} s",
+            "path": session.relative_path,
+        }
+        for key, value in values.items():
+            self._session_detail_values[key].setText(value)
+
+    def _clear_session_details(self) -> None:
+        for label in self._session_detail_values.values():
+            label.setText("—")
+
+    @staticmethod
+    def _source_label(session: SessionRecord) -> str:
+        return "Import" if session.source.startswith("imported") else "Live"
 
     def _open_session_row(self, row: int, _column: int) -> None:
         if 0 <= row < len(self._session_paths):
