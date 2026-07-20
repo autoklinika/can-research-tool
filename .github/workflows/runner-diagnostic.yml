@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Inspect runner account and CRT Python
-        shell: pwsh
+        shell: powershell
         run: |
           Write-Host "Account: $(whoami)"
           Write-Host "Runner root: $env:RUNNER_WORKSPACE"
