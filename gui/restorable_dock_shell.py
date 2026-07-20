@@ -194,6 +194,9 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         dock.setTitleBarWidget(self.project_dock_title_bar)
         dock.visibilityChanged.connect(self._project_dock_visibility_changed)
         dock.setProperty("crtCustomTitleBarInstalled", True)
+        # Native Windows styles can recalculate width limits when a custom title bar
+        # is installed. Reapply the captured engineering-shell limits afterwards.
+        self._restore_project_dock_width()
 
     def _collapse_project_dock(self) -> None:
         dock = self.explorer_dock
