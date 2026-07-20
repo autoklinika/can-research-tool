@@ -85,10 +85,9 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
 
         action = getattr(self, "toggle_output_action", None)
         if action is not None:
-            try:
-                action.triggered.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            # The old signal can stay connected because a hidden, disabled action can
+            # never be invoked by the user. Avoiding disconnect() also avoids a noisy
+            # PySide warning when this idempotent method runs more than once.
             action.setShortcut("")
             action.setChecked(False)
             action.setEnabled(False)
