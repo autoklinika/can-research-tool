@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -39,7 +38,6 @@ from .static_filter_editor_support import (
     is_static_condition,
     operator_hint,
     operators_for_field,
-    summarize_static_condition,
 )
 
 
@@ -143,29 +141,6 @@ class EnhancedFilterManagerWidget(FilterManagerWidget):
             )
         finally:
             self._loading = previous_loading
-
-    def _reload_tree(self, select_path: tuple[int, ...] | None = None) -> None:
-        super()._reload_tree(select_path)
-        preset = self._current_preset()
-        if preset is None:
-            return
-
-        def update_item(item) -> None:
-            raw_path = item.data(0, Qt.ItemDataRole.UserRole) or []
-            try:
-                node = node_at(preset.root, tuple(int(value) for value in raw_path))
-            except (ValueError, IndexError):
-                node = None
-            if isinstance(node, dict):
-                summary = summarize_static_condition(node)
-                if summary:
-                    item.setText(0, summary)
-            for child_index in range(item.childCount()):
-                update_item(item.child(child_index))
-
-        root = self.tree.invisibleRootItem()
-        for index in range(root.childCount()):
-            update_item(root.child(index))
 
     def _load_node_properties(self) -> None:
         super()._load_node_properties()
