@@ -78,8 +78,11 @@ jobs:
       - name: Filter manager window smoke
         run: |
           $logPath = Join-Path $env:RUNNER_TEMP 'filter-manager-window-smoke.log'
-          & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py *> $logPath
+          "START filter_manager_window_smoke.py" | Set-Content -Path $logPath -Encoding utf8
+          & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py 2>&1 |
+              Tee-Object -FilePath $logPath -Append
           $exitCode = $LASTEXITCODE
+          "EXIT_CODE=$exitCode" | Add-Content -Path $logPath -Encoding utf8
           Get-Content $logPath -Tail 120
           if ($exitCode -ne 0) {
               exit $exitCode
