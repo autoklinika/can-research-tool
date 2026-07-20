@@ -45,8 +45,11 @@ def main() -> None:
         window._set_project(project)
 
         assert window.filters_action.shortcut().toString() == "Ctrl+D"
-        actions = window.activity_bar.actions()
-        assert actions.index(window.filters_action) < actions.index(window.settings_action)
+        assert window.activity_bar.isHidden()
+        primary_actions = window.primary_toolbar.actions()
+        assert primary_actions.index(window.decoders_action) < primary_actions.index(
+            window.filters_action
+        )
         registered = {shortcut.key().toString() for shortcut in window._preset_shortcuts}
         assert registered == {"F8", "F9"}
 
@@ -105,7 +108,7 @@ def main() -> None:
         manager.presets[0].shortcut = "F8"
         assert manager._save(silent=True) is True
 
-        # Reopening by the left action/shortcut path activates the same top-level window.
+        # Reopening from the primary action/shortcut activates the same top-level window.
         window.filters_action.trigger()
         app.processEvents()
         assert window._filter_window is filter_window
