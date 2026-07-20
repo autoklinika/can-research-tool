@@ -12,9 +12,9 @@ from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
 from infrastructure.desktop import reveal_path
 
+from .async_dbc_manager import AsyncDbcManagerWidget
 from .bounded_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
-from .dbc_manager import DbcManagerWidget
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
 from .final_streaming_filter_integration import (
     FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
@@ -104,8 +104,8 @@ class ApplicationContainer:
     def create_project_overview(self, project: CrtProject) -> ProjectOverviewWidget:
         return ProjectOverviewWidget(project)
 
-    def create_dbc_manager(self, project: CrtProject) -> DbcManagerWidget:
-        return DbcManagerWidget(project)
+    def create_dbc_manager(self, project: CrtProject) -> AsyncDbcManagerWidget:
+        return AsyncDbcManagerWidget(project)
 
     def create_filter_manager(self, project: CrtProject) -> FilterManagerWidget:
         return FilterManagerWidget(project)
