@@ -82,11 +82,14 @@ def test_logical_uds_fields_use_the_global_filter_compiler() -> None:
     compiler = FilterCompiler()
 
     assert compiler.validate(preset) == []
-    assert compiler.evaluate_logical_message(
-        preset,
-        record,
-        relative_time_us=1_000_000,
-    ).state is MatchState.MATCH
+    assert (
+        compiler.evaluate_logical_message(
+            preset,
+            record,
+            relative_time_us=1_000_000,
+        ).state
+        is MatchState.MATCH
+    )
 
 
 def test_j1939_context_exposes_pgn_and_addresses() -> None:
@@ -152,3 +155,49 @@ def test_existing_raw_frame_evaluation_remains_compatible() -> None:
     )
 
     assert result.state is MatchState.MATCH
+
+
+def test_extended_uds_context_exposes_gui_filter_fields() -> None:
+    record = _logical_record(
+        fields={
+            "service_id": 0x67,
+            "base_service_id": 0x27,
+            "direction": "positive-response",
+            "response_type": "positive-response",
+            "service_name": "SecurityAccess",
+            "subfunction": 0x05,
+            "suppress_positive_response": True,
+            "security_access_type": "request-seed",
+            "security_level": 3,
+            "block_sequence_counter": 0x7A,
+            "addressing": "normal-fixed-29bit",
+        }
+    )
+    preset = _preset(
+        "UDS GUI fields",
+        _condition("addressing", "normal-fixed-29bit"),
+        _condition("isotp_framing", "multi-frame"),
+        _condition("isotp_has_error", False),
+        _condition("response_type", "positive-response"),
+        _condition("service_name", "SecurityAccess"),
+        _condition("suppress_positive_response", True),
+        _condition("security_access_type", "request-seed"),
+        _condition("security_level", 3),
+        _condition("block_sequence_counter", "0x7A"),
+    )
+
+    result = FilterCompiler().evaluate_logical_message(preset, record)
+
+    assert result.state is MatchState.MATCH
+
+
+def test_extended_uds_numeric_bounds_are_validated() -> None:
+    invalid_level = _preset("Bad level", _condition("security_level", 64))
+    invalid_counter = _preset("Bad counter", _condition("block_sequence_counter", 256))
+    invalid_subfunction = _preset("Bad subfunction", _condition("subfunction", 128))
+
+    compiler = FilterCompiler()
+
+    assert compiler.validate(invalid_level)
+    assert compiler.validate(invalid_counter)
+    assert compiler.validate(invalid_subfunction)
