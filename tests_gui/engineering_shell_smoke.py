@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import QEvent, QSettings, QThreadPool, Qt
 from PySide6.QtGui import QStandardItem
-from PySide6.QtWidgets import QApplication, QTableView, QTableWidget
+from PySide6.QtWidgets import QApplication, QTableView, QTableWidget, QToolButton
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
@@ -72,6 +72,21 @@ def main() -> None:
             == Qt.DockWidgetArea.NoDockWidgetArea
         )
 
+        # Inspector is opt-in: opening a project and resetting the workspace keep it hidden.
+        assert window.inspector_dock.isHidden()
+        assert not window.toggle_inspector_action.isChecked()
+
+        # Project uses a custom title bar with native-style float, collapse and close buttons.
+        title_bar = window.explorer_dock.titleBarWidget()
+        assert title_bar is not None
+        assert title_bar.objectName() == "projectDockTitleBar"
+        float_button = title_bar.findChild(QToolButton, "projectDockFloatButton")
+        collapse_button = title_bar.findChild(QToolButton, "projectDockCollapseButton")
+        close_button = title_bar.findChild(QToolButton, "projectDockCloseButton")
+        assert float_button is not None
+        assert collapse_button is not None
+        assert close_button is not None
+
         assert window.explorer.tree.isHeaderHidden()
         assert window.explorer.project_name.text() == "Engineering shell"
         root = window.explorer.model.item(0, 0)
@@ -126,16 +141,35 @@ def main() -> None:
         finally:
             async_dbc_manager.list_project_dbc = original_list_project_dbc
 
-        # Regression: closing the dock with its title-bar X must not leave the
-        # checkable action in a stale state. Menu and Ctrl+Shift+I share this action.
-        assert not window.inspector_dock.isHidden()
-        window.inspector_dock.close()
-        app.processEvents()
-        assert window.inspector_dock.isHidden()
+        # Menu and Ctrl+Shift+I show the opt-in Inspector; title-bar X hides it cleanly.
         window.toggle_inspector_action.trigger()
         app.processEvents()
         assert not window.inspector_dock.isHidden()
         assert window.toggle_inspector_action.isChecked()
+        window.inspector_dock.close()
+        app.processEvents()
+        assert window.inspector_dock.isHidden()
+        assert not window.toggle_inspector_action.isChecked()
+        window.toggle_inspector_action.trigger()
+        app.processEvents()
+        assert not window.inspector_dock.isHidden()
+
+        # The arrow shrinks Project, hides it after the animation and Ctrl+B restores it.
+        normal_minimum_width = window.explorer_dock.minimumWidth()
+        assert not window.explorer_dock.isHidden()
+        collapse_button.click()
+        collapse_deadline = time.monotonic() + 2.0
+        while not window.explorer_dock.isHidden() and time.monotonic() < collapse_deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert window.explorer_dock.isHidden()
+        assert not window.toggle_explorer_action.isChecked()
+
+        window.toggle_explorer_action.trigger()
+        app.processEvents()
+        assert not window.explorer_dock.isHidden()
+        assert window.toggle_explorer_action.isChecked()
+        assert window.explorer_dock.minimumWidth() == normal_minimum_width
 
         window._reset_workspace_layout()
         assert window.output_dock.isHidden()
@@ -144,7 +178,8 @@ def main() -> None:
             == Qt.DockWidgetArea.NoDockWidgetArea
         )
         assert not window.explorer_dock.isHidden()
-        assert not window.inspector_dock.isHidden()
+        assert window.inspector_dock.isHidden()
+        assert not window.toggle_inspector_action.isChecked()
         assert window.activity_bar.isHidden()
 
         window._close_project_tabs()
@@ -157,6 +192,10 @@ def main() -> None:
         overview = None
         recent = None
         logical_table = None
+        title_bar = None
+        float_button = None
+        collapse_button = None
+        close_button = None
         window = None
         project = None
         gc.collect()
