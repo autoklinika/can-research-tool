@@ -17,13 +17,13 @@ class StaticFilterWindowMainWindow(WindowedFilterMainWindow):
             return
 
         window = self._filter_window
-        if window is not None:
-            window.flush_pending_changes()
-            if getattr(window.manager, "_dirty", False):
-                self._append_output(
-                    "Nie przełączono presetu skrótem: edytor zawiera zmiany, których nie udało się zapisać."
-                )
-                return
+        if window is not None and window.has_pending_changes:
+            self._append_output(
+                "Nie przełączono presetu skrótem: najpierw zastosuj albo odrzuć zmiany w edytorze filtrów."
+            )
+            window.raise_()
+            window.activateWindow()
+            return
 
         repository = ProjectFilterRepository(self.project.database_path)
         presets = repository.list_presets()
