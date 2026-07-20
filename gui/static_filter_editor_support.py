@@ -50,19 +50,6 @@ STATIC_OPERATOR_LABELS: dict[str, str] = {
     StaticFilterOperator.PAYLOAD_CONTAINS.value: "payload zawiera",
 }
 
-_COMMON_OPERATOR_LABELS: dict[str, str] = {
-    FilterOperator.EQ.value: "równa się",
-    FilterOperator.NE.value: "różni się",
-    FilterOperator.GT.value: "większe niż",
-    FilterOperator.GE.value: "większe lub równe",
-    FilterOperator.LT.value: "mniejsze niż",
-    FilterOperator.LE.value: "mniejsze lub równe",
-    FilterOperator.BETWEEN.value: "pomiędzy",
-    FilterOperator.OUTSIDE.value: "poza zakresem",
-    FilterOperator.IN.value: "w zbiorze",
-    FilterOperator.NOT_IN.value: "nie w zbiorze",
-}
-
 _LEGACY_OPERATORS: tuple[str, ...] = tuple(operator.value for operator in FilterOperator)
 _BOOLEAN_OPERATORS = (FilterOperator.EQ.value, FilterOperator.NE.value)
 _PAYLOAD_OPERATORS = (
@@ -115,21 +102,3 @@ def is_static_condition(node: Mapping[str, Any]) -> bool:
     return isinstance(children, list) and any(
         isinstance(child, Mapping) and is_static_condition(child) for child in children
     )
-
-
-def summarize_static_condition(node: Mapping[str, Any]) -> str:
-    if node.get("type") != "condition" or not is_static_condition(node):
-        return ""
-    field_name = str(node.get("field", ""))
-    operator_name = str(node.get("operator", ""))
-    field_label = {
-        FilterField.CAN_ID.value: "CAN — CAN ID",
-        **STATIC_FIELD_LABELS,
-    }.get(field_name, field_name)
-    operator_label = {
-        **_COMMON_OPERATOR_LABELS,
-        **STATIC_OPERATOR_LABELS,
-    }.get(operator_name, operator_name)
-    values = node.get("values")
-    rendered = ", ".join(str(value) for value in values) if isinstance(values, list) else "?"
-    return f"{field_label}: {operator_label} — {rendered}"
