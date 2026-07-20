@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import QSettings
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QTableWidget
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
+from gui.async_dbc_manager import AsyncDbcManagerWidget
 from gui.engineering_shell import EngineeringShellMainWindow
 from gui.engineering_theme import apply_engineering_theme
 from gui.project_explorer import ROLE_NODE_TYPE
@@ -78,6 +80,21 @@ def main() -> None:
         recent = overview.findChild(QTableWidget, "recentSessionsTable")
         assert recent is not None
         assert recent.columnCount() == 5
+
+        # Opening the decoder workspace must return immediately. Metadata loading
+        # continues in a worker and installs the normal manager asynchronously.
+        started = time.monotonic()
+        window._open_decoders()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0
+        decoder_workspace = window.navigator.widget("decoders")
+        assert isinstance(decoder_workspace, AsyncDbcManagerWidget)
+
+        deadline = time.monotonic() + 5.0
+        while decoder_workspace.manager is None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert decoder_workspace.manager is not None
 
         assert not window.output_dock.isHidden()
         window.toggle_output_action.trigger()
