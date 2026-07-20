@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .filters import CanFrameRecord
+from .live_filters import ActiveFilterSet
 from .models import CanFrame
 from .session_stream import SessionPagedReader
 from .static_frame_adapter import static_frame_record
@@ -37,7 +39,9 @@ def load_filtered_session_page(
     Without Include/Exclude presets the sparse session index reads the requested
     source range directly. With visibility filters active the file is scanned in a
     worker thread and only the requested range of matching frames is retained.
-    The same canonical ``CanFrame`` adapter is used by Live and stored sessions.
+
+    Legacy v1 filter sets keep receiving ``CanFrameRecord``. Stage 6A filter sets
+    receive the extended static record carrying channel, RTR, error and payload.
     """
 
     if max_rows <= 0:
@@ -96,13 +100,31 @@ def _scan_filtered_range(
     end = start + max_rows
 
     for frame in reader.iter_frames():
-        if not filter_set.decide(static_frame_record(frame)).visible:
+        record = _frame_record_for_filter_set(frame, filter_set)
+        if not filter_set.decide(record).visible:
             continue
         if start <= visible_count < end:
             selected.append(frame)
         visible_count += 1
 
     return selected, visible_count
+
+
+def _frame_record_for_filter_set(
+    frame: CanFrame,
+    filter_set: FrameFilterSet,
+) -> CanFrameRecord | object:
+    """Preserve the v1 evaluator boundary while enabling Stage 6A raw fields."""
+
+    if isinstance(filter_set, ActiveFilterSet):
+        return CanFrameRecord(
+            can_id=int(frame.arbitration_id),
+            extended=bool(frame.is_extended_id),
+            dlc=int(frame.dlc),
+            relative_time_us=int(frame.timestamp_ns // 1_000),
+            channel=int(frame.channel),
+        )
+    return static_frame_record(frame)
 
 
 def _clamp_page_start(start: int, total: int, page_size: int) -> int:
