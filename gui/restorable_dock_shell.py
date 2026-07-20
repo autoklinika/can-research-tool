@@ -106,13 +106,15 @@ class _ProjectDockTitleBar(QWidget):
 class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
     """Engineering shell with compact, restorable project and inspector docks."""
 
-    # Revision 5 adds the custom project title bar and makes Inspector opt-in.
-    WORKSPACE_STATE_VERSION = 5
+    # Revision 6 adds an opt-in main toolbar alongside the opt-in Inspector.
+    WORKSPACE_STATE_VERSION = 6
 
     def __init__(self, services) -> None:
         super().__init__(services)
         self._remove_activity_bar()
         self._remove_output_panel()
+        self._install_primary_toolbar_toggle()
+        self._hide_primary_toolbar_by_default()
         self._table_tooltip_suppressor = _LogicalMessageTooltipSuppressor(self)
         self.tabs.currentChanged.connect(self._schedule_tooltip_suppressor_scan)
         QTimer.singleShot(0, self._install_logical_message_tooltip_suppressors)
@@ -169,6 +171,39 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         self._remove_activity_bar()
         self._remove_output_panel()
         self._hide_inspector_by_default()
+        self._hide_primary_toolbar_by_default()
+
+    def _install_primary_toolbar_toggle(self) -> None:
+        if hasattr(self, "toggle_primary_toolbar_action"):
+            return
+
+        action = QAction("Narzędzia główne", self)
+        action.setObjectName("togglePrimaryToolbarAction")
+        action.setCheckable(True)
+        action.setChecked(not self.primary_toolbar.isHidden())
+        action.setToolTip("Pokaż lub ukryj pasek Narzędzia główne")
+        action.triggered.connect(self.primary_toolbar.setVisible)
+        self.primary_toolbar.visibilityChanged.connect(action.setChecked)
+        self.toggle_primary_toolbar_action = action
+
+        view_menu = next(
+            (
+                menu_action.menu()
+                for menu_action in self.menuBar().actions()
+                if menu_action.text().replace("&", "") == "Widok"
+            ),
+            None,
+        )
+        if view_menu is not None:
+            view_menu.insertAction(self.reset_layout_action, action)
+
+    def _hide_primary_toolbar_by_default(self) -> None:
+        toolbar = getattr(self, "primary_toolbar", None)
+        if toolbar is not None:
+            toolbar.hide()
+        action = getattr(self, "toggle_primary_toolbar_action", None)
+        if action is not None:
+            action.setChecked(False)
 
     def _install_project_title_bar(self) -> None:
         dock = self.explorer_dock
