@@ -2,15 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import (
-    QAbstractAnimation,
-    QEasingCurve,
-    QEvent,
-    QObject,
-    QPropertyAnimation,
-    QTimer,
-    Qt,
-)
+from PySide6.QtCore import QEvent, QObject, QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -35,7 +27,7 @@ class _LogicalMessageTooltipSuppressor(QObject):
 
 
 class _ProjectDockTitleBar(QWidget):
-    """Compact title bar with float, animated-collapse and close controls."""
+    """Compact title bar with float, collapse and close controls."""
 
     def __init__(
         self,
@@ -116,7 +108,6 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
 
     # Revision 5 adds the custom project title bar and makes Inspector opt-in.
     WORKSPACE_STATE_VERSION = 5
-    PROJECT_DOCK_COLLAPSE_MS = 180
 
     def __init__(self, services) -> None:
         super().__init__(services)
@@ -184,63 +175,18 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         if bool(dock.property("crtCustomTitleBarInstalled")):
             return
 
-        self._project_dock_normal_min_width = max(1, dock.minimumWidth())
-        self._project_dock_normal_max_width = dock.maximumWidth()
-        self._project_collapse_animation: QPropertyAnimation | None = None
         self.project_dock_title_bar = _ProjectDockTitleBar(
             dock,
             self._collapse_project_dock,
         )
         dock.setTitleBarWidget(self.project_dock_title_bar)
-        dock.visibilityChanged.connect(self._project_dock_visibility_changed)
         dock.setProperty("crtCustomTitleBarInstalled", True)
-        # Native Windows styles can recalculate width limits when a custom title bar
-        # is installed. Reapply the captured engineering-shell limits afterwards.
-        self._restore_project_dock_width()
 
     def _collapse_project_dock(self) -> None:
-        dock = self.explorer_dock
-        if dock.isHidden():
-            return
+        """Hide Project immediately; Ctrl+B or View -> Project restores it."""
 
-        animation = self._project_collapse_animation
-        if (
-            animation is not None
-            and animation.state() == QAbstractAnimation.State.Running
-        ):
-            return
-
-        current_width = max(1, dock.width())
-        dock.setMinimumWidth(0)
-
-        animation = QPropertyAnimation(dock, b"maximumWidth", self)
-        animation.setDuration(self.PROJECT_DOCK_COLLAPSE_MS)
-        animation.setStartValue(current_width)
-        animation.setEndValue(0)
-        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-        animation.finished.connect(self._finish_project_dock_collapse)
-        self._project_collapse_animation = animation
-        animation.start()
-
-    def _finish_project_dock_collapse(self) -> None:
         self.explorer_dock.hide()
-        self._restore_project_dock_width()
-
-    def _project_dock_visibility_changed(self, visible: bool) -> None:
-        if visible:
-            self._restore_project_dock_width()
-
-    def _restore_project_dock_width(self) -> None:
-        animation = getattr(self, "_project_collapse_animation", None)
-        if (
-            animation is not None
-            and animation.state() == QAbstractAnimation.State.Running
-        ):
-            animation.stop()
-        # Restore maximum first. Windows clamps minimumWidth to the current
-        # maximumWidth (0 at the end of the collapse animation).
-        self.explorer_dock.setMaximumWidth(self._project_dock_normal_max_width)
-        self.explorer_dock.setMinimumWidth(self._project_dock_normal_min_width)
+        self.toggle_explorer_action.setChecked(False)
 
     def _hide_inspector_by_default(self) -> None:
         self.inspector_dock.hide()
