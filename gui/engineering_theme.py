@@ -7,10 +7,14 @@ ENGINEERING_IDE_QSS = r"""
 QWidget {
     color: #20242a;
     background-color: #f3f4f6;
-    font-size: 12px;
 }
 QMainWindow {
     background-color: #eef0f2;
+}
+QLabel,
+QCheckBox,
+QRadioButton {
+    background: transparent;
 }
 QMenuBar {
     background: #f6f7f8;
@@ -175,12 +179,12 @@ QGroupBox {
     border: 1px solid #c8ccd1;
     margin-top: 8px;
     padding-top: 6px;
-    font-weight: 600;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 7px;
     padding: 0 4px;
+    font-weight: 600;
 }
 QPushButton {
     background: #f6f7f8;
@@ -230,6 +234,15 @@ QLabel#secondaryText {
 }
 QTableWidget#recentSessionsTable {
     background: #ffffff;
+}
+QSplitter::handle {
+    background: #c9cdd2;
+}
+QSplitter::handle:horizontal {
+    width: 1px;
+}
+QSplitter::handle:vertical {
+    height: 1px;
 }
 """
 
