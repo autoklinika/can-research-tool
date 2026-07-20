@@ -16,6 +16,7 @@ class ProtocolKind(StrEnum):
     UNKNOWN = "unknown"
     J1939 = "j1939"
     UDS = "uds"
+    CANOPEN = "canopen"
     DBC = "dbc"
     PROPRIETARY = "proprietary"
 
