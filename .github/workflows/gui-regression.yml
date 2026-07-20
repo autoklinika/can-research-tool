@@ -44,6 +44,14 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/filter_manager_window_smoke.py
+      - name: Verify static filter fields and operators in editor
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/static_filter_editor_smoke.py
+      - name: Verify static filters in Live and stored sessions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/static_filter_live_stored_smoke.py
       - name: Verify Live filters use the background worker
         env:
           QT_QPA_PLATFORM: offscreen

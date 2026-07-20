@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QLabel
 
-from app.combined_filters import CombinedActiveFilterSet
 from app.filter_preferences import ProjectFilterPreferences
 from app.filters import ProjectFilterRepository
+from app.static_active_filters import StaticCombinedActiveFilterSet
 
 from .live_filter_integration import _find_layout_containing
+from .static_live_filter_tasks import (
+    StaticLiveFilterScanTask,
+    StaticLiveIncrementalFilterTask,
+)
 from .streaming_live_filter_integration import StreamingLiveFilterIntegration
 
 
 class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
-    """Streaming Live filters with project combination mode and visible state."""
+    """Streaming Live filters with project combination mode and static v2 fields."""
 
     def __init__(self, widget) -> None:
         self._preferences = ProjectFilterPreferences(widget.project.database_path)
@@ -33,7 +38,7 @@ class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
 
     def _reload_combined_filter_set(self) -> bool:
         repository = ProjectFilterRepository(self.widget.project.database_path)
-        candidate = CombinedActiveFilterSet(
+        candidate = StaticCombinedActiveFilterSet(
             repository.list_presets(),
             scope="live",
             combination_mode=self._preferences.combination_mode(),
@@ -43,6 +48,58 @@ class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
         self.proxy.filter_set = candidate
         self.proxy._signature = candidate.signature
         return True
+
+    def _schedule_frame_scan(self) -> None:
+        if not self.proxy.filter_enabled:
+            return
+        self._frame_generation += 1
+        generation = self._frame_generation
+        frames = self.widget.frame_model.snapshot_frames()
+        self._pending_frames.clear()
+        self._incremental_running_generation = None
+        self._incremental_timer.stop()
+        self._set_frame_display_model(False)
+        self.proxy.begin_background_scan()
+        if not frames:
+            self.proxy.apply_background_result((), -1)
+            self._set_frame_display_model(True)
+            self._update_filter_control()
+            self._update_live_counts()
+            return
+        task = StaticLiveFilterScanTask(generation, frames, self.proxy.filter_set)
+        self._frame_tasks.append(task)
+        self._frame_tasks = self._frame_tasks[-3:]
+        task.signals.completed.connect(self._frame_scan_completed)
+        task.signals.failed.connect(self._filter_scan_failed)
+        QThreadPool.globalInstance().start(task)
+        self._update_filter_control()
+
+    def _start_incremental_scan(self) -> None:
+        if (
+            not self.proxy.filter_enabled
+            or not self.proxy.filter_ready
+            or self.proxy.filter_scanning
+            or self._incremental_running_generation is not None
+        ):
+            return
+        self._prune_frame_filter_cache()
+        if not self._pending_frames:
+            return
+
+        batch_size = min(4_096, len(self._pending_frames))
+        frames = tuple(self._pending_frames.popleft() for _ in range(batch_size))
+        generation = self._frame_generation
+        task = StaticLiveIncrementalFilterTask(
+            generation,
+            frames,
+            self.proxy.filter_set,
+        )
+        self._incremental_running_generation = generation
+        self._incremental_tasks.append(task)
+        self._incremental_tasks = self._incremental_tasks[-3:]
+        task.signals.completed.connect(self._incremental_scan_completed)
+        task.signals.failed.connect(self._incremental_scan_failed)
+        QThreadPool.globalInstance().start(task)
 
     def _reload_and_update(self) -> None:
         changed = self._reload_combined_filter_set()
@@ -123,13 +180,7 @@ class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
         total_received: int | None = None,
         logical_total: int | None = None,
     ) -> None:
-        """Keep table bindings consistent with the counters shown to the user.
-
-        Filter counts are calculated from the projection models.  A delayed model reset
-        or a filter change from the separate Global Filters window must therefore not
-        leave the QTableView attached to the unfiltered source model while the labels
-        already report filtered row counts.
-        """
+        """Keep table bindings consistent with the counters shown to the user."""
 
         self._synchronize_display_models()
         super()._update_live_counts(total_received, logical_total)

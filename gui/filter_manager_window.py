@@ -14,7 +14,7 @@ from .main_window import MainWindow
 
 
 class FilterManagerWindow(QMainWindow):
-    """Independent non-modal window hosting the project filter editor."""
+    """Independent non-modal window hosting the transactional filter editor."""
 
     def __init__(
         self,
@@ -37,15 +37,62 @@ class FilterManagerWindow(QMainWindow):
         if geometry is not None:
             self.restoreGeometry(geometry)
 
-    def flush_pending_changes(self) -> None:
-        """Persist a pending autosave before the top-level window is hidden."""
+    @property
+    def has_pending_changes(self) -> bool:
+        return bool(getattr(self.manager, "_dirty", False))
 
-        if self.manager.autosave_timer.isActive():
-            self.manager.autosave_timer.stop()
-        self.manager._autosave()
+    def flush_pending_changes(self) -> bool:
+        """Compatibility hook that never persists the editor's working copy."""
+
+        timer = getattr(self.manager, "autosave_timer", None)
+        if timer is not None:
+            timer.stop()
+        return not self.has_pending_changes
+
+    def _confirm_pending_changes(self) -> bool:
+        if not self.has_pending_changes:
+            return True
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Niezastosowane zmiany filtrów")
+        dialog.setText("Edytor zawiera zmiany, które nie zostały zastosowane.")
+        dialog.setInformativeText(
+            "Zastosuj je do projektu, odrzuć kopię roboczą albo wróć do edycji."
+        )
+        apply_button = dialog.addButton(
+            "Zastosuj zmiany",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        discard_button = dialog.addButton(
+            "Odrzuć zmiany",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_button = dialog.addButton(
+            "Wróć do edycji",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(apply_button)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is apply_button:
+            return bool(self.manager._save())
+        if clicked is discard_button:
+            discard = getattr(self.manager, "_discard_changes", None)
+            if callable(discard):
+                discard()
+            elif hasattr(self.manager, "reload_from_repository"):
+                self.manager.reload_from_repository()
+            return True
+        if clicked is cancel_button:
+            return False
+        return False
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        self.flush_pending_changes()
+        if not self._confirm_pending_changes():
+            event.ignore()
+            return
         QSettings().setValue("windows/filterManagerGeometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -85,7 +132,8 @@ class WindowedFilterMainWindow(MainWindow):
             window.activateWindow()
             return
 
-        self._dispose_filter_window()
+        if not self._dispose_filter_window():
+            return
         manager = self.services.create_filter_manager(self.project)
         manager.output_message.connect(self._append_output)
         manager.changed.connect(self.explorer.refresh)
@@ -102,19 +150,31 @@ class WindowedFilterMainWindow(MainWindow):
         window.activateWindow()
 
     def _set_project(self, project) -> None:
+        if self._has_active_capture():
+            super()._set_project(project)
+            return
+
         previous = self.project
+        changing_project = (
+            previous is not None
+            and Path(previous.root).resolve() != Path(project.root).resolve()
+        )
+        if changing_project and not self._dispose_filter_window():
+            return
+
         super()._set_project(project)
         if self.project is not previous:
-            self._dispose_filter_window()
             self._reload_filter_shortcuts()
 
-    def _dispose_filter_window(self) -> None:
+    def _dispose_filter_window(self) -> bool:
         window = self._filter_window
         if window is None:
-            return
+            return True
+        if not window.close():
+            return False
         self._filter_window = None
-        window.close()
         window.deleteLater()
+        return True
 
     def _clear_filter_shortcuts(self) -> None:
         for shortcut in self._preset_shortcuts:
@@ -160,13 +220,13 @@ class WindowedFilterMainWindow(MainWindow):
             return
 
         window = self._filter_window
-        if window is not None:
-            window.flush_pending_changes()
-            if getattr(window.manager, "_dirty", False):
-                self._append_output(
-                    "Nie przełączono presetu skrótem: edytor zawiera zmiany, których nie udało się zapisać."
-                )
-                return
+        if window is not None and window.has_pending_changes:
+            self._append_output(
+                "Nie przełączono presetu skrótem: najpierw zastosuj albo odrzuć zmiany w edytorze filtrów."
+            )
+            window.raise_()
+            window.activateWindow()
+            return
 
         repository = ProjectFilterRepository(self.project.database_path)
         presets = repository.list_presets()
@@ -215,7 +275,12 @@ class WindowedFilterMainWindow(MainWindow):
         self._reload_filter_shortcuts()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self._has_active_capture():
+            super().closeEvent(event)
+            return
+        if not self._dispose_filter_window():
+            event.ignore()
+            return
         super().closeEvent(event)
         if event.isAccepted():
-            self._dispose_filter_window()
             self._clear_filter_shortcuts()

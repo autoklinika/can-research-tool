@@ -67,7 +67,20 @@ def main() -> None:
         manager.combination_combo.setCurrentIndex(
             manager.combination_combo.findData(FilterCombinationMode.OR.value)
         )
-        assert manager._save(silent=True) is True
+        assert manager.has_pending_changes
+        assert (
+            ProjectFilterPreferences(project.database_path).combination_mode()
+            is FilterCombinationMode.AND
+        )
+
+        # A shortcut must not persist or bypass the editor's dirty working copy.
+        window._toggle_filter_preset(inactive.id)
+        saved = {preset.id: preset for preset in repository.list_presets()}
+        assert saved[inactive.id].enabled is False
+
+        manager.apply_button.click()
+        app.processEvents()
+        assert not manager.has_pending_changes
         assert (
             ProjectFilterPreferences(project.database_path).combination_mode()
             is FilterCombinationMode.OR

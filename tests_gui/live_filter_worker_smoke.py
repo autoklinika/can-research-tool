@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from gc import collect
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from types import SimpleNamespace
@@ -76,6 +77,14 @@ def _logical_message(sequence: int) -> LogicalMessageRecord:
         frame_sequences=(sequence,),
         payload=b"\x22\xF1\x90",
     )
+
+
+def _dispose_widget(app: QApplication, widget: LiveCaptureWidget) -> None:
+    widget.shutdown()
+    widget.close()
+    widget.deleteLater()
+    QThreadPool.globalInstance().waitForDone(5_000)
+    app.processEvents()
 
 
 def main() -> None:
@@ -170,7 +179,9 @@ def main() -> None:
         app.processEvents()
         assert widget.frame_table.model() is widget.frame_model
         assert widget.live_filter_proxy.rowCount() == 30_000
-        widget.close()
+        _dispose_widget(app, widget)
+        del widget
+        collect()
 
         # During active capture the existing GUI rows are not scanned. Applying the
         # filter clears presentation only and immediately switches to future traffic.
@@ -252,7 +263,10 @@ def main() -> None:
         app.processEvents()
         assert active_widget.frame_table.model() is active_widget.frame_model
         assert active_widget.frame_model.rowCount() == 0
-        active_widget.close()
+        _dispose_widget(app, active_widget)
+        del active_widget
+        del repository
+        collect()
 
     app.processEvents()
 

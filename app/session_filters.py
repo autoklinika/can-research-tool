@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from .filters import CanFrameRecord
 from .live_filters import ActiveFilterSet
 from .models import CanFrame
 from .session_stream import SessionPagedReader
+from .static_frame_adapter import static_frame_record
+
+
+class FrameFilterSet(Protocol):
+    @property
+    def affects_visibility(self) -> bool: ...
+
+    def decide(self, record): ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +29,7 @@ class FilteredSessionPage:
 
 def load_filtered_session_page(
     path: str | Path,
-    filter_set: ActiveFilterSet,
+    filter_set: FrameFilterSet,
     *,
     max_rows: int,
     start: int = 0,
@@ -31,8 +40,8 @@ def load_filtered_session_page(
     source range directly. With visibility filters active the file is scanned in a
     worker thread and only the requested range of matching frames is retained.
 
-    The default page starts at frame zero. This avoids silently presenting the last
-    GUI-sized window as though it were the complete session.
+    Legacy v1 filter sets keep receiving ``CanFrameRecord``. Stage 6A filter sets
+    receive the extended static record carrying channel, RTR, error and payload.
     """
 
     if max_rows <= 0:
@@ -81,7 +90,7 @@ def load_filtered_session_page(
 
 def _scan_filtered_range(
     reader: SessionPagedReader,
-    filter_set: ActiveFilterSet,
+    filter_set: FrameFilterSet,
     *,
     start: int,
     max_rows: int,
@@ -91,22 +100,31 @@ def _scan_filtered_range(
     end = start + max_rows
 
     for frame in reader.iter_frames():
-        decision = filter_set.decide(
-            CanFrameRecord(
-                can_id=int(frame.arbitration_id),
-                extended=bool(frame.is_extended_id),
-                dlc=int(frame.dlc),
-                relative_time_us=int(frame.timestamp_ns // 1_000),
-                channel=int(frame.channel),
-            )
-        )
-        if not decision.visible:
+        record = _frame_record_for_filter_set(frame, filter_set)
+        if not filter_set.decide(record).visible:
             continue
         if start <= visible_count < end:
             selected.append(frame)
         visible_count += 1
 
     return selected, visible_count
+
+
+def _frame_record_for_filter_set(
+    frame: CanFrame,
+    filter_set: FrameFilterSet,
+) -> CanFrameRecord | object:
+    """Preserve the v1 evaluator boundary while enabling Stage 6A raw fields."""
+
+    if isinstance(filter_set, ActiveFilterSet):
+        return CanFrameRecord(
+            can_id=int(frame.arbitration_id),
+            extended=bool(frame.is_extended_id),
+            dlc=int(frame.dlc),
+            relative_time_us=int(frame.timestamp_ns // 1_000),
+            channel=int(frame.channel),
+        )
+    return static_frame_record(frame)
 
 
 def _clamp_page_start(start: int, total: int, page_size: int) -> int:
