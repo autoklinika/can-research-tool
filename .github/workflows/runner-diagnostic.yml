@@ -14,9 +14,11 @@ jobs:
   diagnostic:
     runs-on: self-hosted
     timeout-minutes: 5
+    defaults:
+      run:
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
     steps:
       - name: Inspect runner account and CRT Python
-        shell: powershell
         run: |
           Write-Host "Account: $(whoami)"
           Write-Host "Runner root: $env:RUNNER_WORKSPACE"
