@@ -57,6 +57,10 @@ def main() -> None:
         manager.condition_values.setText("62 F1 ??")
         manager._condition_property_changed()
         assert not manager.compiler.validate(manager._current_preset())
+        selected = manager.tree.currentItem()
+        assert selected is not None
+        assert "Payload / maska" in selected.text(0)
+        assert "payload dokładnie równy" in selected.text(0)
 
         manager.test_payload.setText("62 F1 90")
         manager.test_dlc.setValue(3)
