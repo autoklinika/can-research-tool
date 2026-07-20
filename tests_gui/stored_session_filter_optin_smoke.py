@@ -73,7 +73,11 @@ def main() -> None:
         assert widget.stored_apply_filters.isChecked() is False
         assert widget._stored_session_controller.available_filter_set.active_count == 1
         assert widget._stored_session_controller.active_filter_set.active_count == 0
+        assert widget._message_load_generation == 0
         _wait_for_rows(app, widget, 2)
+
+        widget.tabs.setCurrentIndex(widget.message_tab_index)
+        assert widget._message_load_generation == 1
         _wait_for_message_rows(app, widget, 2)
 
         widget.stored_apply_filters.setChecked(True)
