@@ -12,6 +12,7 @@ from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
 from infrastructure.desktop import reveal_path
 
+from .bounded_live_capture import BoundedLiveCaptureWidget
 from .dbc_manager import DbcManagerWidget
 from .enhanced_filter_manager import EnhancedFilterManagerWidget as FilterManagerWidget
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
@@ -19,7 +20,6 @@ from .final_streaming_filter_integration import (
     FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
 from .import_task import ProjectImportTask
-from .live_capture import LiveCaptureWidget
 from .project_dialog import NewProjectDialog
 from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
@@ -73,9 +73,9 @@ class ApplicationContainer:
     def create_project_dialog(self, parent: QWidget) -> NewProjectDialog:
         return NewProjectDialog(parent)
 
-    def create_live_capture_view(self, project: CrtProject) -> LiveCaptureWidget:
+    def create_live_capture_view(self, project: CrtProject) -> BoundedLiveCaptureWidget:
         controller = self._live_controller_factory()
-        return LiveCaptureWidget(
+        return BoundedLiveCaptureWidget(
             project,
             controller=controller,
             filter_integration_factory=StreamingLiveFilterIntegration,
