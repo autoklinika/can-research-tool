@@ -118,6 +118,30 @@ class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
             "Zmieniono filtry Live — nowy widok obowiązuje od bieżącego momentu"
         )
 
+    def _update_live_counts(
+        self,
+        total_received: int | None = None,
+        logical_total: int | None = None,
+    ) -> None:
+        """Keep table bindings consistent with the counters shown to the user.
+
+        Filter counts are calculated from the projection models.  A delayed model reset
+        or a filter change from the separate Global Filters window must therefore not
+        leave the QTableView attached to the unfiltered source model while the labels
+        already report filtered row counts.
+        """
+
+        self._synchronize_display_models()
+        super()._update_live_counts(total_received, logical_total)
+
+    def _synchronize_display_models(self) -> None:
+        self._set_frame_display_model(
+            self.proxy.filter_enabled and self.proxy.filter_ready
+        )
+        self._set_message_display_model(
+            self.message_proxy.filter_enabled and self.message_proxy.filter_ready
+        )
+
     def _update_filter_control(self) -> None:
         super()._update_filter_control()
         label = self._active_filter_label
