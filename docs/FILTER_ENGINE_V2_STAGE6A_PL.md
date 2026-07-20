@@ -6,6 +6,13 @@ Etap 6A rozszerza filtry statyczne CRT bez wprowadzania warunków zależnych od 
 
 Filtry pozostają wyłącznie warstwą prezentacji. Nie mogą ograniczać odbioru CAN, kolejki CANlib ani pełnego zapisu sesji.
 
+## Status
+
+- 6A.1 — fundament wzorców: **zakończony**,
+- 6A.2 — kontekst i kompilator v2: **zakończony**,
+- 6A.3 — GUI: oczekuje,
+- 6A.4 — Live i zapisane sesje: oczekuje.
+
 ## Zakres docelowy
 
 ### Surowa ramka CAN
@@ -53,7 +60,7 @@ A0/F0 55
 
 ## Podział implementacji
 
-### 6A.1 — fundament wzorców
+### 6A.1 — fundament wzorców — zakończony
 
 - `CanIdPattern`,
 - `PayloadPattern`,
@@ -63,13 +70,21 @@ A0/F0 55
 - limit 64 bajtów dla surowej ramki,
 - testy exact, wildcard, explicit mask, prefix i contains.
 
-### 6A.2 — integracja z FilterCompiler
+### 6A.2 — integracja domenowa — zakończony
 
-- nowe pola i operatory formatu presetu,
-- rozszerzenie `CanFrameRecord` i `FilterContext`,
-- kanał, RTR, error frame i payload,
-- kompatybilność istniejących presetów `format_version=1`,
-- jednoznaczna semantyka `UNAVAILABLE`.
+Dodano:
+
+- `StaticCanFrameRecord` z polami kanału, RTR, error frame i payloadu,
+- `StaticFilterContext`, który zachowuje dostęp do wszystkich pól v1,
+- `StaticFilterCompiler`, który deleguje stare warunki do `FilterCompiler` v1,
+- operatory `can_id_pattern`, `payload_exact`, `payload_prefix` i `payload_contains`,
+- zwykłe porównania kanału oraz flag logicznych,
+- wspólne grupy `AND`, `OR` i `NOT` dla warunków v1 i v2,
+- walidację zakresu kanału, DLC, payloadu i składni masek,
+- semantykę `UNAVAILABLE` zgodną z v1,
+- testy mieszanych presetów v1/v2.
+
+Istniejące presety nadal używają `format_version=1`. Nowa semantyka jest rozpoznawana przez nazwy pól i operatorów; nie wymaga migracji `project.sqlite`.
 
 ### 6A.3 — GUI
 
