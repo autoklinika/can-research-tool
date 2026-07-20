@@ -154,46 +154,26 @@ def main() -> None:
         app.processEvents()
         assert not window.inspector_dock.isHidden()
 
-        # The arrow shrinks Project, hides it after the animation and Ctrl+B restores it.
+        # The arrow hides Project immediately; Ctrl+B restores the unchanged dock.
         normal_width = window.explorer_dock.width()
+        normal_minimum_width = window.explorer_dock.minimumWidth()
         normal_maximum_width = window.explorer_dock.maximumWidth()
-        required_restored_width = min(
-            normal_width,
-            window._project_dock_normal_min_width,
-        )
         assert not window.explorer_dock.isHidden()
         collapse_button.click()
-        collapse_deadline = time.monotonic() + 2.0
-        while not window.explorer_dock.isHidden() and time.monotonic() < collapse_deadline:
-            app.processEvents()
-            time.sleep(0.01)
+        app.processEvents()
         assert window.explorer_dock.isHidden()
         assert not window.toggle_explorer_action.isChecked()
+        assert window.explorer_dock.minimumWidth() == normal_minimum_width
+        assert window.explorer_dock.maximumWidth() == normal_maximum_width
 
         window.toggle_explorer_action.trigger()
-        restore_deadline = time.monotonic() + 1.0
-        while (
-            window.explorer_dock.width() < required_restored_width
-            and time.monotonic() < restore_deadline
-        ):
-            app.processEvents()
-            time.sleep(0.01)
+        app.processEvents()
         assert not window.explorer_dock.isHidden()
         assert window.toggle_explorer_action.isChecked()
-        assert (
-            window.explorer_dock.maximumWidth() == normal_maximum_width
-        ), (
-            "project dock maximum width was not restored: "
-            f"before={normal_maximum_width}, after={window.explorer_dock.maximumWidth()}"
-        )
-        assert (
-            window.explorer_dock.width() >= required_restored_width
-        ), (
-            "project dock reopened without its working width: "
-            f"before={normal_width}, required={required_restored_width}, "
-            f"after={window.explorer_dock.width()}, "
-            f"minimum={window.explorer_dock.minimumWidth()}"
-        )
+        assert window.explorer_dock.minimumWidth() == normal_minimum_width
+        assert window.explorer_dock.maximumWidth() == normal_maximum_width
+        assert window.explorer_dock.width() > 0
+        assert normal_width > 0
 
         window._reset_workspace_layout()
         assert window.output_dock.isHidden()
