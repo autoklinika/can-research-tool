@@ -1,14 +1,28 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidgetItem,
+    QWidget,
+)
 
 from app.filter_preferences import FilterCombinationMode
+from app.filters import FilterMode
 
 from .enhanced_filter_manager import EnhancedFilterManagerWidget
 
 
 class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
-    """Filter editor with the Include-combination option rendered as one compact row."""
+    """Compact transactional editor for Global Filter Engine presets.
+
+    Every edit remains in the in-memory working copy until the user explicitly
+    applies it. Live Capture, stored sessions and global shortcuts continue using
+    the last persisted configuration while the editor is dirty.
+    """
 
     def _build_ui(self) -> None:
         super()._build_ui()
@@ -56,3 +70,164 @@ class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
             old_box.deleteLater()
 
         root.insertWidget(1, bar)
+        self._install_transaction_controls()
+
+    def _install_transaction_controls(self) -> None:
+        save_button = next(
+            (
+                button
+                for button in self.findChildren(QPushButton)
+                if button.text() == "Zapisz teraz"
+            ),
+            None,
+        )
+        if save_button is None:
+            return
+
+        parent = save_button.parentWidget()
+        parent_layout = parent.layout() if parent is not None else None
+        if parent is None or parent_layout is None:
+            return
+
+        parent_layout.removeWidget(save_button)
+        buttons = QWidget(parent)
+        buttons.setObjectName("filterTransactionBar")
+        row = QHBoxLayout(buttons)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
+        self.discard_button = QPushButton("Odrzuć zmiany", buttons)
+        self.discard_button.setObjectName("discardFilterChanges")
+        self.discard_button.setToolTip(
+            "Przywróć ostatnio zastosowany stan filtrów z projektu."
+        )
+        self.discard_button.clicked.connect(self._discard_changes)
+        row.addWidget(self.discard_button)
+
+        self.apply_button = save_button
+        self.apply_button.setParent(buttons)
+        self.apply_button.setObjectName("applyFilterChanges")
+        self.apply_button.setText("Zastosuj zmiany")
+        self.apply_button.setToolTip(
+            "Zweryfikuj i zapisz wszystkie przygotowane zmiany w filtrach."
+        )
+        row.addWidget(self.apply_button)
+
+        parent_layout.addWidget(buttons)
+        self._update_transaction_controls()
+
+    @property
+    def has_pending_changes(self) -> bool:
+        return bool(self._dirty)
+
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+        self.autosave_timer.stop()
+        self.save_state_label.setText("Niezastosowane zmiany")
+        self._update_transaction_controls()
+        self._update_status()
+
+    def _autosave(self) -> None:
+        """Compatibility hook: transactional editing deliberately never autosaves."""
+
+        self.autosave_timer.stop()
+
+    def _table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._loading:
+            return
+        row = item.row()
+        if not 0 <= row < len(self.presets):
+            return
+        preset = self.presets[row]
+        if item.column() == 0:
+            preset.enabled = item.checkState() == Qt.CheckState.Checked
+        elif item.column() == 1:
+            preset.name = item.text().strip()
+        elif item.column() == 2:
+            preset.shortcut = item.text().strip()
+        self._mark_dirty()
+        self._selection_changed()
+        self._update_status()
+
+    def _preset_editor_changed(self, *_args: object) -> None:
+        if self._loading:
+            return
+        preset = self._current_preset()
+        if preset is None:
+            return
+        preset.name = self.name_edit.text().strip()
+        preset.description = self.description_edit.text().strip()
+        preset.shortcut = self.shortcut_edit.text().strip()
+        preset.mode = FilterMode(str(self.mode_combo.currentData()))
+        preset.enabled = self.enabled_check.isChecked()
+        row = self._current_row()
+        self._loading = True
+        try:
+            self.table.item(row, 0).setCheckState(
+                Qt.CheckState.Checked if preset.enabled else Qt.CheckState.Unchecked
+            )
+            self.table.item(row, 1).setText(preset.name)
+            self.table.item(row, 2).setText(preset.shortcut)
+        finally:
+            self._loading = False
+        self._mark_dirty()
+        self._update_status()
+
+    def reload_from_repository(self) -> None:
+        """Replace the working copy with the last explicitly applied state."""
+
+        current = self._current_preset()
+        selected_id = current.id if current is not None else None
+        self.presets = self.repository.list_presets()
+
+        self._loading = True
+        try:
+            mode = self.preferences.combination_mode()
+            self.combination_combo.setCurrentIndex(
+                max(0, self.combination_combo.findData(mode.value))
+            )
+        finally:
+            self._loading = False
+
+        selected_row = next(
+            (
+                index
+                for index, preset in enumerate(self.presets)
+                if preset.id == selected_id
+            ),
+            0 if self.presets else -1,
+        )
+        self._dirty = False
+        self.autosave_timer.stop()
+        self.save_state_label.setText("Zastosowano")
+        self._reload_table(selected_row if selected_row >= 0 else None)
+        self._update_transaction_controls()
+
+    def _discard_changes(self, _checked: bool = False) -> None:
+        if not self._dirty:
+            return
+        self.reload_from_repository()
+        self.output_message.emit("Odrzucono niezastosowane zmiany filtrów.")
+
+    def _save(self, _checked: bool = False, *, silent: bool = False) -> bool:
+        saved = super()._save(_checked, silent=silent)
+        if saved:
+            self.save_state_label.setText("Zastosowano")
+        self._update_transaction_controls()
+        return saved
+
+    def _update_transaction_controls(self) -> None:
+        pending = bool(self._dirty)
+        apply_button = getattr(self, "apply_button", None)
+        discard_button = getattr(self, "discard_button", None)
+        if apply_button is not None:
+            apply_button.setEnabled(pending)
+        if discard_button is not None:
+            discard_button.setEnabled(pending)
+
+    def _update_status(self) -> None:
+        super()._update_status()
+        if self._dirty:
+            self.status_label.setText(
+                f"{self.status_label.text()} | Edycja: oczekuje na zastosowanie"
+            )
