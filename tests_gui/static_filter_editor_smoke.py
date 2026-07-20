@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from tempfile import TemporaryDirectory
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGroupBox
 
-from app.static_filter_engine import StaticFilterField, StaticFilterOperator
+from app.filter_preferences import FilterCombinationMode
 from app.project import CrtProject
-from gui.enhanced_filter_manager import EnhancedFilterManagerWidget
+from app.static_filter_engine import StaticFilterField, StaticFilterOperator
+from gui.compact_filter_manager import CompactFilterManagerWidget
 
 
 def _combo_data(combo) -> tuple[str, ...]:
@@ -18,10 +19,24 @@ def main() -> None:
 
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(f"{temporary}/project", name="Static filter editor")
-        manager = EnhancedFilterManagerWidget(project)
+        manager = CompactFilterManagerWidget(project)
         manager._add_preset()
         manager._select_tree_path((0,))
         app.processEvents()
+
+        combination_bar = manager.findChild(type(manager), "filterCombinationBar")
+        assert combination_bar is None
+        assert manager.combination_combo.parentWidget().objectName() == "filterCombinationBar"
+        assert manager.combination_combo.itemText(
+            manager.combination_combo.findData(FilterCombinationMode.AND.value)
+        ) == "AND — wszystkie"
+        assert manager.combination_combo.itemText(
+            manager.combination_combo.findData(FilterCombinationMode.OR.value)
+        ) == "OR — dowolny"
+        assert not any(
+            box.title() == "Łączenie wielu presetów Include" and box.isVisible()
+            for box in manager.findChildren(QGroupBox)
+        )
 
         for field_name in (
             StaticFilterField.CHANNEL.value,
