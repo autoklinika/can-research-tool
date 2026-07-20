@@ -10,6 +10,7 @@ from app.enhanced_stored_session_controller import (
 )
 from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
+from app.session_stream import SessionPagedReader
 from infrastructure.desktop import reveal_path
 
 from .async_dbc_manager import AsyncDbcManagerWidget
@@ -36,8 +37,6 @@ if TYPE_CHECKING:
 
 class ApplicationContainer:
     """Composition root for GUI services, controllers and view factories."""
-
-    STORED_SESSION_PAGE_ROWS = 2_000
 
     def __init__(
         self,
@@ -94,15 +93,18 @@ class ApplicationContainer:
         dbc_paths: tuple[Path, ...] = (),
     ) -> SessionViewWidget:
         session_path = Path(path)
+        frame_count = SessionPagedReader(session_path).frame_count
+        raw_frame_capacity = max(1, frame_count)
         controller = self._stored_controller_factory(
             session_path,
-            page_size=self.STORED_SESSION_PAGE_ROWS,
+            page_size=raw_frame_capacity,
         )
         return SessionViewWidget(
             session_path,
             dbc_paths=dbc_paths,
             controller=controller,
             stored_integration_factory=EnhancedStoredSessionIntegration,
+            raw_frame_capacity=raw_frame_capacity,
         )
 
     def create_project_overview(self, project: CrtProject) -> ProjectOverviewWidget:
