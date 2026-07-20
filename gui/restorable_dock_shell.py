@@ -234,8 +234,10 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
             and animation.state() == QAbstractAnimation.State.Running
         ):
             animation.stop()
-        self.explorer_dock.setMinimumWidth(self._project_dock_normal_min_width)
+        # Restore maximum first. Windows clamps minimumWidth to the current
+        # maximumWidth (0 at the end of the collapse animation).
         self.explorer_dock.setMaximumWidth(self._project_dock_normal_max_width)
+        self.explorer_dock.setMinimumWidth(self._project_dock_normal_min_width)
 
     def _hide_inspector_by_default(self) -> None:
         self.inspector_dock.hide()
