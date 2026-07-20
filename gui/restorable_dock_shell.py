@@ -120,6 +120,13 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
 
     def _build_actions(self) -> None:
         super()._build_actions()
+        self.toggle_explorer_action.setShortcut("Ctrl+Shift+B")
+        self.toggle_explorer_action.setToolTip(
+            "Pokaż lub ukryj panel Projekt (Ctrl+Shift+B)"
+        )
+        self.toggle_explorer_action.setStatusTip(
+            "Pokaż lub ukryj panel Projekt — Ctrl+Shift+B"
+        )
         self.toggle_primary_toolbar_action = QAction("Narzędzia główne", self)
         self.toggle_primary_toolbar_action.setObjectName("togglePrimaryToolbarAction")
         self.toggle_primary_toolbar_action.setCheckable(True)
@@ -237,7 +244,7 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         dock.setProperty("crtCustomTitleBarInstalled", True)
 
     def _collapse_project_dock(self) -> None:
-        """Hide Project immediately; Ctrl+B or View -> Project restores it."""
+        """Hide Project immediately; Ctrl+Shift+B or View -> Project restores it."""
 
         self.explorer_dock.hide()
         self.toggle_explorer_action.setChecked(False)
