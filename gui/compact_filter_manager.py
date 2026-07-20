@@ -75,6 +75,7 @@ class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
 
         root.insertWidget(1, bar)
         self._install_transaction_controls()
+        self._configure_collapsible_test_box()
 
     def _install_cursor_safe_value_editor(self) -> None:
         """Keep text editing local instead of rebuilding the properties form."""
@@ -129,6 +130,96 @@ class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
             json.dumps(preset.root, ensure_ascii=False, indent=2)
         )
         self._show_validation_summary()
+
+    def _configure_collapsible_test_box(self) -> None:
+        test_box = self.test_context.parentWidget()
+        if not isinstance(test_box, QGroupBox):
+            return
+
+        self.test_box = test_box
+        self.test_box.setObjectName("filterPresetTestBox")
+        self.test_box.setTitle("Test presetu — opcjonalny")
+        self.test_box.setCheckable(True)
+        self.test_button = next(
+            (
+                button
+                for button in self.test_box.findChildren(QPushButton)
+                if button.text() == "Sprawdź cały preset"
+            ),
+            None,
+        )
+        self.test_box.toggled.connect(self._test_box_toggled)
+        self.test_box.setChecked(False)
+        self._update_test_box_visibility(False)
+
+    def _test_box_toggled(self, expanded: bool) -> None:
+        self._update_test_box_visibility(bool(expanded))
+
+    def _test_context_changed(self, *_args: object) -> None:
+        super()._test_context_changed(*_args)
+        test_box = getattr(self, "test_box", None)
+        if test_box is not None:
+            self._update_test_box_visibility(test_box.isChecked())
+
+    def _update_test_box_visibility(self, expanded: bool) -> None:
+        test_box = getattr(self, "test_box", None)
+        if test_box is None:
+            return
+
+        logical = self.test_context.currentData() == "logical"
+        self._set_test_row_visible(self.test_context, expanded)
+
+        for name in (
+            "test_can_id",
+            "test_format",
+            "test_dlc",
+            "test_channel",
+            "test_rtr",
+            "test_error_frame",
+            "test_payload",
+            "test_time",
+        ):
+            self._set_test_row_visible(
+                getattr(self, name, None),
+                expanded and not logical,
+            )
+
+        self._set_test_row_visible(
+            getattr(self, "test_logical_json", None),
+            expanded and logical,
+        )
+        self._set_test_row_visible(getattr(self, "test_button", None), expanded)
+        self._set_test_row_visible(getattr(self, "test_result", None), expanded)
+        test_box.updateGeometry()
+
+    def _set_test_row_visible(self, widget: QWidget | None, visible: bool) -> None:
+        if widget is None:
+            return
+        widget.setVisible(visible)
+        test_box = getattr(self, "test_box", None)
+        form = test_box.layout() if test_box is not None else None
+        label_for_field = getattr(form, "labelForField", None)
+        if callable(label_for_field):
+            label = label_for_field(widget)
+            if label is not None:
+                label.setVisible(visible)
+
+    def _test_current(self) -> None:
+        super()._test_current()
+        text = self.test_result.text()
+        translations = (
+            ("NO MATCH", "NIE PASUJE"),
+            ("MATCH", "PASUJE"),
+            ("UNAVAILABLE", "NIEDOSTĘPNE"),
+        )
+        for source, target in translations:
+            if text == source:
+                self.test_result.setText(target)
+                return
+            prefix = f"{source} —"
+            if text.startswith(prefix):
+                self.test_result.setText(target + text[len(source) :])
+                return
 
     def _install_transaction_controls(self) -> None:
         save_button = next(
