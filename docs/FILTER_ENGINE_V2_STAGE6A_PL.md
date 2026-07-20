@@ -101,7 +101,13 @@ Dodano:
 - jawne `UNAVAILABLE` przy próbie testowania warunku surowej ramki jako wiadomości logicznej,
 - walidację presetów v2 przy aktywacji globalnym skrótem,
 - testy jednostkowe metadanych edytora i smoke GUI,
-- kompaktowy wybór sposobu łączenia wielu presetów Include.
+- kompaktowy wybór sposobu łączenia wielu presetów Include,
+- transakcyjną kopię roboczą edytora,
+- przyciski `Zastosuj zmiany` i `Odrzuć zmiany`,
+- ostrzeżenie przy zamykaniu okna z niezastosowanymi zmianami,
+- blokadę skrótów presetów do chwili zastosowania albo odrzucenia zmian.
+
+Zmiana pola, operatora, wartości, nazwy, skrótu, trybu, aktywności presetu albo sposobu łączenia Include nie zapisuje już automatycznie `project.sqlite`. Live Capture i zapisane sesje używają ostatniego zatwierdzonego stanu aż do kliknięcia `Zastosuj zmiany`.
 
 ### 6A.4 — Live i zapisane sesje — zakończony
 
@@ -147,3 +153,5 @@ Do Etapu 6C należą menu kontekstowe i generowanie presetów przez analizę.
 6. GUI nie implementuje własnej semantyki dopasowania.
 7. Format `*.crt.jsonl` i indeks sesji pozostają bez zmian.
 8. Wyłączenie filtrów przywraca pełny, niezmodyfikowany widok danych.
+9. Zmiany w edytorze nie wpływają na zapisany zestaw filtrów przed jawnym zastosowaniem.
+10. Zamknięcie okna, timer ani skrót klawiaturowy nie mogą automatycznie zatwierdzić kopii roboczej.
