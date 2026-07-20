@@ -51,7 +51,9 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .engineering_shell import EngineeringShellMainWindow as MainWindow
+        from .restorable_dock_shell import (
+            RestorableDockEngineeringShellMainWindow as MainWindow,
+        )
 
         return MainWindow(self)
 
