@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import gc
 import time
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, QThreadPool, Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QApplication, QTableView, QTableWidget
 
@@ -102,6 +103,7 @@ def main() -> None:
         # Force a slow metadata read. Opening the workspace must still return
         # immediately because the read belongs to a QThreadPool worker.
         original_list_project_dbc = async_dbc_manager.list_project_dbc
+        decoder_workspace = None
 
         def slow_list_project_dbc(_project):
             time.sleep(0.5)
@@ -145,8 +147,19 @@ def main() -> None:
         assert not window.inspector_dock.isHidden()
         assert window.activity_bar.isHidden()
 
+        window._close_project_tabs()
         window.close()
+        window.deleteLater()
+        assert QThreadPool.globalInstance().waitForDone(5_000)
+        app.sendPostedEvents()
         app.processEvents()
+        decoder_workspace = None
+        overview = None
+        recent = None
+        logical_table = None
+        window = None
+        project = None
+        gc.collect()
 
     QSettings().clear()
 
