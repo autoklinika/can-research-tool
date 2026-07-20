@@ -17,9 +17,6 @@ from .async_dbc_manager import AsyncDbcManagerWidget
 from .bounded_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
-from .external_logical_session_view import (
-    ExternalLogicalSessionViewWidget as SessionViewWidget,
-)
 from .final_streaming_filter_integration import (
     FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
@@ -29,6 +26,9 @@ from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .session_management_integration import SessionManagementIntegration
+from .sqlite_logical_session_view import (
+    SqliteLogicalSessionViewWidget as SessionViewWidget,
+)
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
