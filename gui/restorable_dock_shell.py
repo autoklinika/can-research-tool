@@ -177,13 +177,10 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         if hasattr(self, "toggle_primary_toolbar_action"):
             return
 
-        action = QAction("Narzędzia główne", self)
+        action = self.primary_toolbar.toggleViewAction()
+        action.setText("Narzędzia główne")
         action.setObjectName("togglePrimaryToolbarAction")
-        action.setCheckable(True)
-        action.setChecked(not self.primary_toolbar.isHidden())
         action.setToolTip("Pokaż lub ukryj pasek Narzędzia główne")
-        action.triggered.connect(self.primary_toolbar.setVisible)
-        self.primary_toolbar.visibilityChanged.connect(action.setChecked)
         self.toggle_primary_toolbar_action = action
 
         view_menu = next(
