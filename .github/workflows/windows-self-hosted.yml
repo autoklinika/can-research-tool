@@ -66,21 +66,41 @@ jobs:
       - name: Unit tests
         run: '& $env:CRT_CI_PYTHON -m pytest -q'
 
-      - name: GUI startup and shell smoke tests
-        run: |
-          & $env:CRT_CI_PYTHON .\tests_gui\application_startup_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\engineering_shell_smoke.py
+      - name: Application startup smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\application_startup_smoke.py'
 
-      - name: Core GUI regression smoke tests
-        run: |
-          & $env:CRT_CI_PYTHON .\tests_gui\static_filter_editor_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\static_filter_live_stored_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\live_filter_worker_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\live_buffer_performance_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\dbc_activation_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py tree
-          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py live
-          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py imported
-          & $env:CRT_CI_PYTHON .\tests_gui\table_hover_smoke.py
-          & $env:CRT_CI_PYTHON .\tests_gui\protocol_filter_gui_smoke.py
+      - name: Engineering shell smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\engineering_shell_smoke.py'
+
+      - name: Static filter editor smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\static_filter_editor_smoke.py'
+
+      - name: Filter manager window smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py'
+
+      - name: Static filter Live and stored smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\static_filter_live_stored_smoke.py'
+
+      - name: Live filter worker smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\live_filter_worker_smoke.py'
+
+      - name: Live buffer performance smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\live_buffer_performance_smoke.py'
+
+      - name: DBC activation smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\dbc_activation_smoke.py'
+
+      - name: Session tree smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py tree'
+
+      - name: Live session actions smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py live'
+
+      - name: Imported session actions smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py imported'
+
+      - name: Table hover smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\table_hover_smoke.py'
+
+      - name: Protocol filter GUI smoke
+        run: '& $env:CRT_CI_PYTHON .\tests_gui\protocol_filter_gui_smoke.py'
