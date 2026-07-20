@@ -59,6 +59,14 @@ BO_ 291 EGR_Status: 8 ECU
  SG_ EGR_Command : 8|8@1+ (0.4,0) [0|100] "%" Vector__XXX
 '''
 
+EXTENDED_DBC_TEXT = DBC_TEXT.replace(
+    "BO_ 291 EGR_Status: 8 ECU",
+    "BO_ 2566869247 EngineData: 8 ECU",
+).replace("EGR_Status", "EngineData") + '''
+BO_ 2566844927 OtherPgn: 8 ECU
+ SG_ OtherValue : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+'''
+
 
 def _write_dbc(path: Path) -> Path:
     path.write_text(DBC_TEXT, encoding="utf-8")
@@ -78,6 +86,19 @@ def _raw_message() -> TransportMessage:
     )
 
 
+def _extended_raw_message(sequence: int = 0) -> TransportMessage:
+    return TransportMessage(
+        sequence=sequence,
+        first_timestamp_ns=sequence,
+        last_timestamp_ns=sequence,
+        transport=TransportKind.RAW,
+        payload=bytes([125, 100, 0, 0, 0, 0, 0, 0]),
+        frame_sequences=(sequence,),
+        arbitration_id=0x18FF50A5,
+        is_extended_id=True,
+    )
+
+
 def test_dbc_decoder_reads_scaled_signals(tmp_path: Path) -> None:
     path = _write_dbc(tmp_path / "egr.dbc")
     inspection = inspect_dbc(path)
@@ -89,6 +110,30 @@ def test_dbc_decoder_reads_scaled_signals(tmp_path: Path) -> None:
     assert decoded.name == "DBC EGR_Status"
     assert decoded.fields["signals"]["EGR_Position"] == pytest.approx(50.0)
     assert decoded.fields["signals"]["EGR_Command"] == pytest.approx(40.0)
+
+
+def test_extended_dbc_lookup_and_payload_decode_are_cached(tmp_path: Path) -> None:
+    path = tmp_path / "j1939.dbc"
+    path.write_text(EXTENDED_DBC_TEXT, encoding="utf-8")
+    decoder = DbcDecoder((path,))
+
+    first = decoder.decode_if_matches(_extended_raw_message())
+    assert first is not None
+    assert first.name == "DBC EngineData"
+    assert first.fields["dbc_match_mode"] == "j1939-address-aware"
+    assert decoder.cache_stats["last_candidate_count"] == 1
+
+    for sequence in range(1, 101):
+        decoded = decoder.decode_if_matches(_extended_raw_message(sequence))
+        assert decoded is not None
+        assert decoded.fields["signals"]["EGR_Position"] == pytest.approx(50.0)
+
+    stats = decoder.cache_stats
+    assert stats["match_cache_misses"] == 1
+    assert stats["match_cache_hits"] >= 100
+    assert stats["payload_cache_misses"] == 1
+    assert stats["payload_cache_hits"] >= 100
+    assert stats["match_cache_entries"] == 1
 
 
 def test_project_dbc_import_enable_disable_and_remove(tmp_path: Path) -> None:
