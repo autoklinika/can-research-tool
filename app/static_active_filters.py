@@ -27,6 +27,17 @@ from .static_filter_engine import (
 )
 from .static_filter_patterns import CanIdPattern, PayloadMatchMode, PayloadPattern
 
+_STATIC_FIELD_NAMES = frozenset(field.value for field in StaticFilterField)
+_RAW_FIELD_NAMES = frozenset(field.value for field in FilterField) | _STATIC_FIELD_NAMES
+_RAW_ONLY_OPERATORS = frozenset(
+    {
+        StaticFilterOperator.CAN_ID_PATTERN.value,
+        StaticFilterOperator.PAYLOAD_EXACT.value,
+        StaticFilterOperator.PAYLOAD_PREFIX.value,
+        StaticFilterOperator.PAYLOAD_CONTAINS.value,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _CompiledCondition:
@@ -39,6 +50,10 @@ class _CompiledCondition:
     membership: frozenset[Any] | None = None
     can_id_pattern: CanIdPattern | None = None
     payload_pattern: PayloadPattern | None = None
+
+    @property
+    def raw_only(self) -> bool:
+        return self.field_name in _STATIC_FIELD_NAMES or self.operator_name in _RAW_ONLY_OPERATORS
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +75,9 @@ class _CompiledPreset:
 class StaticCombinedActiveFilterSet:
     """Compiled project filters shared by Live and stored-session views.
 
-    Static patterns are parsed once when the set is created. Raw frames use a direct
-    field resolver without allocating a dictionary context on the high-volume path.
+    Static patterns are parsed once. Raw frames use a direct field resolver without
+    allocating a dictionary context. Conditions introduced by 6A remain neutral in
+    logical-message views, where they resolve to ``UNAVAILABLE``.
     """
 
     def __init__(
@@ -88,17 +104,13 @@ class StaticCombinedActiveFilterSet:
             if issues:
                 validation_issues.append((preset.name, issues))
                 compiled.append(
-                    _CompiledPreset(
-                        preset=preset,
-                        root=None,
-                        validation_error=issues[0].message,
-                    )
+                    _CompiledPreset(preset, None, issues[0].message)
                 )
             else:
                 compiled.append(
                     _CompiledPreset(
-                        preset=preset,
-                        root=_compile_node(preset.root, self._legacy_compiler),
+                        preset,
+                        _compile_node(preset.root, self._legacy_compiler),
                     )
                 )
         self._compiled_presets = tuple(compiled)
@@ -121,12 +133,9 @@ class StaticCombinedActiveFilterSet:
 
     @property
     def affects_raw_visibility(self) -> bool:
-        raw_fields = {field.value for field in FilterField} | {
-            field.value for field in StaticFilterField
-        }
         return any(
             preset.mode in {FilterMode.INCLUDE, FilterMode.EXCLUDE}
-            and _tree_uses_any_field(preset.root, raw_fields)
+            and _tree_uses_any_field(preset.root, _RAW_FIELD_NAMES)
             for preset in self.presets
         )
 
@@ -154,12 +163,12 @@ class StaticCombinedActiveFilterSet:
         record: StaticCanFrameRecord | CanFrameRecord | StaticFilterContext | FilterContext,
     ) -> LiveFilterDecision:
         if isinstance(record, StaticCanFrameRecord):
-            return self._decide_compiled(raw=record)
+            return self._decide(raw=record)
         if isinstance(record, CanFrameRecord):
-            return self._decide_compiled(raw=StaticCanFrameRecord.from_legacy(record))
+            return self._decide(raw=StaticCanFrameRecord.from_legacy(record))
         if isinstance(record, StaticFilterContext):
-            return self._decide_compiled(context=record)
-        return self._decide_compiled(context=StaticFilterContext(legacy=record))
+            return self._decide(context=record)
+        return self._decide(context=StaticFilterContext(legacy=record))
 
     def decide_logical_message(
         self,
@@ -167,19 +176,16 @@ class StaticCombinedActiveFilterSet:
         *,
         relative_time_us: int | None = None,
     ) -> LiveFilterDecision:
-        return self._decide_compiled(
-            context=StaticFilterContext(
-                legacy=FilterContext.from_logical_message(
-                    record,
-                    relative_time_us=relative_time_us,
-                )
-            )
+        context = FilterContext.from_logical_message(
+            record,
+            relative_time_us=relative_time_us,
         )
+        return self._decide(context=StaticFilterContext(legacy=context))
 
     def decide_context(self, context: FilterContext) -> LiveFilterDecision:
-        return self._decide_compiled(context=StaticFilterContext(legacy=context))
+        return self._decide(context=StaticFilterContext(legacy=context))
 
-    def _decide_compiled(
+    def _decide(
         self,
         *,
         raw: StaticCanFrameRecord | None = None,
@@ -248,8 +254,8 @@ class StaticCombinedActiveFilterSet:
 def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _CompiledNode:
     if node["type"] == "group":
         return _CompiledGroup(
-            operator=LogicalOperator(str(node["operator"])),
-            children=tuple(_compile_node(child, compiler) for child in node["children"]),
+            LogicalOperator(str(node["operator"])),
+            tuple(_compile_node(child, compiler) for child in node["children"]),
         )
 
     field_name = str(node["field"])
@@ -258,8 +264,8 @@ def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _Compile
 
     if operator_name == StaticFilterOperator.CAN_ID_PATTERN.value:
         return _CompiledCondition(
-            field_name=field_name,
-            operator_name=operator_name,
+            field_name,
+            operator_name,
             can_id_pattern=CanIdPattern.parse(str(raw_values[0])),
         )
 
@@ -275,12 +281,12 @@ def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _Compile
             StaticFilterOperator.PAYLOAD_CONTAINS: PayloadMatchMode.CONTAINS,
         }[operator]
         return _CompiledCondition(
-            field_name=field_name,
-            operator_name=operator_name,
+            field_name,
+            operator_name,
             payload_pattern=PayloadPattern.parse(str(raw_values[0]), mode=mode),
         )
 
-    if field_name in {field.value for field in StaticFilterField}:
+    if field_name in _STATIC_FIELD_NAMES:
         operator = StaticFilterOperator(operator_name)
         if field_name == StaticFilterField.CHANNEL.value:
             values = tuple(_parse_int(value) for value in raw_values)
@@ -292,8 +298,8 @@ def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _Compile
         else:
             raise ValueError("payload requires a payload matching operator")
         return _CompiledCondition(
-            field_name=field_name,
-            operator_name=operator_name,
+            field_name,
+            operator_name,
             static_operator=operator,
             values=values,
             membership=(
@@ -307,8 +313,8 @@ def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _Compile
     legacy_operator = FilterOperator(operator_name)
     values = tuple(compiler._normalize_value(legacy_field, value) for value in raw_values)
     return _CompiledCondition(
-        field_name=field_name,
-        operator_name=operator_name,
+        field_name,
+        operator_name,
         legacy_field=legacy_field,
         legacy_operator=legacy_operator,
         values=values,
@@ -327,14 +333,7 @@ def _evaluate_raw(node: _CompiledNode, record: StaticCanFrameRecord | None) -> M
         available, actual = _resolve_raw(node.field_name, record)
         if not available:
             return MatchState.UNAVAILABLE
-        try:
-            return (
-                MatchState.MATCH
-                if _condition_matches(node, actual, None)
-                else MatchState.NO_MATCH
-            )
-        except (TypeError, ValueError):
-            return MatchState.UNAVAILABLE
+        return _match_state(node, actual, compiler=None)
     return _evaluate_group(node, lambda child: _evaluate_raw(child, record))
 
 
@@ -346,17 +345,12 @@ def _evaluate_context(
     if context is None:
         return MatchState.UNAVAILABLE
     if isinstance(node, _CompiledCondition):
+        if node.raw_only:
+            return MatchState.UNAVAILABLE
         available, actual = context.resolve(node.field_name)
         if not available:
             return MatchState.UNAVAILABLE
-        try:
-            return (
-                MatchState.MATCH
-                if _condition_matches(node, actual, compiler)
-                else MatchState.NO_MATCH
-            )
-        except (TypeError, ValueError):
-            return MatchState.UNAVAILABLE
+        return _match_state(node, actual, compiler=compiler)
     return _evaluate_group(
         node,
         lambda child: _evaluate_context(child, context, compiler),
@@ -387,54 +381,52 @@ def _evaluate_group(node: _CompiledGroup, evaluate_child) -> MatchState:
     return MatchState.UNAVAILABLE if unavailable else MatchState.NO_MATCH
 
 
-def _condition_matches(
+def _match_state(
     condition: _CompiledCondition,
     actual: Any,
+    *,
     compiler: FilterCompiler | None,
-) -> bool:
-    if condition.can_id_pattern is not None:
-        return condition.can_id_pattern.matches(int(actual))
-    if condition.payload_pattern is not None:
-        return condition.payload_pattern.matches(bytes(actual))
-    if condition.static_operator is not None:
-        normalized = (
-            _parse_int(actual)
-            if condition.field_name == StaticFilterField.CHANNEL.value
-            else _parse_bool(actual)
-        )
-        return _compare(normalized, condition.static_operator.value, condition)
+) -> MatchState:
+    try:
+        if condition.can_id_pattern is not None:
+            matched = condition.can_id_pattern.matches(int(actual))
+        elif condition.payload_pattern is not None:
+            matched = condition.payload_pattern.matches(bytes(actual))
+        elif condition.static_operator is not None:
+            normalized = (
+                _parse_int(actual)
+                if condition.field_name == StaticFilterField.CHANNEL.value
+                else _parse_bool(actual)
+            )
+            matched = _compare(normalized, condition.static_operator.value, condition)
+        else:
+            assert condition.legacy_field is not None
+            assert condition.legacy_operator is not None
+            normalized = (
+                compiler._normalize_value(condition.legacy_field, actual)
+                if compiler is not None
+                else actual
+            )
+            matched = _compare(normalized, condition.legacy_operator.value, condition)
+    except (TypeError, ValueError):
+        return MatchState.UNAVAILABLE
+    return MatchState.MATCH if matched else MatchState.NO_MATCH
 
-    assert condition.legacy_field is not None
-    assert condition.legacy_operator is not None
-    normalized = (
-        compiler._normalize_value(condition.legacy_field, actual)
-        if compiler is not None
-        else actual
-    )
-    return _compare(normalized, condition.legacy_operator.value, condition)
 
-
-def _resolve_raw(
-    field_name: str,
-    record: StaticCanFrameRecord,
-) -> tuple[bool, Any]:
-    if field_name == FilterField.CAN_ID.value:
-        return True, record.can_id
-    if field_name == FilterField.FRAME_FORMAT.value:
-        return True, "ext" if record.extended else "std"
-    if field_name == FilterField.DLC.value:
-        return True, record.dlc
-    if field_name == FilterField.RELATIVE_TIME_US.value:
-        return True, record.relative_time_us
-    if field_name == StaticFilterField.CHANNEL.value:
-        return True, record.channel
-    if field_name == StaticFilterField.RTR.value:
-        return True, record.rtr
-    if field_name == StaticFilterField.ERROR_FRAME.value:
-        return True, record.error_frame
-    if field_name == StaticFilterField.PAYLOAD.value:
-        return True, record.payload
-    return False, None
+def _resolve_raw(field_name: str, record: StaticCanFrameRecord) -> tuple[bool, Any]:
+    values = {
+        FilterField.CAN_ID.value: record.can_id,
+        FilterField.FRAME_FORMAT.value: "ext" if record.extended else "std",
+        FilterField.DLC.value: record.dlc,
+        FilterField.RELATIVE_TIME_US.value: record.relative_time_us,
+        StaticFilterField.CHANNEL.value: record.channel,
+        StaticFilterField.RTR.value: record.rtr,
+        StaticFilterField.ERROR_FRAME.value: record.error_frame,
+        StaticFilterField.PAYLOAD.value: record.payload,
+    }
+    if field_name not in values:
+        return False, None
+    return True, values[field_name]
 
 
 def _compare(actual: Any, operator: str, condition: _CompiledCondition) -> bool:
@@ -489,7 +481,7 @@ def _parse_bool(value: Any) -> bool:
     raise ValueError("wartość logiczna musi oznaczać tak albo nie")
 
 
-def _tree_uses_any_field(node: object, fields: set[str]) -> bool:
+def _tree_uses_any_field(node: object, fields: frozenset[str]) -> bool:
     if not isinstance(node, dict):
         return False
     if node.get("type") == "condition":
