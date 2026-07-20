@@ -105,13 +105,7 @@ Dodano:
 - transakcyjną kopię roboczą edytora,
 - przyciski `Zastosuj zmiany` i `Odrzuć zmiany`,
 - ostrzeżenie przy zamykaniu okna z niezastosowanymi zmianami,
-- blokadę skrótów presetów do chwili zastosowania albo odrzucenia zmian,
-- kursorowo bezpieczną edycję pola `Wartość / wartości`,
-- zwijany, opcjonalny test presetu z polskimi wynikami,
-- ergonomiczny podział interfejsu na funkcje codzienne, opcjonalne i diagnostyczne,
-- domyślnie ukryte ustawienia globalne, opis i skrót presetu, narzędzia drzewa oraz JSON,
-- stały pasek `Zastosuj/Odrzuć` na dole całego okna,
-- proporcje splittera preferujące drzewo filtra jako główny obszar pracy.
+- blokadę skrótów presetów do chwili zastosowania albo odrzucenia zmian.
 
 Zmiana pola, operatora, wartości, nazwy, skrótu, trybu, aktywności presetu albo sposobu łączenia Include nie zapisuje już automatycznie `project.sqlite`. Live Capture i zapisane sesje używają ostatniego zatwierdzonego stanu aż do kliknięcia `Zastosuj zmiany`.
 
@@ -161,4 +155,3 @@ Do Etapu 6C należą menu kontekstowe i generowanie presetów przez analizę.
 8. Wyłączenie filtrów przywraca pełny, niezmodyfikowany widok danych.
 9. Zmiany w edytorze nie wpływają na zapisany zestaw filtrów przed jawnym zastosowaniem.
 10. Zamknięcie okna, timer ani skrót klawiaturowy nie mogą automatycznie zatwierdzić kopii roboczej.
-11. Funkcje diagnostyczne i rzadko używane nie powinny zajmować stałej powierzchni głównego widoku.
