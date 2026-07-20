@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import gc
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings
 from PySide6.QtWidgets import QApplication
 
 from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferences
@@ -25,6 +26,15 @@ def _preset(name: str, shortcut: str, *, enabled: bool) -> FilterPreset:
         "values": ["0x100"],
     }
     return preset
+
+
+def _drain_deferred_deletes(app: QApplication) -> None:
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    gc.collect()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 def main() -> None:
@@ -99,6 +109,7 @@ def main() -> None:
         assert "CAN 0x100" in live.active_live_filter_label.text()
         assert "Include: OR" in live.active_live_filter_label.text()
         live.close()
+        live.deleteLater()
 
         # Application shortcuts are reserved and block filter preset saves.
         manager.reload_from_repository()
@@ -122,7 +133,16 @@ def main() -> None:
         assert filter_window.isVisible()
 
         window.close()
-        app.processEvents()
+        window.deleteLater()
+        _drain_deferred_deletes(app)
+
+        del manager
+        del filter_window
+        del live
+        del window
+        del repository
+        del project
+        _drain_deferred_deletes(app)
 
     QSettings().clear()
 
