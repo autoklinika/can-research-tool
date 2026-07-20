@@ -32,6 +32,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/session_management_smoke.py tree
+      - name: Verify stored logical target workspace
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/stored_logical_workspace_smoke.py
       - name: Verify Live session actions
         env:
           QT_QPA_PLATFORM: offscreen
