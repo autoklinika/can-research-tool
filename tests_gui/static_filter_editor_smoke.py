@@ -101,14 +101,31 @@ def main() -> None:
         manager._condition_values_edited("62 F1 ??")
         assert not manager.compiler.validate(manager._current_preset())
 
+        # The optional preset test stays collapsed until explicitly requested.
+        assert manager.test_box.objectName() == "filterPresetTestBox"
+        assert manager.test_box.title() == "Test presetu — opcjonalny"
+        assert manager.test_box.isCheckable()
+        assert not manager.test_box.isChecked()
+        assert manager.test_context.isHidden()
+
+        manager.test_box.setChecked(True)
+        app.processEvents()
+        assert not manager.test_context.isHidden()
+        logical_label = manager.test_box.layout().labelForField(manager.test_logical_json)
+        assert manager.test_logical_json.isHidden()
+        assert logical_label is not None and logical_label.isHidden()
+
         manager.test_payload.setText("62 F1 90")
         manager.test_dlc.setValue(3)
         manager._test_current()
-        assert manager.test_result.text() == "MATCH"
+        assert manager.test_result.text() == "PASUJE"
 
         manager.test_context.setCurrentIndex(manager.test_context.findData("logical"))
+        app.processEvents()
+        assert not manager.test_logical_json.isHidden()
+        assert logical_label is not None and not logical_label.isHidden()
         manager._test_current()
-        assert manager.test_result.text().startswith("UNAVAILABLE")
+        assert manager.test_result.text().startswith("NIEDOSTĘPNE")
 
         manager.apply_button.click()
         app.processEvents()
