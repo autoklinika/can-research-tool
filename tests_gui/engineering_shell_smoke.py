@@ -87,6 +87,17 @@ def main() -> None:
         app.processEvents()
         assert not window.output_dock.isHidden()
 
+        # Regression: closing the dock with its title-bar X must not leave the
+        # checkable action in a stale state. Menu and Ctrl+Shift+I share this action.
+        assert not window.inspector_dock.isHidden()
+        window.inspector_dock.close()
+        app.processEvents()
+        assert window.inspector_dock.isHidden()
+        window.toggle_inspector_action.trigger()
+        app.processEvents()
+        assert not window.inspector_dock.isHidden()
+        assert window.toggle_inspector_action.isChecked()
+
         window._reset_workspace_layout()
         assert not window.output_dock.isHidden()
         assert not window.explorer_dock.isHidden()
