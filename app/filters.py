@@ -48,9 +48,8 @@ class FilterField(StrEnum):
 class ProtocolFilterField(StrEnum):
     """Logical-message fields evaluated by the global filter compiler.
 
-    They intentionally remain separate from ``FilterField`` until the logical-message
-    filter editor is introduced. Existing GUI code iterates ``FilterField`` and must
-    continue exposing only fields that can be tested against a raw CAN frame.
+    They remain separate from ``FilterField`` so raw-frame adapters can keep a strict
+    type boundary. The visual editor exposes both enums through its field catalog.
     """
 
     PROTOCOL = "protocol"
@@ -81,13 +80,25 @@ class ProtocolFilterField(StrEnum):
     J1939_TRANSPORT = "j1939_transport"
     J1939_IS_TP = "j1939_is_tp"
 
+    ADDRESSING = "addressing"
+    ISOTP_FRAMING = "isotp_framing"
+    ISOTP_HAS_ERROR = "isotp_has_error"
+
     SID = "sid"
     BASE_SID = "base_sid"
     DIRECTION = "direction"
+    RESPONSE_TYPE = "response_type"
+    SERVICE_NAME = "service_name"
+    REQUESTED_SERVICE_NAME = "requested_service_name"
     NRC = "nrc"
+    NRC_NAME = "nrc_name"
     DID = "did"
     ROUTINE_ID = "routine_id"
     SUBFUNCTION = "subfunction"
+    SUPPRESS_POSITIVE_RESPONSE = "suppress_positive_response"
+    SECURITY_ACCESS_TYPE = "security_access_type"
+    SECURITY_LEVEL = "security_level"
+    BLOCK_SEQUENCE_COUNTER = "block_sequence_counter"
 
 
 FilterFieldName = FilterField | ProtocolFilterField
@@ -192,16 +203,51 @@ class FilterContext:
             ProtocolFilterField.RECEIVED_PACKET_COUNT,
         )
 
+        _copy_present(fields, values, "addressing", ProtocolFilterField.ADDRESSING)
+        if str(record.transport).strip().casefold().replace("_", "-") == "isotp":
+            values[ProtocolFilterField.ISOTP_FRAMING.value] = (
+                "single-frame" if record.frame_count == 1 else "multi-frame"
+            )
+            values[ProtocolFilterField.ISOTP_HAS_ERROR.value] = bool(record.error)
+
         _copy_present(fields, values, "service_id", ProtocolFilterField.SID)
         if fields.get("base_service_id") is not None:
             values[ProtocolFilterField.BASE_SID.value] = fields["base_service_id"]
         elif fields.get("requested_service_id") is not None:
             values[ProtocolFilterField.BASE_SID.value] = fields["requested_service_id"]
         _copy_present(fields, values, "direction", ProtocolFilterField.DIRECTION)
+        _copy_present(fields, values, "response_type", ProtocolFilterField.RESPONSE_TYPE)
+        _copy_present(fields, values, "service_name", ProtocolFilterField.SERVICE_NAME)
+        _copy_present(
+            fields,
+            values,
+            "requested_service_name",
+            ProtocolFilterField.REQUESTED_SERVICE_NAME,
+        )
         _copy_present(fields, values, "negative_response_code", ProtocolFilterField.NRC)
+        _copy_present(fields, values, "negative_response_name", ProtocolFilterField.NRC_NAME)
         _copy_present(fields, values, "did", ProtocolFilterField.DID)
         _copy_present(fields, values, "routine_id", ProtocolFilterField.ROUTINE_ID)
         _copy_present(fields, values, "subfunction", ProtocolFilterField.SUBFUNCTION)
+        _copy_present(
+            fields,
+            values,
+            "suppress_positive_response",
+            ProtocolFilterField.SUPPRESS_POSITIVE_RESPONSE,
+        )
+        _copy_present(
+            fields,
+            values,
+            "security_access_type",
+            ProtocolFilterField.SECURITY_ACCESS_TYPE,
+        )
+        _copy_present(fields, values, "security_level", ProtocolFilterField.SECURITY_LEVEL)
+        _copy_present(
+            fields,
+            values,
+            "block_sequence_counter",
+            ProtocolFilterField.BLOCK_SEQUENCE_COUNTER,
+        )
 
         if str(record.protocol).strip().casefold() == "j1939":
             _populate_j1939_values(record, fields, values)
@@ -255,10 +301,7 @@ class FilterPreset:
             mode=FilterMode(str(payload.get("mode", FilterMode.INCLUDE.value))),
             shortcut=str(payload.get("shortcut") or ""),
             scope=[str(item) for item in payload.get("scope", ["live", "stored_session"])],
-            root=dict(
-                payload.get("root")
-                or {"type": "group", "operator": "and", "children": []}
-            ),
+            root=dict(payload.get("root") or {"type": "group", "operator": "and", "children": []}),
             format_version=int(payload.get("format_version", FILTER_FORMAT_VERSION)),
         )
 
@@ -380,9 +423,7 @@ class FilterCompiler:
             return
         required = 2 if operator in {FilterOperator.BETWEEN, FilterOperator.OUTSIDE} else 1
         if len(values) < required:
-            issues.append(
-                ValidationIssue(path, "Warunek nie zawiera wymaganej liczby wartości.")
-            )
+            issues.append(ValidationIssue(path, "Warunek nie zawiera wymaganej liczby wartości."))
             return
         try:
             normalized = [self._normalize_value(field_name, value) for value in values]
@@ -502,8 +543,18 @@ class FilterCompiler:
             ),
             ProtocolFilterField.SUBFUNCTION: (
                 0,
+                0x7F,
+                "Subfunction musi należeć do zakresu 0x00–0x7F.",
+            ),
+            ProtocolFilterField.SECURITY_LEVEL: (
+                1,
+                63,
+                "Poziom SecurityAccess musi należeć do zakresu 1–63.",
+            ),
+            ProtocolFilterField.BLOCK_SEQUENCE_COUNTER: (
+                0,
                 0xFF,
-                "Subfunction musi należeć do zakresu 0x00–0xFF.",
+                "Block Sequence Counter musi należeć do zakresu 0x00–0xFF.",
             ),
             ProtocolFilterField.DID: (
                 0,
@@ -609,6 +660,13 @@ _TEXT_FIELDS: frozenset[FilterFieldName] = frozenset(
         ProtocolFilterField.PGN_NAME,
         ProtocolFilterField.PDU_TYPE,
         ProtocolFilterField.J1939_TRANSPORT,
+        ProtocolFilterField.ADDRESSING,
+        ProtocolFilterField.ISOTP_FRAMING,
+        ProtocolFilterField.RESPONSE_TYPE,
+        ProtocolFilterField.SERVICE_NAME,
+        ProtocolFilterField.REQUESTED_SERVICE_NAME,
+        ProtocolFilterField.NRC_NAME,
+        ProtocolFilterField.SECURITY_ACCESS_TYPE,
     }
 )
 _BOOLEAN_FIELDS: frozenset[FilterFieldName] = frozenset(
@@ -617,6 +675,8 @@ _BOOLEAN_FIELDS: frozenset[FilterFieldName] = frozenset(
         ProtocolFilterField.BROADCAST,
         ProtocolFilterField.DESTINATION_SPECIFIC,
         ProtocolFilterField.J1939_IS_TP,
+        ProtocolFilterField.ISOTP_HAS_ERROR,
+        ProtocolFilterField.SUPPRESS_POSITIVE_RESPONSE,
     }
 )
 _FLOAT_FIELDS: frozenset[FilterFieldName] = frozenset({ProtocolFilterField.CONFIDENCE})
