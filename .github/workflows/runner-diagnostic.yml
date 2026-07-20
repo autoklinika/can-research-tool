@@ -2,9 +2,6 @@ name: Runner Diagnostic
 
 on:
   pull_request:
-  push:
-    branches:
-      - "agent/**"
   workflow_dispatch:
 
 permissions:
