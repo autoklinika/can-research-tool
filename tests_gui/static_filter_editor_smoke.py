@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from gc import collect
 from tempfile import TemporaryDirectory
 
 from PySide6.QtWidgets import QApplication, QWidget
@@ -80,6 +81,10 @@ def main() -> None:
         assert manager.test_result.text().startswith("UNAVAILABLE")
 
         manager.close()
+        manager.deleteLater()
+        app.processEvents()
+        del manager
+        collect()
 
     app.processEvents()
 
