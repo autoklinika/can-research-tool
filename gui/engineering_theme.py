@@ -248,9 +248,12 @@ QSplitter::handle:vertical {
 
 
 def apply_engineering_theme(app: QApplication) -> None:
-    """Install the compact, neutral CRT engineering-workbench theme."""
+    """Install the compact CRT theme on top of the native platform style."""
 
-    app.setStyle("Fusion")
+    # Do not force Qt's Fusion style here. On native Windows installations it can
+    # abort inside the Qt style engine before Python can report an exception, and
+    # it is measurably slower for large item views. Keep the platform-native style
+    # and apply only the CRT palette/spacing stylesheet.
     font = QFont(app.font())
     if font.pointSize() < 9:
         font.setPointSize(9)
