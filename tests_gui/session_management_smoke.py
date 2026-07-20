@@ -98,6 +98,11 @@ def _run_phase(phase: str) -> None:
                 inspector_sink=window.inspector.setPlainText,
                 output_sink=window._append_output,
             )
+            assert first._message_load_generation == 0
+            assert not first._message_loading
+            assert not first._messages_ready
+            assert "kliknij" in first.tabs.tabText(first.message_tab_index).lower()
+
             second = window.navigator.open_session(
                 live_path,
                 project=project,
@@ -106,6 +111,12 @@ def _run_phase(phase: str) -> None:
             )
             assert first is second
             assert window.navigator.widget(ProjectNavigator.session_key(live_path)) is first
+
+            first.tabs.setCurrentIndex(first.message_tab_index)
+            assert first._message_load_generation == 1
+            assert first._message_loading
+            app.processEvents()
+
             assert window.navigator.close_session(live_path) is CloseTabResult.CLOSED
             assert window.navigator.widget(ProjectNavigator.session_key(live_path)) is None
 
