@@ -177,8 +177,10 @@ def reinterpret_raw_record(
         error=record.error,
         metadata=_transport_metadata(record.fields),
     )
-    if transport is TransportKind.RAW and dbc_decoder is not None and dbc_decoder.matches(message):
-        return LogicalMessageRecord.from_decoded(dbc_decoder.decode(message))
+    if transport is TransportKind.RAW and dbc_decoder is not None:
+        dbc_decoded = dbc_decoder.decode_if_matches(message)
+        if dbc_decoded is not None:
+            return LogicalMessageRecord.from_decoded(dbc_decoded)
     return LogicalMessageRecord.from_decoded(base_registry.decode(message))
 
 
