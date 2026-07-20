@@ -36,6 +36,7 @@ class ApplicationContainer:
     """Composition root for GUI services, controllers and view factories."""
 
     STORED_SESSION_PAGE_ROWS = 2_000
+    LOGICAL_MESSAGE_VIEW_ROWS = 2_000
 
     def __init__(
         self,
@@ -96,6 +97,10 @@ class ApplicationContainer:
             session_path,
             page_size=self.STORED_SESSION_PAGE_ROWS,
         )
+        # The full logical-message stream remains in the session files. Bound
+        # only the Qt working set: 20,000 rows x 14 columns followed by an
+        # automatic scroll-to-bottom forces a long synchronous Fusion layout.
+        SessionViewWidget.MAX_MESSAGES = self.LOGICAL_MESSAGE_VIEW_ROWS
         return SessionViewWidget(
             session_path,
             dbc_paths=dbc_paths,
