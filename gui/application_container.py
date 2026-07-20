@@ -53,11 +53,9 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        # Temporary startup safety fallback. The Stage-1 dock shell triggers a
-        # native Qt abort on the physical Windows workstation although CI's
-        # offscreen GUI tests pass. Keep the stable pre-Stage-1 window active
-        # until the native-shell failure is isolated.
-        from .static_filter_manager_window import StaticFilterWindowMainWindow as MainWindow
+        from .restorable_dock_shell import (
+            RestorableDockEngineeringShellMainWindow as MainWindow,
+        )
 
         return MainWindow(self)
 
