@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QTableWidget
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
+import gui.async_dbc_manager as async_dbc_manager
 from gui.async_dbc_manager import AsyncDbcManagerWidget
 from gui.engineering_shell import EngineeringShellMainWindow
 from gui.engineering_theme import apply_engineering_theme
@@ -81,20 +82,30 @@ def main() -> None:
         assert recent is not None
         assert recent.columnCount() == 5
 
-        # Opening the decoder workspace must return immediately. Metadata loading
-        # continues in a worker and installs the normal manager asynchronously.
-        started = time.monotonic()
-        window._open_decoders()
-        elapsed = time.monotonic() - started
-        assert elapsed < 1.0
-        decoder_workspace = window.navigator.widget("decoders")
-        assert isinstance(decoder_workspace, AsyncDbcManagerWidget)
+        # Force a slow metadata read. Opening the workspace must still return
+        # immediately because the read belongs to a QThreadPool worker.
+        original_list_project_dbc = async_dbc_manager.list_project_dbc
 
-        deadline = time.monotonic() + 5.0
-        while decoder_workspace.manager is None and time.monotonic() < deadline:
-            app.processEvents()
-            time.sleep(0.01)
-        assert decoder_workspace.manager is not None
+        def slow_list_project_dbc(_project):
+            time.sleep(0.5)
+            return []
+
+        async_dbc_manager.list_project_dbc = slow_list_project_dbc
+        try:
+            started = time.monotonic()
+            window._open_decoders()
+            elapsed = time.monotonic() - started
+            assert elapsed < 0.2
+            decoder_workspace = window.navigator.widget("decoders")
+            assert isinstance(decoder_workspace, AsyncDbcManagerWidget)
+
+            deadline = time.monotonic() + 5.0
+            while decoder_workspace.manager is None and time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
+            assert decoder_workspace.manager is not None
+        finally:
+            async_dbc_manager.list_project_dbc = original_list_project_dbc
 
         assert not window.output_dock.isHidden()
         window.toggle_output_action.trigger()
