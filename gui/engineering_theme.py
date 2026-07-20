@@ -108,13 +108,13 @@ QLabel#captureIndicator[state="error"] {
 }
 QDockWidget {
     color: #30363d;
-    font-weight: 600;
 }
 QDockWidget::title {
     background: #e8eaed;
     border: 1px solid #c6cad0;
     padding: 4px 6px;
     text-align: left;
+    font-weight: 600;
 }
 QTreeView,
 QTableView,
