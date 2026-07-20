@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QEvent, QSettings
+from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QApplication, QTableView, QTableWidget
 
@@ -62,7 +62,14 @@ def main() -> None:
 
         assert window.toggle_explorer_action.shortcut().toString() == "Ctrl+B"
         assert window.toggle_inspector_action.shortcut().toString() == "Ctrl+Shift+I"
-        assert window.toggle_output_action.shortcut().toString() == "Ctrl+J"
+        assert window.toggle_output_action.shortcut().toString() == ""
+        assert window.toggle_output_action.isVisible() is False
+        assert window.toggle_output_action.isEnabled() is False
+        assert window.output_dock.isHidden()
+        assert (
+            window.dockWidgetArea(window.output_dock)
+            == Qt.DockWidgetArea.NoDockWidgetArea
+        )
 
         assert window.explorer.tree.isHeaderHidden()
         assert window.explorer.project_name.text() == "Engineering shell"
@@ -83,7 +90,7 @@ def main() -> None:
         assert recent is not None
         assert recent.columnCount() == 5
 
-        # Logical-message details belong to the Inspector, not a large native tooltip.
+        # Logical-message details belong to a dedicated window, not a native tooltip.
         logical_table = QTableView(window)
         logical_table.setModel(LogicalMessageTableModel(capacity=1, parent=logical_table))
         tooltip_event = QEvent(QEvent.Type.ToolTip)
@@ -117,14 +124,6 @@ def main() -> None:
         finally:
             async_dbc_manager.list_project_dbc = original_list_project_dbc
 
-        assert not window.output_dock.isHidden()
-        window.toggle_output_action.trigger()
-        app.processEvents()
-        assert window.output_dock.isHidden()
-        window.toggle_output_action.trigger()
-        app.processEvents()
-        assert not window.output_dock.isHidden()
-
         # Regression: closing the dock with its title-bar X must not leave the
         # checkable action in a stale state. Menu and Ctrl+Shift+I share this action.
         assert not window.inspector_dock.isHidden()
@@ -137,7 +136,11 @@ def main() -> None:
         assert window.toggle_inspector_action.isChecked()
 
         window._reset_workspace_layout()
-        assert not window.output_dock.isHidden()
+        assert window.output_dock.isHidden()
+        assert (
+            window.dockWidgetArea(window.output_dock)
+            == Qt.DockWidgetArea.NoDockWidgetArea
+        )
         assert not window.explorer_dock.isHidden()
         assert not window.inspector_dock.isHidden()
         assert window.activity_bar.isHidden()
