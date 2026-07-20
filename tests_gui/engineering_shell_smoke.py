@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QEvent, QSettings
 from PySide6.QtGui import QStandardItem
-from PySide6.QtWidgets import QApplication, QTableWidget
+from PySide6.QtWidgets import QApplication, QTableView, QTableWidget
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
@@ -13,6 +13,7 @@ import gui.async_dbc_manager as async_dbc_manager
 from gui.async_dbc_manager import AsyncDbcManagerWidget
 from gui.engineering_shell import EngineeringShellMainWindow
 from gui.engineering_theme import apply_engineering_theme
+from gui.logical_message_model import LogicalMessageTableModel
 from gui.project_explorer import ROLE_NODE_TYPE
 
 
@@ -53,7 +54,7 @@ def main() -> None:
         assert window.objectName() == "engineeringMainWindow"
         assert window.primary_toolbar.objectName() == "primaryToolBar"
         assert window.activity_bar.objectName() == "activityBar"
-        assert window.activity_bar.maximumWidth() == 46
+        assert window.activity_bar.isHidden()
         assert window.tabs.objectName() == "workspaceTabs"
 
         menu_names = [action.text() for action in window.menuBar().actions()]
@@ -67,8 +68,8 @@ def main() -> None:
         assert window.explorer.project_name.text() == "Engineering shell"
         root = window.explorer.model.item(0, 0)
         assert root is not None
-        assert _find_node(root, "overview") is not None
-        assert _find_node(root, "live") is not None
+        assert _find_node(root, "overview") is None
+        assert _find_node(root, "live") is None
         assert _find_node(root, "filters") is not None
 
         assert window.transport_status.text() == "CAN: 250 kbit/s"
@@ -81,6 +82,15 @@ def main() -> None:
         recent = overview.findChild(QTableWidget, "recentSessionsTable")
         assert recent is not None
         assert recent.columnCount() == 5
+
+        # Logical-message details belong to the Inspector, not a large native tooltip.
+        logical_table = QTableView(window)
+        logical_table.setModel(LogicalMessageTableModel(capacity=1, parent=logical_table))
+        tooltip_event = QEvent(QEvent.Type.ToolTip)
+        assert window._table_tooltip_suppressor.eventFilter(
+            logical_table.viewport(),
+            tooltip_event,
+        )
 
         # Force a slow metadata read. Opening the workspace must still return
         # immediately because the read belongs to a QThreadPool worker.
@@ -130,6 +140,7 @@ def main() -> None:
         assert not window.output_dock.isHidden()
         assert not window.explorer_dock.isHidden()
         assert not window.inspector_dock.isHidden()
+        assert window.activity_bar.isHidden()
 
         window.close()
         app.processEvents()
