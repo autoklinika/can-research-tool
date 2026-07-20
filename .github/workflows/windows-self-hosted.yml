@@ -24,40 +24,24 @@ jobs:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QT_QPA_PLATFORM: offscreen
+      CRT_CI_PYTHON: "C:\CAN\can-research-tool\.venv\Scripts\python.exe"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Prepare isolated Python environment
+      - name: Verify runner environment
         shell: pwsh
         run: |
-          $bootstrap = "C:\CAN\can-research-tool\.venv\Scripts\python.exe"
-          if (-not (Test-Path $bootstrap)) {
-              throw "Bootstrap Python not found: $bootstrap"
+          if (-not (Test-Path $env:CRT_CI_PYTHON)) {
+              throw "CRT Python not found: $env:CRT_CI_PYTHON"
           }
-
-          $venvRoot = Join-Path $env:RUNNER_WORKSPACE "_crt-ci-venv"
-          $ciPython = Join-Path $venvRoot "Scripts\python.exe"
-          if (-not (Test-Path $ciPython)) {
-              & $bootstrap -m venv $venvRoot
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Unable to create runner-local virtual environment"
-              }
-          }
-
-          "CRT_CI_PYTHON=$ciPython" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          & $ciPython --version
-          & $ciPython -c "import platform; print(platform.platform())"
+          & $env:CRT_CI_PYTHON --version
+          & $env:CRT_CI_PYTHON -c "import platform; print(platform.platform())"
+          & $env:CRT_CI_PYTHON -c "import PySide6, pytest, canlib, cantools; print('Dependencies: OK')"
           Write-Host "Runner: $env:RUNNER_NAME"
           Write-Host "Workspace: $env:GITHUB_WORKSPACE"
-          Write-Host "CI Python: $ciPython"
-
-      - name: Install dependencies
-        shell: pwsh
-        run: |
-          & $env:CRT_CI_PYTHON -m pip install --upgrade pip
-          & $env:CRT_CI_PYTHON -m pip install -e ".[dev,kvaser,gui]"
+          Write-Host "Python: $env:CRT_CI_PYTHON"
 
       - name: Compile Python sources
         shell: pwsh
