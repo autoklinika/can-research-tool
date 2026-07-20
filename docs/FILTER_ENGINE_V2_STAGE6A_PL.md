@@ -10,7 +10,7 @@ Filtry pozostają wyłącznie warstwą prezentacji. Nie mogą ograniczać odbior
 
 - 6A.1 — fundament wzorców: **zakończony**,
 - 6A.2 — kontekst i kompilator v2: **zakończony**,
-- 6A.3 — GUI: oczekuje,
+- 6A.3 — GUI: **zakończony**,
 - 6A.4 — Live i zapisane sesje: oczekuje.
 
 ## Zakres docelowy
@@ -86,16 +86,26 @@ Dodano:
 
 Istniejące presety nadal używają `format_version=1`. Nowa semantyka jest rozpoznawana przez nazwy pól i operatorów; nie wymaga migracji `project.sqlite`.
 
-### 6A.3 — GUI
+### 6A.3 — GUI — zakończony
 
-- pola w katalogu edytora,
-- opisy składni i przykłady,
-- walidacja przed zapisem,
-- czytelne podsumowanie maski/wildcardu,
-- test presetu na ręcznie zdefiniowanej ramce.
+Dodano:
+
+- pola `Kanał`, `RTR`, `Error frame` oraz `Payload / maska`,
+- operator maski/wildcardu CAN ID,
+- operatory payloadu `dokładnie`, `prefix` i `contains`,
+- listę operatorów zależną od wybranego pola,
+- bezpieczne wartości domyślne dla nowych warunków,
+- opisy składni CAN ID i payloadu bez implementowania semantyki w GUI,
+- walidację aktywnych presetów przez `StaticFilterCompiler`,
+- czytelne podsumowania warunków statycznych w drzewie,
+- test ręcznie zdefiniowanej ramki z kanałem, RTR, error frame i payloadem,
+- jawne `UNAVAILABLE` przy próbie testowania warunku surowej ramki jako wiadomości logicznej,
+- walidację presetów v2 przy aktywacji globalnym skrótem,
+- testy jednostkowe metadanych edytora i smoke GUI.
 
 ### 6A.4 — Live i zapisane sesje
 
+- adapter prawdziwej ramki aplikacji do `StaticCanFrameRecord`,
 - identyczne wyniki dla tego samego materiału,
 - filtrowanie przyrostowe podczas Capture,
 - pełne przeliczenie zapisanej sesji poza wątkiem GUI,
