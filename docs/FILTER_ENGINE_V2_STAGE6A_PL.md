@@ -2,16 +2,16 @@
 
 ## Cel
 
-Etap 6A rozszerza filtry statyczne CRT bez wprowadzania warunków zależnych od historii. Ten sam preset ma później działać identycznie w Live Capture, zapisanej sesji, analizie i eksporcie.
+Etap 6A rozszerza filtry statyczne CRT bez wprowadzania warunków zależnych od historii. Ten sam preset działa identycznie w Live Capture oraz zapisanej sesji.
 
-Filtry pozostają wyłącznie warstwą prezentacji. Nie mogą ograniczać odbioru CAN, kolejki CANlib ani pełnego zapisu sesji.
+Filtry pozostają wyłącznie warstwą prezentacji. Nie ograniczają odbioru CAN, kolejki CANlib ani pełnego zapisu sesji.
 
 ## Status
 
 - 6A.1 — fundament wzorców: **zakończony**,
 - 6A.2 — kontekst i kompilator v2: **zakończony**,
 - 6A.3 — GUI: **zakończony**,
-- 6A.4 — Live i zapisane sesje: oczekuje.
+- 6A.4 — Live i zapisane sesje: **zakończony**.
 
 ## Zakres docelowy
 
@@ -100,16 +100,29 @@ Dodano:
 - test ręcznie zdefiniowanej ramki z kanałem, RTR, error frame i payloadem,
 - jawne `UNAVAILABLE` przy próbie testowania warunku surowej ramki jako wiadomości logicznej,
 - walidację presetów v2 przy aktywacji globalnym skrótem,
-- testy jednostkowe metadanych edytora i smoke GUI.
+- testy jednostkowe metadanych edytora i smoke GUI,
+- kompaktowy wybór sposobu łączenia wielu presetów Include.
 
-### 6A.4 — Live i zapisane sesje
+### 6A.4 — Live i zapisane sesje — zakończony
 
-- adapter prawdziwej ramki aplikacji do `StaticCanFrameRecord`,
-- identyczne wyniki dla tego samego materiału,
-- filtrowanie przyrostowe podczas Capture,
-- pełne przeliczenie zapisanej sesji poza wątkiem GUI,
-- brak wpływu na pełny zapis,
-- regresje GUI i test stanowiskowy.
+Dodano:
+
+- wspólny adapter `static_frame_record()` z rzeczywistego `CanFrame` do `StaticCanFrameRecord`,
+- przenoszenie do filtra kanału, RTR, error frame, payloadu, formatu i czasu ramki bez utraty danych,
+- `StaticCombinedActiveFilterSet` używany przez Live i zapisane sesje,
+- kompilację masek CAN ID i wzorców payloadu jeden raz przy zmianie zestawu presetów,
+- bezpośredni resolver pól surowej ramki bez słownika tworzonego dla każdego warunku,
+- pełny skan bufora Live w workerze poza wątkiem GUI,
+- filtrowanie przyrostowe nowych ramek podczas aktywnego Capture,
+- pełny skan zapisanej sesji w istniejącym executorze kontrolera stored-session,
+- identyczny adapter i zestaw filtrów dla Live oraz stored-session,
+- test parytetu wyników na tych samych ramkach w pamięci i odczytanych z pliku,
+- test deterministycznego stronicowania przefiltrowanej sesji,
+- test braku ponownego parsowania i normalizowania wartości na hot path,
+- smoke GUI obejmujący produkcyjną integrację Live i kontroler zapisanej sesji,
+- kontrolę niezmienności pliku sesji po filtrowaniu.
+
+Warunki wprowadzone w 6A są warunkami surowej ramki. W widoku wiadomości logicznych zwracają `UNAVAILABLE` i pozostają neutralne dla widoczności. Filtry protokołów nadal działają w kontekście wiadomości logicznych według dotychczasowych zasad.
 
 ## Poza zakresem 6A
 
@@ -132,3 +145,5 @@ Do Etapu 6C należą menu kontekstowe i generowanie presetów przez analizę.
 4. Nieprawidłowa maska nie może zostać zapisana jako aktywny preset.
 5. Filtr payloadu nie może modyfikować payloadu ani dekodowania protokołu.
 6. GUI nie implementuje własnej semantyki dopasowania.
+7. Format `*.crt.jsonl` i indeks sesji pozostają bez zmian.
+8. Wyłączenie filtrów przywraca pełny, niezmodyfikowany widok danych.
