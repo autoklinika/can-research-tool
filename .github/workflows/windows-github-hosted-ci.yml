@@ -14,7 +14,7 @@ concurrency:
 jobs:
   windows-validation:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -37,62 +37,55 @@ jobs:
           python -m pip install -e ".[dev,kvaser,gui]"
           python -c "import PySide6, pytest, canlib, cantools; print('Dependencies: OK')"
 
-      - name: Compile Python sources
+      - name: Full validation suite
         shell: pwsh
-        run: python -m compileall -q app kvaser gui
+        run: |
+          $tests = @(
+            @{ Name = "Compile Python sources"; Command = "python -m compileall -q app kvaser gui" },
+            @{ Name = "Unit tests"; Command = "python -m pytest -q" },
+            @{ Name = "Application startup smoke"; Command = "python .\tests_gui\application_startup_smoke.py" },
+            @{ Name = "Engineering shell smoke"; Command = "python .\tests_gui\engineering_shell_smoke.py" },
+            @{ Name = "Static filter editor smoke"; Command = "python .\tests_gui\static_filter_editor_smoke.py" },
+            @{ Name = "Filter manager window smoke"; Command = "python .\tests_gui\filter_manager_window_smoke.py" },
+            @{ Name = "Static filter Live and stored smoke"; Command = "python .\tests_gui\static_filter_live_stored_smoke.py" },
+            @{ Name = "Live filter worker smoke"; Command = "python .\tests_gui\live_filter_worker_smoke.py" },
+            @{ Name = "Live buffer performance smoke"; Command = "python .\tests_gui\live_buffer_performance_smoke.py" },
+            @{ Name = "DBC activation smoke"; Command = "python .\tests_gui\dbc_activation_smoke.py" },
+            @{ Name = "Session tree smoke"; Command = "python .\tests_gui\session_management_smoke.py tree" },
+            @{ Name = "Live session actions smoke"; Command = "python .\tests_gui\session_management_smoke.py live" },
+            @{ Name = "Imported session actions smoke"; Command = "python .\tests_gui\session_management_smoke.py imported" },
+            @{ Name = "Table hover smoke"; Command = "python .\tests_gui\table_hover_smoke.py" },
+            @{ Name = "Protocol filter GUI smoke"; Command = "python .\tests_gui\protocol_filter_gui_smoke.py" }
+          )
 
-      - name: Unit tests
-        shell: pwsh
-        run: python -m pytest -q
+          $results = @()
+          $failed = 0
 
-      - name: Application startup smoke
-        shell: pwsh
-        run: python .\tests_gui\application_startup_smoke.py
+          foreach ($test in $tests) {
+            Write-Host ""
+            Write-Host "========== $($test.Name) =========="
+            Invoke-Expression $test.Command
+            $exitCode = $LASTEXITCODE
+            $status = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
+            if ($exitCode -ne 0) { $failed++ }
+            $results += [PSCustomObject]@{
+              Test = $test.Name
+              Status = $status
+              ExitCode = $exitCode
+            }
+          }
 
-      - name: Engineering shell smoke
-        shell: pwsh
-        run: python .\tests_gui\engineering_shell_smoke.py
+          Write-Host ""
+          Write-Host "========== FULL VALIDATION SUMMARY =========="
+          $results | Format-Table -AutoSize | Out-String | Write-Host
+          "### Windows full validation" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "| Test | Status | Exit code |" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "|---|---:|---:|" | Add-Content $env:GITHUB_STEP_SUMMARY
+          foreach ($result in $results) {
+            "| $($result.Test) | $($result.Status) | $($result.ExitCode) |" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
 
-      - name: Static filter editor smoke
-        shell: pwsh
-        run: python .\tests_gui\static_filter_editor_smoke.py
-
-      - name: Filter manager window smoke
-        shell: pwsh
-        run: python .\tests_gui\filter_manager_window_smoke.py
-
-      - name: Static filter Live and stored smoke
-        shell: pwsh
-        run: python .\tests_gui\static_filter_live_stored_smoke.py
-
-      - name: Live filter worker smoke
-        shell: pwsh
-        run: python .\tests_gui\live_filter_worker_smoke.py
-
-      - name: Live buffer performance smoke
-        shell: pwsh
-        run: python .\tests_gui\live_buffer_performance_smoke.py
-
-      - name: DBC activation smoke
-        shell: pwsh
-        run: python .\tests_gui\dbc_activation_smoke.py
-
-      - name: Session tree smoke
-        shell: pwsh
-        run: python .\tests_gui\session_management_smoke.py tree
-
-      - name: Live session actions smoke
-        shell: pwsh
-        run: python .\tests_gui\session_management_smoke.py live
-
-      - name: Imported session actions smoke
-        shell: pwsh
-        run: python .\tests_gui\session_management_smoke.py imported
-
-      - name: Table hover smoke
-        shell: pwsh
-        run: python .\tests_gui\table_hover_smoke.py
-
-      - name: Protocol filter GUI smoke
-        shell: pwsh
-        run: python .\tests_gui\protocol_filter_gui_smoke.py
+          if ($failed -gt 0) {
+            throw "$failed validation test(s) failed."
+          }
