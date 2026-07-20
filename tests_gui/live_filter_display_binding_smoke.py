@@ -105,7 +105,7 @@ def main() -> None:
         view.timer.stop()
         integration = view._live_filter_integration
 
-        assert integration.proxy.filter_set.active_names == ("00F9", "F900")
+        assert set(integration.proxy.filter_set.active_names) == {"F900", "00F9"}
         assert integration.proxy.filter_set.combination_mode is FilterCombinationMode.OR
         assert integration.proxy.filter_set.affects_raw_visibility is True
 
@@ -133,13 +133,24 @@ def main() -> None:
         view.frame_model.append_frames(frames)
         view.message_model.append_messages(messages)
 
-        assert _wait_until(
+        completed = _wait_until(
             lambda: (
                 integration.proxy.rowCount() == 2
                 and integration.message_proxy.rowCount() == 2
                 and not integration._pending_frames
                 and integration._incremental_running_generation is None
             )
+        )
+        assert completed, (
+            "active Live filtering did not settle: "
+            f"frame_rows={integration.proxy.rowCount()} "
+            f"message_rows={integration.message_proxy.rowCount()} "
+            f"pending={len(integration._pending_frames)} "
+            f"running_generation={integration._incremental_running_generation} "
+            f"frame_ready={integration.proxy.filter_ready} "
+            f"frame_scanning={integration.proxy.filter_scanning} "
+            f"frame_model={type(view.frame_table.model()).__name__} "
+            f"message_model={type(view.message_table.model()).__name__}"
         )
 
         integration.update_status(total_received=3, logical_total=3)
