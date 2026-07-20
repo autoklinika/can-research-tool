@@ -334,6 +334,79 @@ QProgressBar::chunk {
     border-radius: 1px;
 }
 
+QWidget#storedLogicalWorkspace {
+    background: #1a1e22;
+}
+QFrame#logicalFilterSection,
+QFrame#logicalLoadingSection {
+    background: #1b2025;
+    border: 1px solid #343b42;
+}
+QLabel#logicalSectionTitle {
+    background: #20252a;
+    color: #e1e5e9;
+    border: 0;
+    border-bottom: 1px solid #343b42;
+    padding: 5px 7px;
+    min-height: 17px;
+    font-size: 10px;
+    font-weight: 700;
+}
+QWidget#logicalSectionBody {
+    background: #1b2025;
+}
+QWidget#logicalSectionBody QLabel {
+    color: #d7dce1;
+}
+QWidget#logicalSectionBody QLineEdit,
+QWidget#logicalSectionBody QComboBox {
+    min-height: 18px;
+    max-height: 26px;
+    padding: 3px 6px;
+}
+QWidget#logicalSectionBody QPushButton {
+    min-height: 18px;
+    max-height: 27px;
+    padding: 3px 12px;
+}
+QProgressBar#logicalLoadProgress {
+    min-height: 20px;
+    max-height: 20px;
+    border: 1px solid #334039;
+    background: #182019;
+}
+QProgressBar#logicalLoadProgress::chunk {
+    background: #438f3f;
+}
+QLabel#logicalLoadStatus {
+    color: #b8bec5;
+    border-bottom: 1px solid #59616a;
+    padding: 1px 3px;
+}
+QTableView#storedLogicalMessageTable {
+    background: #1a1e22;
+    alternate-background-color: #1d2227;
+    border: 1px solid #343b42;
+    gridline-color: #343a40;
+    selection-background-color: #244b69;
+    selection-color: #ffffff;
+}
+QTableView#storedLogicalMessageTable::item {
+    padding: 3px 7px;
+    border: 0;
+}
+QTableView#storedLogicalMessageTable::item:hover {
+    background: #222a31;
+}
+QTableView#storedLogicalMessageTable QHeaderView::section {
+    background: #262c32;
+    color: #e3e7eb;
+    border-right: 1px solid #343b42;
+    border-bottom: 1px solid #3c444c;
+    padding: 5px 7px;
+    font-weight: 500;
+}
+
 QScrollBar:vertical {
     background: #171b1f;
     width: 12px;
