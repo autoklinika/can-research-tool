@@ -105,7 +105,9 @@ Dodano:
 - transakcyjną kopię roboczą edytora,
 - przyciski `Zastosuj zmiany` i `Odrzuć zmiany`,
 - ostrzeżenie przy zamykaniu okna z niezastosowanymi zmianami,
-- blokadę skrótów presetów do chwili zastosowania albo odrzucenia zmian.
+- blokadę skrótów presetów do chwili zastosowania albo odrzucenia zmian,
+- zachowanie pozycji kursora podczas edycji wartości,
+- zwijany test presetu z polskimi wynikami.
 
 Zmiana pola, operatora, wartości, nazwy, skrótu, trybu, aktywności presetu albo sposobu łączenia Include nie zapisuje już automatycznie `project.sqlite`. Live Capture i zapisane sesje używają ostatniego zatwierdzonego stanu aż do kliknięcia `Zastosuj zmiany`.
 
