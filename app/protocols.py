@@ -312,17 +312,15 @@ class CanOpenDecoder:
 
 
 class J1939RawDecoder:
-    """Classify normal single-frame J1939 traffic after DBC/custom overrides."""
+    """Optional classifier for explicitly confirmed single-frame J1939 traffic."""
 
     def matches(self, message: TransportMessage) -> bool:
-        if (
-            message.transport is not TransportKind.RAW
-            or not message.is_extended_id
-            or message.arbitration_id is None
-        ):
-            return False
-        identifier = decode_j1939_identifier(message.arbitration_id)
-        return identifier.pdu_format not in (0xDA, 0xDB, 0xEB, 0xEC)
+        return bool(
+            message.transport is TransportKind.RAW
+            and message.is_extended_id
+            and message.arbitration_id is not None
+            and message.metadata.get("confirmed_j1939") is True
+        )
 
     def decode(self, message: TransportMessage) -> DecodedMessage:
         assert message.arbitration_id is not None
@@ -342,11 +340,6 @@ class J1939RawDecoder:
                 "pgn_name": pgn_name,
                 "source_address": identifier.source_address,
                 "destination_address": identifier.destination_address,
-                "direction": (
-                    "broadcast"
-                    if identifier.destination_address in (None, 0xFF)
-                    else "peer-to-peer"
-                ),
                 "payload_length": len(message.payload),
                 "complete": message.complete,
             }
@@ -356,7 +349,7 @@ class J1939RawDecoder:
             protocol=ProtocolKind.J1939,
             name=f"J1939 {pgn_name}",
             fields=fields,
-            confidence=0.9,
+            confidence=1.0,
         )
 
 
