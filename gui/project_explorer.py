@@ -6,7 +6,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QTreeView,
     QVBoxLayout,
@@ -27,6 +29,7 @@ class ProjectExplorer(QWidget):
     open_session = Signal(str)
     open_area = Signal(str)
     open_decoders = Signal()
+    open_filters = Signal()
     import_requested = Signal()
     add_area_requested = Signal()
 
@@ -35,28 +38,57 @@ class ProjectExplorer(QWidget):
         self._project: CrtProject | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
-        root.setSpacing(4)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        toolbar = QHBoxLayout()
-        self.add_area_button = QPushButton("+ Obszar")
+        header = QFrame(self)
+        header.setObjectName("projectExplorerHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(8, 7, 8, 6)
+        header_layout.setSpacing(2)
+
+        self.project_name = QLabel("Brak projektu", header)
+        self.project_name.setObjectName("projectExplorerName")
+        header_layout.addWidget(self.project_name)
+
+        self.project_path = QLabel("", header)
+        self.project_path.setObjectName("secondaryText")
+        self.project_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.project_path.setToolTip("")
+        header_layout.addWidget(self.project_path)
+        root.addWidget(header)
+
+        toolbar_widget = QWidget(self)
+        toolbar = QHBoxLayout(toolbar_widget)
+        toolbar.setContentsMargins(5, 5, 5, 5)
+        toolbar.setSpacing(4)
+
+        self.add_area_button = QPushButton("+ Obszar", toolbar_widget)
+        self.add_area_button.setObjectName("addStudyAreaButton")
         self.add_area_button.setToolTip("Dodaj obszar badań, np. EGR lub VGT")
         self.add_area_button.clicked.connect(self.add_area_requested)
         toolbar.addWidget(self.add_area_button)
 
-        self.import_button = QPushButton("Importuj log")
+        self.import_button = QPushButton("Importuj", toolbar_widget)
+        self.import_button.setObjectName("importProjectLogButton")
+        self.import_button.setToolTip("Importuj zapisany log CRT lub Kvaser CSV")
         self.import_button.clicked.connect(self.import_requested)
         toolbar.addWidget(self.import_button)
-        root.addLayout(toolbar)
+        toolbar.addStretch(1)
+        root.addWidget(toolbar_widget)
 
         self.model = QStandardItemModel(self)
-        self.model.setHorizontalHeaderLabels(["EXPLORER CRT"])
-        self.tree = QTreeView()
+        self.model.setHorizontalHeaderLabels(["Projekt"])
+        self.tree = QTreeView(self)
+        self.tree.setObjectName("projectTree")
         self.tree.setModel(self.model)
-        self.tree.setHeaderHidden(False)
-        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tree.setHeaderHidden(True)
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(14)
+        self.tree.setAnimated(False)
         self.tree.doubleClicked.connect(self._activate_index)
         root.addWidget(self.tree, 1)
 
@@ -65,15 +97,26 @@ class ProjectExplorer(QWidget):
     def set_project(self, project: CrtProject | None) -> None:
         self._project = project
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["EXPLORER CRT"])
+        self.model.setHorizontalHeaderLabels(["Projekt"])
+
         enabled = project is not None
         self.add_area_button.setEnabled(enabled)
         self.import_button.setEnabled(enabled)
+
         if project is None:
-            item = QStandardItem("Brak otwartego projektu")
+            self.project_name.setText("Brak projektu")
+            self.project_path.clear()
+            self.project_path.setToolTip("")
+            item = QStandardItem("Otwórz lub utwórz projekt CRT")
             item.setEnabled(False)
             self.model.appendRow(item)
             return
+
+        self.project_name.setText(project.manifest.name)
+        path_text = str(project.root)
+        self.project_path.setText(path_text)
+        self.project_path.setToolTip(path_text)
+
         self._build_tree(project)
         self.tree.expandToDepth(1)
 
@@ -82,34 +125,14 @@ class ProjectExplorer(QWidget):
 
     def _build_tree(self, project: CrtProject) -> None:
         root = self._item(project.manifest.name, "project", str(project.root))
+        font = root.font()
+        font.setBold(True)
+        root.setFont(font)
         root.setToolTip(str(project.root))
         self.model.appendRow(root)
 
         root.appendRow(self._item("Przegląd projektu", "overview", ""))
         root.appendRow(self._item("Live Capture", "live", ""))
-
-        areas_root = self._item("Obszary badań", "section", "areas")
-        for area in project.list_study_areas():
-            area_item = self._item(area.name, "area", area.id)
-            linked = project.area_session_ids(area.id)
-            if linked:
-                sessions_by_id = {
-                    session.id: session for session in project.list_sessions()
-                }
-                linked_root = self._item(
-                    "Powiązane sesje", "section", "area-sessions"
-                )
-                for session_id in sorted(linked):
-                    session = sessions_by_id.get(session_id)
-                    if session is not None:
-                        linked_root.appendRow(self._session_item(project, session))
-                area_item.appendRow(linked_root)
-            areas_root.appendRow(area_item)
-        root.appendRow(areas_root)
-
-        experiments = self._item("Eksperymenty", "section", "experiments")
-        experiments.appendRow(self._placeholder("Brak eksperymentów"))
-        root.appendRow(experiments)
 
         sessions_root = self._item("Sesje CAN", "section", "sessions")
         live_root = self._item("Live", "section", "sessions-live")
@@ -125,19 +148,31 @@ class ProjectExplorer(QWidget):
         sessions_root.appendRow(imported_root)
         root.appendRow(sessions_root)
 
-        root.appendRow(self._build_decoders(project))
+        areas_root = self._item("Obszary badań", "section", "areas")
+        sessions_by_id = {
+            session.id: session for session in project.list_sessions()
+        }
+        for area in project.list_study_areas():
+            area_item = self._item(area.name, "area", area.id)
+            linked = project.area_session_ids(area.id)
+            if linked:
+                linked_root = self._item(
+                    "Powiązane sesje",
+                    "section",
+                    "area-sessions",
+                )
+                for session_id in sorted(linked):
+                    session = sessions_by_id.get(session_id)
+                    if session is not None:
+                        linked_root.appendRow(self._session_item(project, session))
+                area_item.appendRow(linked_root)
+            areas_root.appendRow(area_item)
+        if areas_root.rowCount() == 0:
+            areas_root.appendRow(self._placeholder("Brak obszarów"))
+        root.appendRow(areas_root)
 
-        for name, key in (
-            ("Porównania", "comparisons"),
-            ("Sygnały", "signals"),
-            ("Hipotezy", "hypotheses"),
-            ("Notatki", "notes"),
-            ("Załączniki", "attachments"),
-            ("Raporty", "reports"),
-        ):
-            section = self._item(name, "section", key)
-            section.appendRow(self._placeholder("W przygotowaniu"))
-            root.appendRow(section)
+        root.appendRow(self._build_decoders(project))
+        root.appendRow(self._item("Filtry globalne", "filters", ""))
 
     def _build_decoders(self, project: CrtProject) -> QStandardItem:
         records = list_project_dbc(project)
@@ -179,7 +214,8 @@ class ProjectExplorer(QWidget):
         item.setToolTip(
             f"{session.relative_path}\nRamki: {session.frame_count:,}\n"
             f"Znaczniki: {session.marker_count:,}\nStatus: {session.status}".replace(
-                ",", " "
+                ",",
+                " ",
             )
         )
         return item
@@ -213,3 +249,5 @@ class ProjectExplorer(QWidget):
             self.open_area.emit(str(value))
         elif node_type in {"decoders", "dbc"}:
             self.open_decoders.emit()
+        elif node_type == "filters":
+            self.open_filters.emit()
