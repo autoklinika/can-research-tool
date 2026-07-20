@@ -32,6 +32,9 @@ class LogicalMessageTableModel(QAbstractTableModel):
             raise ValueError("capacity must be greater than zero")
         self._capacity = capacity
         self._messages: list[LogicalMessageRecord] = []
+        self._protocol_counts: dict[str, int] = {}
+        self._transport_counts: dict[str, int] = {}
+        self._incomplete_count = 0
 
     @property
     def message_count(self) -> int:
@@ -106,12 +109,16 @@ class LogicalMessageTableModel(QAbstractTableModel):
             return
         self.beginResetModel()
         self._messages.clear()
+        self._protocol_counts.clear()
+        self._transport_counts.clear()
+        self._incomplete_count = 0
         self.endResetModel()
 
     def replace_messages(self, messages: Iterable[LogicalMessageRecord]) -> None:
         retained = list(messages)[-self._capacity :]
         self.beginResetModel()
         self._messages = retained
+        self._rebuild_summary()
         self.endResetModel()
 
     def append_messages(self, messages: Iterable[LogicalMessageRecord]) -> None:
@@ -124,14 +131,21 @@ class LogicalMessageTableModel(QAbstractTableModel):
 
         overflow = max(0, len(self._messages) + len(incoming) - self._capacity)
         if overflow:
-            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
-            del self._messages[:overflow]
+            trim_chunk = max(1, self._capacity // 10)
+            remove_count = min(len(self._messages), max(overflow, trim_chunk))
+            removed = self._messages[:remove_count]
+            self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+            del self._messages[:remove_count]
+            for message in removed:
+                self._remove_from_summary(message)
             self.endRemoveRows()
 
         first_row = len(self._messages)
         last_row = first_row + len(incoming) - 1
         self.beginInsertRows(QModelIndex(), first_row, last_row)
         self._messages.extend(incoming)
+        for message in incoming:
+            self._add_to_summary(message)
         self.endInsertRows()
 
     def message_at(self, row: int) -> LogicalMessageRecord | None:
@@ -140,11 +154,50 @@ class LogicalMessageTableModel(QAbstractTableModel):
         return None
 
     def protocol_counts(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
+        return dict(self._protocol_counts)
+
+    def transport_counts(self) -> dict[str, int]:
+        return dict(self._transport_counts)
+
+    @property
+    def incomplete_count(self) -> int:
+        return self._incomplete_count
+
+    def summary_counts(self) -> tuple[dict[str, int], dict[str, int], int]:
+        return (
+            dict(self._protocol_counts),
+            dict(self._transport_counts),
+            self._incomplete_count,
+        )
+
+    def _rebuild_summary(self) -> None:
+        self._protocol_counts.clear()
+        self._transport_counts.clear()
+        self._incomplete_count = 0
         for message in self._messages:
-            key = message.protocol.upper()
-            counts[key] = counts.get(key, 0) + 1
-        return counts
+            self._add_to_summary(message)
+
+    def _add_to_summary(self, message: LogicalMessageRecord) -> None:
+        protocol = str(message.protocol).upper()
+        transport = str(message.transport).upper()
+        self._protocol_counts[protocol] = self._protocol_counts.get(protocol, 0) + 1
+        self._transport_counts[transport] = self._transport_counts.get(transport, 0) + 1
+        if not message.complete:
+            self._incomplete_count += 1
+
+    def _remove_from_summary(self, message: LogicalMessageRecord) -> None:
+        _decrement_count(self._protocol_counts, str(message.protocol).upper())
+        _decrement_count(self._transport_counts, str(message.transport).upper())
+        if not message.complete:
+            self._incomplete_count = max(0, self._incomplete_count - 1)
+
+
+def _decrement_count(counts: dict[str, int], key: str) -> None:
+    remaining = counts.get(key, 0) - 1
+    if remaining > 0:
+        counts[key] = remaining
+    else:
+        counts.pop(key, None)
 
 
 def _service_or_pgn_text(message: LogicalMessageRecord) -> str:

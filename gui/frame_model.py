@@ -114,8 +114,14 @@ class FrameTableModel(QAbstractTableModel):
 
         overflow = max(0, len(self._frames) + len(incoming) - self._capacity)
         if overflow:
-            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
-            del self._frames[:overflow]
+            # Removing exactly the overflow on every GUI refresh turns the list
+            # into a permanent O(capacity) front-shift once the buffer is full.
+            # Drop a chunk instead, so expensive front removals happen only
+            # occasionally while the model remains strictly bounded.
+            trim_chunk = max(1, self._capacity // 10)
+            remove_count = min(len(self._frames), max(overflow, trim_chunk))
+            self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+            del self._frames[:remove_count]
             self.endRemoveRows()
 
         first_row = len(self._frames)
