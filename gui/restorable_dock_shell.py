@@ -1,32 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QDockWidget, QTableView
+from PySide6.QtWidgets import QDockWidget
 
 from .engineering_shell import EngineeringShellMainWindow
-
-
-class _LogicalMessageTooltipSuppressor(QObject):
-    """Keep logical-message details in the Inspector instead of native tooltips."""
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() != QEvent.Type.ToolTip:
-            return False
-
-        table = watched.parent()
-        if not isinstance(table, QTableView):
-            return False
-
-        model = table.model()
-        visited: set[int] = set()
-        while model is not None and id(model) not in visited:
-            visited.add(id(model))
-            if "LogicalMessage" in type(model).__name__:
-                return True
-            source_model = getattr(model, "sourceModel", None)
-            model = source_model() if callable(source_model) else None
-        return False
 
 
 class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
@@ -45,10 +23,6 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
     def __init__(self, services) -> None:
         super().__init__(services)
         self._remove_activity_bar()
-        self._table_tooltip_suppressor = _LogicalMessageTooltipSuppressor(self)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self._table_tooltip_suppressor)
 
     def _build_docks(self) -> None:
         super()._build_docks()
