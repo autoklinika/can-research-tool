@@ -38,10 +38,7 @@ jobs:
               throw "Machine Python not found: $env:CRT_CI_BOOTSTRAP_PYTHON"
           }
 
-          $venvPath = Join-Path $env:RUNNER_TEMP 'crt-ci-venv'
-          if (Test-Path $venvPath) {
-              Remove-Item -Recurse -Force $venvPath
-          }
+          $venvPath = Join-Path $env:RUNNER_TEMP "crt-ci-venv-$env:GITHUB_RUN_ID"
 
           & $env:CRT_CI_BOOTSTRAP_PYTHON --version
           & $env:CRT_CI_BOOTSTRAP_PYTHON -m venv $venvPath
