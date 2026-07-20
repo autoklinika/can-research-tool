@@ -51,7 +51,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .static_filter_manager_window import StaticFilterWindowMainWindow as MainWindow
+        from .engineering_shell import EngineeringShellMainWindow as MainWindow
 
         return MainWindow(self)
 
