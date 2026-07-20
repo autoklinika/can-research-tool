@@ -9,7 +9,6 @@ from app.enhanced_stored_session_controller import (
     EnhancedStoredSessionController as StoredSessionController,
 )
 from app.live_capture_controller import LiveCaptureController
-from app.live_performance import maybe_instrument_live_controller
 from app.project import CrtProject
 from infrastructure.desktop import reveal_path
 
@@ -76,10 +75,6 @@ class ApplicationContainer:
 
     def create_live_capture_view(self, project: CrtProject) -> BoundedLiveCaptureWidget:
         controller = self._live_controller_factory()
-        controller = maybe_instrument_live_controller(
-            controller,
-            report_dir=project.root / "reports",
-        )
         return BoundedLiveCaptureWidget(
             project,
             controller=controller,
