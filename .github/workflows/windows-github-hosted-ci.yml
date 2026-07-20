@@ -1,0 +1,98 @@
+name: Windows GitHub-Hosted CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-github-hosted-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-validation:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,kvaser,gui]"
+          python -c "import PySide6, pytest, canlib, cantools; print('Dependencies: OK')"
+
+      - name: Compile Python sources
+        shell: pwsh
+        run: python -m compileall -q app kvaser gui
+
+      - name: Unit tests
+        shell: pwsh
+        run: python -m pytest -q
+
+      - name: Application startup smoke
+        shell: pwsh
+        run: python .\tests_gui\application_startup_smoke.py
+
+      - name: Engineering shell smoke
+        shell: pwsh
+        run: python .\tests_gui\engineering_shell_smoke.py
+
+      - name: Static filter editor smoke
+        shell: pwsh
+        run: python .\tests_gui\static_filter_editor_smoke.py
+
+      - name: Filter manager window smoke
+        shell: pwsh
+        run: python .\tests_gui\filter_manager_window_smoke.py
+
+      - name: Static filter Live and stored smoke
+        shell: pwsh
+        run: python .\tests_gui\static_filter_live_stored_smoke.py
+
+      - name: Live filter worker smoke
+        shell: pwsh
+        run: python .\tests_gui\live_filter_worker_smoke.py
+
+      - name: Live buffer performance smoke
+        shell: pwsh
+        run: python .\tests_gui\live_buffer_performance_smoke.py
+
+      - name: DBC activation smoke
+        shell: pwsh
+        run: python .\tests_gui\dbc_activation_smoke.py
+
+      - name: Session tree smoke
+        shell: pwsh
+        run: python .\tests_gui\session_management_smoke.py tree
+
+      - name: Live session actions smoke
+        shell: pwsh
+        run: python .\tests_gui\session_management_smoke.py live
+
+      - name: Imported session actions smoke
+        shell: pwsh
+        run: python .\tests_gui\session_management_smoke.py imported
+
+      - name: Table hover smoke
+        shell: pwsh
+        run: python .\tests_gui\table_hover_smoke.py
+
+      - name: Protocol filter GUI smoke
+        shell: pwsh
+        run: python .\tests_gui\protocol_filter_gui_smoke.py
