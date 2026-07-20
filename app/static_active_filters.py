@@ -13,7 +13,6 @@ from .filters import (
     FilterMode,
     FilterOperator,
     FilterPreset,
-    FilterScalar,
     LogicalOperator,
     MatchState,
     ProtocolFilterField,
@@ -59,11 +58,10 @@ class _CompiledPreset:
 
 
 class StaticCombinedActiveFilterSet:
-    """Hot-path filter set shared by Live and stored-session raw frames.
+    """Compiled project filters shared by Live and stored-session views.
 
-    Presets and patterns are validated and compiled once when the active set is
-    created. Frame evaluation never reparses CAN-ID masks or payload patterns.
-    Legacy v1 and protocol conditions keep their previous semantics.
+    Static patterns are parsed once when the set is created. Raw frames use a direct
+    field resolver without allocating a dictionary context on the high-volume path.
     """
 
     def __init__(
@@ -96,13 +94,13 @@ class StaticCombinedActiveFilterSet:
                         validation_error=issues[0].message,
                     )
                 )
-                continue
-            compiled.append(
-                _CompiledPreset(
-                    preset=preset,
-                    root=_compile_node(preset.root, self._legacy_compiler),
+            else:
+                compiled.append(
+                    _CompiledPreset(
+                        preset=preset,
+                        root=_compile_node(preset.root, self._legacy_compiler),
+                    )
                 )
-            )
         self._compiled_presets = tuple(compiled)
         self.validation_issues = tuple(validation_issues)
 
@@ -155,13 +153,13 @@ class StaticCombinedActiveFilterSet:
         self,
         record: StaticCanFrameRecord | CanFrameRecord | StaticFilterContext | FilterContext,
     ) -> LiveFilterDecision:
+        if isinstance(record, StaticCanFrameRecord):
+            return self._decide_compiled(raw=record)
+        if isinstance(record, CanFrameRecord):
+            return self._decide_compiled(raw=StaticCanFrameRecord.from_legacy(record))
         if isinstance(record, StaticFilterContext):
-            context = record
-        elif isinstance(record, FilterContext):
-            context = StaticFilterContext(legacy=record)
-        else:
-            context = StaticFilterContext.from_frame(record)
-        return self._decide_compiled(context)
+            return self._decide_compiled(context=record)
+        return self._decide_compiled(context=StaticFilterContext(legacy=record))
 
     def decide_logical_message(
         self,
@@ -170,7 +168,7 @@ class StaticCombinedActiveFilterSet:
         relative_time_us: int | None = None,
     ) -> LiveFilterDecision:
         return self._decide_compiled(
-            StaticFilterContext(
+            context=StaticFilterContext(
                 legacy=FilterContext.from_logical_message(
                     record,
                     relative_time_us=relative_time_us,
@@ -179,9 +177,14 @@ class StaticCombinedActiveFilterSet:
         )
 
     def decide_context(self, context: FilterContext) -> LiveFilterDecision:
-        return self._decide_compiled(StaticFilterContext(legacy=context))
+        return self._decide_compiled(context=StaticFilterContext(legacy=context))
 
-    def _decide_compiled(self, context: StaticFilterContext) -> LiveFilterDecision:
+    def _decide_compiled(
+        self,
+        *,
+        raw: StaticCanFrameRecord | None = None,
+        context: StaticFilterContext | None = None,
+    ) -> LiveFilterDecision:
         if not self._compiled_presets:
             return LiveFilterDecision(True)
 
@@ -199,7 +202,11 @@ class StaticCombinedActiveFilterSet:
                 )
                 continue
 
-            state = _evaluate_node(compiled.root, context, self._legacy_compiler)
+            state = (
+                _evaluate_raw(compiled.root, raw)
+                if raw is not None
+                else _evaluate_context(compiled.root, context, self._legacy_compiler)
+            )
             if state is MatchState.UNAVAILABLE:
                 unavailable.append(
                     f"{preset.name}: warunek niedostępny w tym kontekście"
@@ -313,16 +320,52 @@ def _compile_node(node: Mapping[str, Any], compiler: FilterCompiler) -> _Compile
     )
 
 
-def _evaluate_node(
+def _evaluate_raw(node: _CompiledNode, record: StaticCanFrameRecord | None) -> MatchState:
+    if record is None:
+        return MatchState.UNAVAILABLE
+    if isinstance(node, _CompiledCondition):
+        available, actual = _resolve_raw(node.field_name, record)
+        if not available:
+            return MatchState.UNAVAILABLE
+        try:
+            return (
+                MatchState.MATCH
+                if _condition_matches(node, actual, None)
+                else MatchState.NO_MATCH
+            )
+        except (TypeError, ValueError):
+            return MatchState.UNAVAILABLE
+    return _evaluate_group(node, lambda child: _evaluate_raw(child, record))
+
+
+def _evaluate_context(
     node: _CompiledNode,
-    context: StaticFilterContext,
+    context: StaticFilterContext | None,
     compiler: FilterCompiler,
 ) -> MatchState:
+    if context is None:
+        return MatchState.UNAVAILABLE
     if isinstance(node, _CompiledCondition):
-        return _evaluate_condition(node, context, compiler)
+        available, actual = context.resolve(node.field_name)
+        if not available:
+            return MatchState.UNAVAILABLE
+        try:
+            return (
+                MatchState.MATCH
+                if _condition_matches(node, actual, compiler)
+                else MatchState.NO_MATCH
+            )
+        except (TypeError, ValueError):
+            return MatchState.UNAVAILABLE
+    return _evaluate_group(
+        node,
+        lambda child: _evaluate_context(child, context, compiler),
+    )
 
+
+def _evaluate_group(node: _CompiledGroup, evaluate_child) -> MatchState:
     if node.operator is LogicalOperator.NOT:
-        child = _evaluate_node(node.children[0], context, compiler)
+        child = evaluate_child(node.children[0])
         if child is MatchState.UNAVAILABLE:
             return child
         return MatchState.NO_MATCH if child is MatchState.MATCH else MatchState.MATCH
@@ -330,50 +373,68 @@ def _evaluate_node(
     unavailable = False
     if node.operator is LogicalOperator.AND:
         for child in node.children:
-            state = _evaluate_node(child, context, compiler)
+            state = evaluate_child(child)
             if state is MatchState.NO_MATCH:
                 return MatchState.NO_MATCH
             unavailable = unavailable or state is MatchState.UNAVAILABLE
         return MatchState.UNAVAILABLE if unavailable else MatchState.MATCH
 
     for child in node.children:
-        state = _evaluate_node(child, context, compiler)
+        state = evaluate_child(child)
         if state is MatchState.MATCH:
             return MatchState.MATCH
         unavailable = unavailable or state is MatchState.UNAVAILABLE
     return MatchState.UNAVAILABLE if unavailable else MatchState.NO_MATCH
 
 
-def _evaluate_condition(
+def _condition_matches(
     condition: _CompiledCondition,
-    context: StaticFilterContext,
-    compiler: FilterCompiler,
-) -> MatchState:
-    available, actual = context.resolve(condition.field_name)
-    if not available:
-        return MatchState.UNAVAILABLE
+    actual: Any,
+    compiler: FilterCompiler | None,
+) -> bool:
+    if condition.can_id_pattern is not None:
+        return condition.can_id_pattern.matches(int(actual))
+    if condition.payload_pattern is not None:
+        return condition.payload_pattern.matches(bytes(actual))
+    if condition.static_operator is not None:
+        normalized = (
+            _parse_int(actual)
+            if condition.field_name == StaticFilterField.CHANNEL.value
+            else _parse_bool(actual)
+        )
+        return _compare(normalized, condition.static_operator.value, condition)
 
-    try:
-        if condition.can_id_pattern is not None:
-            matched = condition.can_id_pattern.matches(int(actual))
-        elif condition.payload_pattern is not None:
-            matched = condition.payload_pattern.matches(bytes(actual))
-        elif condition.static_operator is not None:
-            normalized = (
-                _parse_int(actual)
-                if condition.field_name == StaticFilterField.CHANNEL.value
-                else _parse_bool(actual)
-            )
-            matched = _compare(normalized, condition.static_operator.value, condition)
-        else:
-            assert condition.legacy_field is not None
-            assert condition.legacy_operator is not None
-            normalized = compiler._normalize_value(condition.legacy_field, actual)
-            matched = _compare(normalized, condition.legacy_operator.value, condition)
-    except (TypeError, ValueError):
-        return MatchState.UNAVAILABLE
+    assert condition.legacy_field is not None
+    assert condition.legacy_operator is not None
+    normalized = (
+        compiler._normalize_value(condition.legacy_field, actual)
+        if compiler is not None
+        else actual
+    )
+    return _compare(normalized, condition.legacy_operator.value, condition)
 
-    return MatchState.MATCH if matched else MatchState.NO_MATCH
+
+def _resolve_raw(
+    field_name: str,
+    record: StaticCanFrameRecord,
+) -> tuple[bool, Any]:
+    if field_name == FilterField.CAN_ID.value:
+        return True, record.can_id
+    if field_name == FilterField.FRAME_FORMAT.value:
+        return True, "ext" if record.extended else "std"
+    if field_name == FilterField.DLC.value:
+        return True, record.dlc
+    if field_name == FilterField.RELATIVE_TIME_US.value:
+        return True, record.relative_time_us
+    if field_name == StaticFilterField.CHANNEL.value:
+        return True, record.channel
+    if field_name == StaticFilterField.RTR.value:
+        return True, record.rtr
+    if field_name == StaticFilterField.ERROR_FRAME.value:
+        return True, record.error_frame
+    if field_name == StaticFilterField.PAYLOAD.value:
+        return True, record.payload
+    return False, None
 
 
 def _compare(actual: Any, operator: str, condition: _CompiledCondition) -> bool:
