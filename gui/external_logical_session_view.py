@@ -15,17 +15,24 @@ from .session_view import SessionViewWidget
 
 
 class ExternalLogicalSessionViewWidget(SessionViewWidget):
-    """Stored-session view with isolated loading rendered inside the normal tab.
+    """Stored-session view with isolated full loading inside the normal tab.
 
-    The helper process performs CSV parsing and protocol decoding outside the main
-    GUI process. The user remains in the session tab: an indeterminate progress
-    bar is displayed while the worker runs, then the bounded result set is placed
-    in the existing logical-message table.
+    The helper process performs CSV parsing or raw-session reconstruction and
+    protocol decoding outside the main GUI process. The user remains in the
+    session tab: progress is displayed while the worker runs, then the complete
+    logical-message set is placed in the existing table.
     """
 
-    MAX_EMBEDDED_ROWS = 1_000
-
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        raw_frame_capacity: int | None = None,
+        **kwargs,
+    ) -> None:
+        if raw_frame_capacity is not None:
+            # SessionViewWidget reads this instance attribute while constructing
+            # the stored raw-frame model. Live capture models remain bounded.
+            self.MAX_ROWS = max(1, int(raw_frame_capacity))
         super().__init__(*args, **kwargs)
 
         self._logical_process: QProcess | None = None
@@ -43,7 +50,7 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             self._protocol_summary_label.hide()
 
         self.external_message_status = QLabel(
-            "Kliknij zakładkę, aby załadować wiadomości logiczne."
+            "Kliknij zakładkę, aby załadować wszystkie wiadomości logiczne."
         )
         self.external_message_status.setWordWrap(True)
 
@@ -87,7 +94,7 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
         self.external_message_progress.hide()
         self.external_message_button.hide()
         self.external_message_status.setText(
-            "Dekodery zostały zmienione. Wiadomości zostaną załadowane ponownie."
+            "Dekodery zostały zmienione. Wszystkie wiadomości zostaną załadowane ponownie."
         )
         self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne")
         if self.tabs.currentIndex() == self.message_tab_index:
@@ -98,22 +105,6 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             return
 
         message_path = logical_message_path_for_session(self.path)
-        if not message_path.is_file():
-            self._messages_ready = False
-            self._message_loading = False
-            self.message_table.hide()
-            self.external_message_progress.hide()
-            self.external_message_button.hide()
-            self.external_message_status.setText(
-                "Dla tej sesji nie istnieje jeszcze plik messages.csv. "
-                "Surowe ramki pozostają dostępne w pierwszej zakładce."
-            )
-            self.tabs.setTabText(
-                self.message_tab_index,
-                "Wiadomości logiczne — brak pliku",
-            )
-            return
-
         self._stop_logical_process()
         self._cleanup_result_file()
 
@@ -145,8 +136,6 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             str(self.path),
             "--output",
             str(self._logical_result_path),
-            "--max-rows",
-            str(self.MAX_EMBEDDED_ROWS),
         ]
         for dbc_path in self._dbc_paths:
             arguments.extend(("--dbc", str(dbc_path)))
@@ -158,11 +147,16 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
         if self._protocol_summary_label is not None:
             self._protocol_summary_label.hide()
         self.external_message_button.hide()
-        self.external_message_progress.setRange(0, 0)
-        self.external_message_progress.setFormat("Ładowanie…")
+        self.external_message_progress.setRange(0, 100)
+        self.external_message_progress.setValue(0)
+        self.external_message_progress.setFormat("Ładowanie — 0%")
         self.external_message_progress.show()
+        if message_path.is_file():
+            status_source = message_path.name
+        else:
+            status_source = f"{self.path.name} — rekonstrukcja z surowych ramek"
         self.external_message_status.setText(
-            f"Ładowanie wiadomości z {message_path.name}…"
+            f"Ładowanie wszystkich wiadomości z {status_source}…"
         )
         self.tabs.setTabText(
             self.message_tab_index,
@@ -187,6 +181,15 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
     def _handle_process_line(self, line: str) -> None:
         if line.startswith("STATUS\t"):
             self.external_message_status.setText(line.partition("\t")[2])
+        elif line.startswith("PROGRESS\t"):
+            value_text = line.partition("\t")[2].strip()
+            try:
+                value = max(0, min(100, int(value_text)))
+            except ValueError:
+                return
+            self.external_message_progress.setRange(0, 100)
+            self.external_message_progress.setValue(value)
+            self.external_message_progress.setFormat(f"Ładowanie — {value}%")
         elif line.startswith("RESULT\t"):
             result_text = line.partition("\t")[2].strip()
             if result_text:
@@ -236,6 +239,16 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             self._cleanup_result_file()
             return
 
+        if len(messages) != total_messages:
+            self._show_load_failure(
+                f"załadowano {len(messages)} z {total_messages} wiadomości"
+            )
+            self._cleanup_result_file()
+            return
+
+        # This model belongs to the stored-session view, not the bounded live
+        # preview. Expand its retained capacity to the exact completed result.
+        self.message_model._capacity = max(1, len(messages))
         self.message_model.replace_messages(messages)
         self.message_table.show()
         if self._protocol_summary_label is not None:
@@ -255,8 +268,8 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             source_text += " + DBC"
         self.external_message_status.setText(
             (
-                f"Sesja: {path} | pokazano {len(messages):,} ostatnich z "
-                f"{total_messages:,} wiadomości | źródło: {source_text}"
+                f"Sesja: {path} | załadowano wszystkie {total_messages:,} wiadomości "
+                f"| źródło: {source_text}"
             ).replace(",", " ")
         )
         self.tabs.setTabText(
@@ -264,7 +277,7 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             f"Wiadomości logiczne ({total_messages:,})".replace(",", " "),
         )
         self.output_message.emit(
-            f"Wiadomości logiczne {path}: {total_messages} ({source_text})"
+            f"Wiadomości logiczne {path}: załadowano wszystkie {total_messages} ({source_text})"
         )
         self._cleanup_result_file()
 
