@@ -60,6 +60,13 @@ def main() -> None:
 
         menu_names = [action.text() for action in window.menuBar().actions()]
         assert menu_names == ["Plik", "Widok", "Capture", "Analiza", "Narzędzia"]
+        view_menu = next(
+            action.menu()
+            for action in window.menuBar().actions()
+            if action.text().replace("&", "") == "Widok"
+        )
+        assert view_menu is not None
+        assert "Narzędzia główne" in [action.text() for action in view_menu.actions()]
 
         assert window.toggle_explorer_action.shortcut().toString() == "Ctrl+B"
         assert window.toggle_inspector_action.shortcut().toString() == "Ctrl+Shift+I"
@@ -71,6 +78,18 @@ def main() -> None:
             window.dockWidgetArea(window.output_dock)
             == Qt.DockWidgetArea.NoDockWidgetArea
         )
+
+        # Main tools are opt-in and the View action mirrors their real visibility.
+        assert window.primary_toolbar.isHidden()
+        assert not window.toggle_primary_toolbar_action.isChecked()
+        window.toggle_primary_toolbar_action.trigger()
+        app.processEvents()
+        assert not window.primary_toolbar.isHidden()
+        assert window.toggle_primary_toolbar_action.isChecked()
+        window.toggle_primary_toolbar_action.trigger()
+        app.processEvents()
+        assert window.primary_toolbar.isHidden()
+        assert not window.toggle_primary_toolbar_action.isChecked()
 
         # Inspector is opt-in: opening a project and resetting the workspace keep it hidden.
         assert window.inspector_dock.isHidden()
@@ -175,6 +194,9 @@ def main() -> None:
         assert window.explorer_dock.width() > 0
         assert normal_width > 0
 
+        window.toggle_primary_toolbar_action.trigger()
+        app.processEvents()
+        assert not window.primary_toolbar.isHidden()
         window._reset_workspace_layout()
         assert window.output_dock.isHidden()
         assert (
@@ -184,6 +206,8 @@ def main() -> None:
         assert not window.explorer_dock.isHidden()
         assert window.inspector_dock.isHidden()
         assert not window.toggle_inspector_action.isChecked()
+        assert window.primary_toolbar.isHidden()
+        assert not window.toggle_primary_toolbar_action.isChecked()
         assert window.activity_bar.isHidden()
 
         window._close_project_tabs()
@@ -200,6 +224,7 @@ def main() -> None:
         float_button = None
         collapse_button = None
         close_button = None
+        view_menu = None
         window = None
         project = None
         gc.collect()
