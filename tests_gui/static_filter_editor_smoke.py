@@ -3,6 +3,7 @@ from __future__ import annotations
 from gc import collect
 from tempfile import TemporaryDirectory
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferences
@@ -86,8 +87,18 @@ def main() -> None:
             == StaticFilterOperator.PAYLOAD_EXACT.value
         )
 
+        # Typing at the beginning must not rebuild the editor or move the cursor
+        # to the end of the value string.
         manager.condition_values.setText("62 F1 ??")
-        manager._condition_property_changed()
+        manager.condition_values.setCursorPosition(0)
+        manager.condition_values.setFocus()
+        QTest.keyClicks(manager.condition_values, "A0 ")
+        app.processEvents()
+        assert manager.condition_values.text() == "A0 62 F1 ??"
+        assert manager.condition_values.cursorPosition() == 3
+
+        manager.condition_values.setText("62 F1 ??")
+        manager._condition_values_edited("62 F1 ??")
         assert not manager.compiler.validate(manager._current_preset())
 
         manager.test_payload.setText("62 F1 90")
