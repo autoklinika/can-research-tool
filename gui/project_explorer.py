@@ -131,9 +131,6 @@ class ProjectExplorer(QWidget):
         root.setToolTip(str(project.root))
         self.model.appendRow(root)
 
-        root.appendRow(self._item("Przegląd projektu", "overview", ""))
-        root.appendRow(self._item("Live Capture", "live", ""))
-
         sessions_root = self._item("Sesje CAN", "section", "sessions")
         live_root = self._item("Live", "section", "sessions-live")
         imported_root = self._item("Importowane", "section", "sessions-imported")
