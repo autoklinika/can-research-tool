@@ -97,7 +97,6 @@ Dodano:
 - bezpieczne wartości domyślne dla nowych warunków,
 - opisy składni CAN ID i payloadu bez implementowania semantyki w GUI,
 - walidację aktywnych presetów przez `StaticFilterCompiler`,
-- czytelne podsumowania warunków statycznych w drzewie,
 - test ręcznie zdefiniowanej ramki z kanałem, RTR, error frame i payloadem,
 - jawne `UNAVAILABLE` przy próbie testowania warunku surowej ramki jako wiadomości logicznej,
 - walidację presetów v2 przy aktywacji globalnym skrótem,
