@@ -15,31 +15,21 @@ class _LogicalMessageTooltipSuppressor(QObject):
 
 
 class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
-    """Engineering shell with dock actions driven by actual dock visibility.
+    """Engineering shell with compact, restorable project and inspector docks."""
 
-    Qt can leave a checkable action out of sync after a dock is closed with its
-    title-bar close button, especially after restoring a saved workspace. The
-    actions below therefore toggle the dock's real hidden state instead of trusting
-    the action's incoming ``checked`` value.
-    """
-
-    # Revision 3 rejects workspace state saved by the crash-prone shell build.
-    WORKSPACE_STATE_VERSION = 3
+    # Revision 4 permanently removes the former bottom Output dock from layouts.
+    WORKSPACE_STATE_VERSION = 4
 
     def __init__(self, services) -> None:
         super().__init__(services)
         self._remove_activity_bar()
+        self._remove_output_panel()
         self._table_tooltip_suppressor = _LogicalMessageTooltipSuppressor(self)
         self.tabs.currentChanged.connect(self._schedule_tooltip_suppressor_scan)
         QTimer.singleShot(0, self._install_logical_message_tooltip_suppressors)
 
     def _set_capture_status(self, text: str) -> None:
-        """Update the indicator without manually unpolishing a Fusion widget.
-
-        Calling QStyle.unpolish()/polish() during construction can abort Qt on
-        native Windows builds. A small local stylesheet gives the same visual
-        result without rebuilding the widget's style internals.
-        """
+        """Update the indicator without rebuilding native Qt style internals."""
 
         normalized = (text or "STOPPED").strip()
         upper = normalized.upper()
@@ -76,11 +66,12 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         super()._build_docks()
         self._rewire_dock_toggle(self.toggle_explorer_action, self.explorer_dock)
         self._rewire_dock_toggle(self.toggle_inspector_action, self.inspector_dock)
-        self._rewire_dock_toggle(self.toggle_output_action, self.output_dock)
+        self._remove_output_panel()
 
     def _apply_default_layout(self) -> None:
         super()._apply_default_layout()
         self._remove_activity_bar()
+        self._remove_output_panel()
 
     def _remove_activity_bar(self) -> None:
         activity_bar = getattr(self, "activity_bar", None)
@@ -88,6 +79,28 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
             return
         self.removeToolBar(activity_bar)
         activity_bar.hide()
+
+    def _remove_output_panel(self) -> None:
+        """Keep the diagnostic sink alive but remove its visible dock and action."""
+
+        action = getattr(self, "toggle_output_action", None)
+        if action is not None:
+            try:
+                action.triggered.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            action.setShortcut("")
+            action.setChecked(False)
+            action.setEnabled(False)
+            action.setVisible(False)
+
+        dock = getattr(self, "output_dock", None)
+        if dock is None:
+            return
+        dock.hide()
+        self.removeDockWidget(dock)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setAllowedAreas(Qt.DockWidgetArea.NoDockWidgetArea)
 
     def _schedule_tooltip_suppressor_scan(self, *_args: object) -> None:
         QTimer.singleShot(0, self._install_logical_message_tooltip_suppressors)
