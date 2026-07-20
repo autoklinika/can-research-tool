@@ -36,6 +36,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/stored_logical_workspace_smoke.py
+      - name: Verify decoded UDS data presentation
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/uds_data_display_smoke.py
       - name: Verify Live session actions
         env:
           QT_QPA_PLATFORM: offscreen
