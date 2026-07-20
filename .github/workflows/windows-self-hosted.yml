@@ -76,7 +76,23 @@ jobs:
         run: '& $env:CRT_CI_PYTHON .\tests_gui\static_filter_editor_smoke.py'
 
       - name: Filter manager window smoke
-        run: '& $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py'
+        run: |
+          $logPath = Join-Path $env:RUNNER_TEMP 'filter-manager-window-smoke.log'
+          & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py *> $logPath
+          $exitCode = $LASTEXITCODE
+          Get-Content $logPath -Tail 120
+          if ($exitCode -ne 0) {
+              exit $exitCode
+          }
+
+      - name: Upload filter manager smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: filter-manager-window-smoke-log
+          path: ${{ runner.temp }}\filter-manager-window-smoke.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Static filter Live and stored smoke
         run: '& $env:CRT_CI_PYTHON .\tests_gui\static_filter_live_stored_smoke.py'
