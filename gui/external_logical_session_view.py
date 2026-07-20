@@ -67,7 +67,10 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
             layout.insertWidget(1, self.external_message_progress)
             layout.insertWidget(2, self.external_message_button)
 
-        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne")
+        self.tabs.setTabText(
+            self.message_tab_index,
+            "Wiadomości logiczne — kliknij, aby załadować wszystkie",
+        )
 
     def _session_tab_changed(self, index: int) -> None:
         if (
@@ -96,7 +99,10 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
         self.external_message_status.setText(
             "Dekodery zostały zmienione. Wszystkie wiadomości zostaną załadowane ponownie."
         )
-        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne")
+        self.tabs.setTabText(
+            self.message_tab_index,
+            "Wiadomości logiczne — kliknij, aby załadować wszystkie",
+        )
         if self.tabs.currentIndex() == self.message_tab_index:
             self._start_embedded_load()
 
@@ -140,6 +146,7 @@ class ExternalLogicalSessionViewWidget(SessionViewWidget):
         for dbc_path in self._dbc_paths:
             arguments.extend(("--dbc", str(dbc_path)))
 
+        self._message_load_generation += 1
         self._message_loading = True
         self._messages_ready = False
         self.message_model.clear()
