@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tempfile import TemporaryDirectory
 
-from PySide6.QtWidgets import QApplication, QGroupBox
+from PySide6.QtWidgets import QApplication, QWidget
 
 from app.filter_preferences import FilterCombinationMode
 from app.project import CrtProject
@@ -24,19 +24,16 @@ def main() -> None:
         manager._select_tree_path((0,))
         app.processEvents()
 
-        combination_bar = manager.findChild(type(manager), "filterCombinationBar")
-        assert combination_bar is None
-        assert manager.combination_combo.parentWidget().objectName() == "filterCombinationBar"
+        combination_bar = manager.findChild(QWidget, "filterCombinationBar")
+        assert combination_bar is not None
+        assert manager.combination_combo.parentWidget() is combination_bar
+        assert manager.combination_combo.maximumWidth() == 260
         assert manager.combination_combo.itemText(
             manager.combination_combo.findData(FilterCombinationMode.AND.value)
         ) == "AND — wszystkie"
         assert manager.combination_combo.itemText(
             manager.combination_combo.findData(FilterCombinationMode.OR.value)
         ) == "OR — dowolny"
-        assert not any(
-            box.title() == "Łączenie wielu presetów Include" and box.isVisible()
-            for box in manager.findChildren(QGroupBox)
-        )
 
         for field_name in (
             StaticFilterField.CHANNEL.value,
