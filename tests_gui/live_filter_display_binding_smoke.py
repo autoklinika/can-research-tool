@@ -3,19 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from app.combined_filters import CombinedActiveFilterSet
-from app.filter_preferences import FilterCombinationMode
-from app.filters import FilterMode, FilterPreset
+from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferences
+from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
 from app.logical_records import LogicalMessageRecord
 from app.models import CanFrame
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
-from gui.logical_filter_integration import (
-    LogicalFilterScanResult,
-    logical_message_key,
-)
 
 
 FILTER_IDS = (0x18DAF900, 0x18DA00F9)
@@ -28,7 +24,8 @@ class FakeLiveController:
 
     @property
     def is_active(self) -> bool:
-        return False
+        # Exercise the real StreamingLiveFilterIntegration path used while Capture runs.
+        return True
 
 
 def _preset(name: str, can_id: int) -> FilterPreset:
@@ -79,24 +76,46 @@ def _message(sequence: int, can_id: int) -> LogicalMessageRecord:
     )
 
 
+def _wait_until(predicate, *, timeout_ms: int = 2_000) -> bool:
+    elapsed = 0
+    while elapsed < timeout_ms:
+        QApplication.processEvents()
+        if predicate():
+            return True
+        QTest.qWait(20)
+        elapsed += 20
+    QApplication.processEvents()
+    return bool(predicate())
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
 
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(Path(temporary) / "project", name="Filter Binding")
+        ProjectFilterRepository(project.database_path).save_presets(
+            [_preset("F900", FILTER_IDS[0]), _preset("00F9", FILTER_IDS[1])]
+        )
+        ProjectFilterPreferences(project.database_path).set_combination_mode(
+            FilterCombinationMode.OR
+        )
+
         container = ApplicationContainer(live_controller_factory=FakeLiveController)
         view = container.create_live_capture_view(project)
         view.timer.stop()
         integration = view._live_filter_integration
 
-        filter_set = CombinedActiveFilterSet(
-            [_preset("F900", FILTER_IDS[0]), _preset("00F9", FILTER_IDS[1])],
-            scope="live",
-            combination_mode=FilterCombinationMode.OR,
-        )
-        integration.proxy.filter_set = filter_set
-        integration.proxy._signature = filter_set.signature
-        integration.message_proxy.set_filter_set(filter_set)
+        assert integration.proxy.filter_set.active_names == ("00F9", "F900")
+        assert integration.proxy.filter_set.combination_mode is FilterCombinationMode.OR
+        assert integration.proxy.filter_set.affects_raw_visibility is True
+
+        # Reproduce the user action during an active Capture.
+        view.apply_live_filters.setChecked(True)
+        assert integration._streaming_filter_view is True
+        assert integration.proxy.filter_enabled is True
+        assert integration.message_proxy.filter_enabled is True
+        assert view.frame_table.model() is integration.proxy
+        assert view.message_table.model() is integration.message_proxy
 
         frames = (
             _frame(0, FILTER_IDS[0]),
@@ -108,37 +127,25 @@ def main() -> None:
             _message(1, OTHER_ID),
             _message(2, FILTER_IDS[1]),
         )
+
+        # Feed new records through the same source-model signals and Qt worker/timer
+        # path used by LiveCaptureWidget._refresh_view().
         view.frame_model.append_frames(frames)
         view.message_model.append_messages(messages)
 
-        integration.proxy.set_filter_enabled(True)
-        integration.proxy.apply_background_result((frames[0], frames[2]), 2)
-
-        integration.message_proxy.set_filter_enabled(True)
-        accepted_keys = frozenset(
-            logical_message_key(message)
-            for message in (messages[0], messages[2])
-        )
-        integration.message_proxy.apply_background_result(
-            LogicalFilterScanResult(
-                accepted_keys=accepted_keys,
-                evaluated_keys=frozenset(logical_message_key(message) for message in messages),
+        assert _wait_until(
+            lambda: (
+                integration.proxy.rowCount() == 2
+                and integration.message_proxy.rowCount() == 2
+                and not integration._pending_frames
+                and integration._incremental_running_generation is None
             )
         )
-
-        # Reproduce the reported inconsistency: counters use filtered proxies while
-        # QTableViews have drifted back to their unfiltered source models.
-        view.frame_table.setModel(view.frame_model)
-        view.message_table.setModel(view.message_model)
-        assert view.frame_table.model() is view.frame_model
-        assert view.message_table.model() is view.message_model
 
         integration.update_status(total_received=3, logical_total=3)
 
         assert view.frame_table.model() is integration.proxy
         assert view.message_table.model() is integration.message_proxy
-        assert integration.proxy.rowCount() == 2
-        assert integration.message_proxy.rowCount() == 2
         assert {
             integration.proxy.frame_at(row).arbitration_id
             for row in range(integration.proxy.rowCount())
