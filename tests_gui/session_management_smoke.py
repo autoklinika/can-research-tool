@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import tempfile
 from pathlib import Path
@@ -132,6 +133,12 @@ def _run_phase(phase: str) -> None:
             raise ValueError(f"unknown phase: {phase}")
 
         window.close()
+        window.deleteLater()
+        app.processEvents()
+        del window
+        del project
+        gc.collect()
+        app.processEvents()
 
 
 def main() -> int:
