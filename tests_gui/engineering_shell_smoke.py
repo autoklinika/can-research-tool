@@ -67,8 +67,13 @@ def main() -> None:
         )
         assert view_menu is not None
         assert "Narzędzia główne" in [action.text() for action in view_menu.actions()]
+        assert window.toggle_explorer_action in view_menu.actions()
 
-        assert window.toggle_explorer_action.shortcut().toString() == "Ctrl+B"
+        assert (
+            window.toggle_explorer_action.shortcut().toString()
+            == "Ctrl+Shift+B"
+        )
+        assert "Ctrl+Shift+B" in window.toggle_explorer_action.toolTip()
         assert window.toggle_inspector_action.shortcut().toString() == "Ctrl+Shift+I"
         assert window.toggle_output_action.shortcut().toString() == ""
         assert window.toggle_output_action.isVisible() is False
@@ -173,7 +178,7 @@ def main() -> None:
         app.processEvents()
         assert not window.inspector_dock.isHidden()
 
-        # The arrow hides Project immediately; Ctrl+B restores the unchanged dock.
+        # The arrow hides Project immediately; Ctrl+Shift+B restores the unchanged dock.
         normal_width = window.explorer_dock.width()
         normal_minimum_width = window.explorer_dock.minimumWidth()
         normal_maximum_width = window.explorer_dock.maximumWidth()
