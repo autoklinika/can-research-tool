@@ -176,6 +176,10 @@ class SessionViewWidget(QWidget):
             self,
             self._stored_session_controller,
         )
+        self.tabs.setTabText(
+            self.message_tab_index,
+            "Wiadomości logiczne — kliknij, aby załadować",
+        )
         self.tabs.currentChanged.connect(self._session_tab_changed)
         self.tabs.tabBarClicked.connect(self._session_tab_changed)
         protocol_summary_attacher(self.message_table, self.message_model)
