@@ -94,6 +94,8 @@ class SessionViewWidget(QWidget):
         self._stored_rendered_generation = 0
         self._message_load_tasks: list[LogicalMessageLoadTask] = []
         self._message_load_generation = 0
+        self._message_loading = False
+        self._messages_ready = False
         self.frame_model = FrameTableModel(capacity=self.MAX_ROWS, parent=self)
         self.message_model = LogicalMessageTableModel(
             capacity=self.MAX_MESSAGES,
@@ -151,7 +153,7 @@ class SessionViewWidget(QWidget):
         message_layout.addWidget(self.message_table)
         self.message_tab_index = self.tabs.addTab(
             message_page,
-            "Wiadomości logiczne — ładowanie…",
+            "Wiadomości logiczne — kliknij, aby załadować",
         )
 
         markers = list(iter_markers(marker_path_for_session(self.path)))
@@ -174,16 +176,32 @@ class SessionViewWidget(QWidget):
             self,
             self._stored_session_controller,
         )
-        self._start_message_load()
+        self.tabs.currentChanged.connect(self._session_tab_changed)
+        self.tabs.tabBarClicked.connect(self._session_tab_changed)
         protocol_summary_attacher(self.message_table, self.message_model)
 
     def reload_logical_messages(self, dbc_paths: tuple[Path, ...]) -> None:
         self._dbc_paths = tuple(Path(item) for item in dbc_paths)
+        self._message_load_generation += 1
+        self._message_loading = False
+        self._messages_ready = False
         self.message_model.clear()
-        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — ładowanie…")
-        self._start_message_load()
+        self.tabs.setTabText(
+            self.message_tab_index,
+            "Wiadomości logiczne — kliknij, aby załadować",
+        )
+        if self.tabs.currentIndex() == self.message_tab_index:
+            self._start_message_load()
+
+    def _session_tab_changed(self, index: int) -> None:
+        if index == self.message_tab_index:
+            self._start_message_load()
 
     def _start_message_load(self) -> None:
+        if self._message_loading or self._messages_ready:
+            return
+        self._message_loading = True
+        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — ładowanie…")
         self._message_load_generation += 1
         generation = self._message_load_generation
         task = LogicalMessageLoadTask(
@@ -266,6 +284,8 @@ class SessionViewWidget(QWidget):
         if generation != self._message_load_generation:
             self._discard_finished_message_tasks()
             return
+        self._message_loading = False
+        self._messages_ready = True
         loaded = list(messages)
         self.message_model.replace_messages(loaded)
         self.tabs.setTabText(
@@ -289,7 +309,12 @@ class SessionViewWidget(QWidget):
         if generation != self._message_load_generation:
             self._discard_finished_message_tasks()
             return
-        self.tabs.setTabText(self.message_tab_index, "Wiadomości logiczne — błąd")
+        self._message_loading = False
+        self._messages_ready = False
+        self.tabs.setTabText(
+            self.message_tab_index,
+            "Wiadomości logiczne — błąd, kliknij aby ponowić",
+        )
         self.output_message.emit(
             f"Błąd odczytu wiadomości logicznych {path}: {error}"
         )
@@ -356,6 +381,8 @@ class SessionViewWidget(QWidget):
         )
 
     def shutdown(self) -> None:
+        self._message_load_generation += 1
+        self._message_loading = False
         self._stored_session_integration.shutdown()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
