@@ -20,6 +20,9 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
     env:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -31,7 +34,6 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Verify runner environment
-        shell: powershell
         run: |
           if (-not (Test-Path $env:CRT_CI_PYTHON)) {
               throw "CRT Python not found: $env:CRT_CI_PYTHON"
@@ -44,21 +46,17 @@ jobs:
           Write-Host "Python: $env:CRT_CI_PYTHON"
 
       - name: Compile Python sources
-        shell: powershell
         run: '& $env:CRT_CI_PYTHON -m compileall -q app kvaser gui'
 
       - name: Unit tests
-        shell: powershell
         run: '& $env:CRT_CI_PYTHON -m pytest -q'
 
       - name: GUI startup and shell smoke tests
-        shell: powershell
         run: |
           & $env:CRT_CI_PYTHON .\tests_gui\application_startup_smoke.py
           & $env:CRT_CI_PYTHON .\tests_gui\engineering_shell_smoke.py
 
       - name: Core GUI regression smoke tests
-        shell: powershell
         run: |
           & $env:CRT_CI_PYTHON .\tests_gui\static_filter_editor_smoke.py
           & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py
