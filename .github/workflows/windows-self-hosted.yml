@@ -24,7 +24,7 @@ jobs:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QT_QPA_PLATFORM: offscreen
-      CRT_CI_PYTHON: "C:\CAN\can-research-tool\.venv\Scripts\python.exe"
+      CRT_CI_PYTHON: 'C:\CAN\can-research-tool\.venv\Scripts\python.exe'
 
     steps:
       - name: Checkout
