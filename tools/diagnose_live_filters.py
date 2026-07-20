@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.combined_filters import CombinedActiveFilterSet
 from app.filter_preferences import ProjectFilterPreferences
@@ -16,7 +21,7 @@ DEFAULT_IDS = (0x18DAF900, 0x18DA00F9, 0x18FEEE30)
 
 def _parse_can_id(value: str) -> int:
     text = value.strip().lower().replace("_", "")
-    return int(text, 16) if text.startswith("0x") else int(text, 16)
+    return int(text, 16)
 
 
 def _git_head() -> str:
@@ -26,6 +31,7 @@ def _git_head() -> str:
             check=True,
             capture_output=True,
             text=True,
+            cwd=ROOT,
         )
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
