@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 class ApplicationContainer:
     """Composition root for GUI services, controllers and view factories."""
 
+    STORED_SESSION_PAGE_ROWS = 2_000
+
     def __init__(
         self,
         *,
@@ -92,7 +94,7 @@ class ApplicationContainer:
         session_path = Path(path)
         controller = self._stored_controller_factory(
             session_path,
-            page_size=SessionViewWidget.MAX_ROWS,
+            page_size=self.STORED_SESSION_PAGE_ROWS,
         )
         return SessionViewWidget(
             session_path,
