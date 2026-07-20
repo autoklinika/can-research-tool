@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -11,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.filter_preferences import FilterCombinationMode
+from app.filter_tree import node_at, summarize_node
 from app.filters import FilterMode
 
 from .enhanced_filter_manager import EnhancedFilterManagerWidget
@@ -26,6 +29,7 @@ class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
 
     def _build_ui(self) -> None:
         super()._build_ui()
+        self._install_cursor_safe_value_editor()
 
         root = self.layout()
         if root is None:
@@ -71,6 +75,60 @@ class CompactFilterManagerWidget(EnhancedFilterManagerWidget):
 
         root.insertWidget(1, bar)
         self._install_transaction_controls()
+
+    def _install_cursor_safe_value_editor(self) -> None:
+        """Keep text editing local instead of rebuilding the properties form."""
+
+        try:
+            self.condition_values.textEdited.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.condition_values.textEdited.connect(self._condition_values_edited)
+
+    def _condition_values_edited(self, _text: str = "") -> None:
+        """Update the working tree without resetting QLineEdit cursor/selection."""
+
+        if self._loading:
+            return
+        preset = self._current_preset()
+        if preset is None:
+            return
+        try:
+            node = node_at(preset.root, self._selected_path)
+        except (ValueError, IndexError):
+            return
+        if node.get("type") != "condition":
+            return
+
+        node["operator"] = str(self.condition_operator.currentData())
+        node["values"] = [
+            part.strip()
+            for part in self.condition_values.text().split(",")
+            if part.strip()
+        ]
+        self._mark_dirty()
+        self._refresh_edited_condition(preset, node)
+        self._update_value_hint(str(node.get("field", "")))
+
+    def _refresh_edited_condition(self, preset, node: dict) -> None:
+        """Refresh diagnostics and tree summary without reloading editor widgets."""
+
+        items = self.tree.selectedItems()
+        if items:
+            item = items[0]
+            item.setText(0, summarize_node(node))
+            issue_paths = {issue.path for issue in self.compiler.validate(preset)}
+            if self._path_has_issue(self._selected_path, issue_paths):
+                item.setText(1, "⚠")
+                item.setToolTip(1, "Element zawiera błąd walidacji")
+            else:
+                item.setText(1, "")
+                item.setToolTip(1, "")
+
+        self.json_preview.setPlainText(
+            json.dumps(preset.root, ensure_ascii=False, indent=2)
+        )
+        self._show_validation_summary()
 
     def _install_transaction_controls(self) -> None:
         save_button = next(
