@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from app.message_models import TransportKind, TransportMessage
+from app.models import CanFrame
+from app.protocols import ProtocolRegistry
+from app.stream_pipeline import StreamingTransportPipeline
 from app.uds import UdsDecoder
 
 
@@ -34,6 +37,44 @@ def test_read_data_by_identifier_response_exposes_vin_record() -> None:
     assert decoded.fields["data_record_length"] == len(vin)
     assert decoded.fields["data_record_ascii"] == vin.decode("ascii")
     assert decoded.fields["data_record_hex"].startswith("58 4C 52")
+
+
+def test_multiframe_isotp_vin_is_reassembled_before_uds_decode() -> None:
+    pipeline = StreamingTransportPipeline()
+    frames = (
+        CanFrame(
+            sequence=0,
+            timestamp_ns=0,
+            arbitration_id=0x18DAF900,
+            is_extended_id=True,
+            data=bytes.fromhex("10 14 62 F1 90 58 4C 52"),
+        ),
+        CanFrame(
+            sequence=1,
+            timestamp_ns=1_000_000,
+            arbitration_id=0x18DAF900,
+            is_extended_id=True,
+            data=bytes.fromhex("21 54 45 34 37 4D 53 30"),
+        ),
+        CanFrame(
+            sequence=2,
+            timestamp_ns=2_000_000,
+            arbitration_id=0x18DAF900,
+            is_extended_id=True,
+            data=bytes.fromhex("22 45 31 32 33 34 35 36"),
+        ),
+    )
+
+    messages = []
+    for frame in frames:
+        messages.extend(pipeline.feed(frame))
+
+    assert len(messages) == 1
+    assert messages[0].transport is TransportKind.ISOTP
+    assert messages[0].payload == b"\x62\xF1\x90XLRTE47MS0E123456"
+    decoded = ProtocolRegistry().decode(messages[0])
+    assert decoded.fields["did_hex"] == "0xF190"
+    assert decoded.fields["data_record_ascii"] == "XLRTE47MS0E123456"
 
 
 def test_read_data_by_identifier_request_lists_all_dids() -> None:
