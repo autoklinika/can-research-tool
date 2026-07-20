@@ -29,51 +29,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Environment
+      - name: Prepare isolated Python environment
         shell: pwsh
         run: |
-          python --version
-          python -c "import platform; print(platform.platform())"
+          $bootstrap = "C:\CAN\can-research-tool\.venv\Scripts\python.exe"
+          if (-not (Test-Path $bootstrap)) {
+              throw "Bootstrap Python not found: $bootstrap"
+          }
+
+          $venvRoot = Join-Path $env:RUNNER_WORKSPACE "_crt-ci-venv"
+          $ciPython = Join-Path $venvRoot "Scripts\python.exe"
+          if (-not (Test-Path $ciPython)) {
+              & $bootstrap -m venv $venvRoot
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Unable to create runner-local virtual environment"
+              }
+          }
+
+          "CRT_CI_PYTHON=$ciPython" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $ciPython --version
+          & $ciPython -c "import platform; print(platform.platform())"
           Write-Host "Runner: $env:RUNNER_NAME"
           Write-Host "Workspace: $env:GITHUB_WORKSPACE"
+          Write-Host "CI Python: $ciPython"
 
       - name: Install dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,kvaser,gui]"
+          & $env:CRT_CI_PYTHON -m pip install --upgrade pip
+          & $env:CRT_CI_PYTHON -m pip install -e ".[dev,kvaser,gui]"
 
       - name: Compile Python sources
         shell: pwsh
-        run: python -m compileall -q app kvaser gui
+        run: '& $env:CRT_CI_PYTHON -m compileall -q app kvaser gui'
 
       - name: Unit tests
         shell: pwsh
-        run: python -m pytest -q
+        run: '& $env:CRT_CI_PYTHON -m pytest -q'
 
       - name: GUI startup and shell smoke tests
         shell: pwsh
         run: |
-          python .\tests_gui\application_startup_smoke.py
-          python .\tests_gui\engineering_shell_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\application_startup_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\engineering_shell_smoke.py
 
       - name: Core GUI regression smoke tests
         shell: pwsh
         run: |
-          python .\tests_gui\static_filter_editor_smoke.py
-          python .\tests_gui\filter_manager_window_smoke.py
-          python .\tests_gui\static_filter_live_stored_smoke.py
-          python .\tests_gui\live_filter_worker_smoke.py
-          python .\tests_gui\live_buffer_performance_smoke.py
-          python .\tests_gui\dbc_activation_smoke.py
-          python .\tests_gui\session_management_smoke.py tree
-          python .\tests_gui\session_management_smoke.py live
-          python .\tests_gui\session_management_smoke.py imported
-          python .\tests_gui\table_hover_smoke.py
-          python .\tests_gui\protocol_filter_gui_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\static_filter_editor_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\filter_manager_window_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\static_filter_live_stored_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\live_filter_worker_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\live_buffer_performance_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\dbc_activation_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py tree
+          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py live
+          & $env:CRT_CI_PYTHON .\tests_gui\session_management_smoke.py imported
+          & $env:CRT_CI_PYTHON .\tests_gui\table_hover_smoke.py
+          & $env:CRT_CI_PYTHON .\tests_gui\protocol_filter_gui_smoke.py
