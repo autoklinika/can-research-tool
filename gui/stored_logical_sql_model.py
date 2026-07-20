@@ -21,7 +21,6 @@ from .stored_logical_message_panel import (
 
 PAGE_SIZE = 256
 MAX_CACHED_PAGES = 10
-FILTER_YIELD_EVERY = 2_048
 
 
 class StoredLogicalSqlModel(QAbstractTableModel):
@@ -129,11 +128,11 @@ class StoredLogicalSqlModel(QAbstractTableModel):
             format_logical_time(message.first_timestamp_ns),
             format_message_id(message),
             message.name or "—",
-            sender_text(message),
+            _display_sender(message),
             protocol_label(message.protocol),
             len(message.payload),
             message.payload_hex or "—",
-            decoded_values_text(message),
+            _display_decoded_values(message),
         )
         return values[index.column()]
 
@@ -183,7 +182,6 @@ class StoredLogicalSqlModel(QAbstractTableModel):
                 (first_id, last_id),
             ).fetchall()
             return tuple(record_from_cache_row(row) for row in rows)
-
         identifiers = self._visible_ids[start : start + PAGE_SIZE]
         if not identifiers:
             return ()
@@ -220,27 +218,31 @@ class StoredLogicalSqlFilterTask(QRunnable):
 
     @Slot()
     def run(self) -> None:
+        connection: sqlite3.Connection | None = None
         try:
-            with open_logical_cache_readonly(self.cache_path) as connection:
-                total = int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
-                sql, parameters = _criteria_query(self.criteria)
-                needs_records = bool(
-                    self.project_filter_set is not None
-                    and getattr(self.project_filter_set, "active_count", 0)
-                ) or self.criteria.hide_periodic
-                if not needs_records:
-                    identifiers = tuple(
-                        int(row[0])
-                        for row in connection.execute(
-                            f"SELECT id FROM messages {sql} ORDER BY id",
-                            parameters,
-                        )
+            connection = open_logical_cache_readonly(self.cache_path)
+            total = int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
+            sql, parameters = _criteria_query(self.criteria)
+            needs_records = bool(
+                self.project_filter_set is not None
+                and getattr(self.project_filter_set, "active_count", 0)
+            ) or self.criteria.hide_periodic
+            if not needs_records:
+                identifiers = tuple(
+                    int(row[0])
+                    for row in connection.execute(
+                        f"SELECT id FROM messages {sql} ORDER BY id",
+                        parameters,
                     )
-                else:
-                    identifiers = self._filter_records(connection, sql, parameters)
+                )
+            else:
+                identifiers = self._filter_records(connection, sql, parameters)
             self.signals.completed.emit(self.generation, identifiers, total)
         except Exception as exc:
             self.signals.failed.emit(self.generation, str(exc))
+        finally:
+            if connection is not None:
+                connection.close()
 
     def _filter_records(
         self,
@@ -251,7 +253,7 @@ class StoredLogicalSqlFilterTask(QRunnable):
         accepted: list[int] = []
         seen_periodic: set[tuple[object, ...]] = set()
         rows = connection.execute(f"SELECT * FROM messages {sql} ORDER BY id", parameters)
-        for index, row in enumerate(rows, start=1):
+        for row in rows:
             message = record_from_cache_row(row)
             filter_set = self.project_filter_set
             if filter_set is not None and getattr(filter_set, "active_count", 0):
@@ -276,8 +278,6 @@ class StoredLogicalSqlFilterTask(QRunnable):
                     continue
                 seen_periodic.add(key)
             accepted.append(int(row["id"]))
-            if index % FILTER_YIELD_EVERY == 0:
-                pass
         return tuple(accepted)
 
 
@@ -306,6 +306,45 @@ def _criteria_query(criteria: StoredLogicalCriteria) -> tuple[str, tuple[object,
     if criteria.data_pattern:
         offset = max(0, int(criteria.data_offset or 0))
         clauses.append("substr(payload, ?, ?) = ?")
-        parameters.extend((offset + 1, len(criteria.data_pattern), sqlite3.Binary(criteria.data_pattern)))
+        parameters.extend(
+            (
+                offset + 1,
+                len(criteria.data_pattern),
+                sqlite3.Binary(criteria.data_pattern),
+            )
+        )
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return where, tuple(parameters)
+
+
+def _display_sender(message: LogicalMessageRecord) -> str:
+    fields = message.fields or {}
+    senders = fields.get("senders")
+    if isinstance(senders, (list, tuple)) and senders:
+        return ", ".join(str(value) for value in senders)
+    return sender_text(message)
+
+
+def _display_decoded_values(message: LogicalMessageRecord) -> str:
+    fields = message.fields or {}
+    signals = fields.get("signals")
+    if isinstance(signals, dict) and signals:
+        units = fields.get("signal_units")
+        unit_map = units if isinstance(units, dict) else {}
+        parts: list[str] = []
+        for name, value in signals.items():
+            unit = str(unit_map.get(name) or "").strip()
+            text = f"{name}: {_format_scalar(value)}"
+            if unit:
+                text += f" {unit}"
+            parts.append(text)
+            if len(parts) >= 8:
+                break
+        return "    ".join(parts)
+    return decoded_values_text(message)
+
+
+def _format_scalar(value: object) -> str:
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
