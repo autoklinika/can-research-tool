@@ -1,148 +1,100 @@
-# Etap H — pomiary wydajności Live Capture
+# Etap H — wydajność Live Capture
 
-**Gałąź:** `agent/live-performance-monitoring`  
-**Status:** faza H2 potwierdzona — produkcyjny podgląd ograniczony; oczekuje test H3  
-**Zakres:** obserwacja granicy aplikacyjnej Live Capture bez zmian w GUI i torze CAN
+**Status:** zakończony  
+**Gałąź robocza:** `agent/live-performance-monitoring`  
+**Zakres:** stabilizacja podglądu Live bez zmian w `CaptureService`, Kvaserze, lifecycle CANlib i pełnym zapisie sesji
 
-## Cel
+## Problem bazowy — H1
 
-Etap H ma dostarczyć rzeczywiste dane o zachowaniu Live Capture pod obciążeniem.
-Instrumentacja ma odpowiedzieć, czy przy długiej rejestracji rośnie opóźnienie
-odświeżania, rozmiar paczek oczekujących na GUI, użycie pamięci albo koszt pobierania
-snapshotów.
+Pierwszy pomiar stanowiskowy trwał około 220 s i objął 69 068 ramek oraz 65 966 wiadomości logicznych. Bufory podglądu miały pojemność 250 000 ramek i 100 000 wiadomości.
 
-Etap H nie jest nową funkcją użytkową. Kod pomiarowy jest domyślnie wyłączony i po
-zakończeniu testów zostanie oceniony pod kątem usunięcia. W kodzie produkcyjnym mogą
-pozostać wyłącznie lekkie zabezpieczenia lub metryki, których przydatność potwierdzą
-pomiary.
+Wyniki:
 
-## Nienaruszalne granice
+- working set: około 116,8 MB → 281,5 MB,
+- wzrost pamięci: około 45 MB/min,
+- `status()`: około 0,055 ms → 3,126 ms,
+- `frames_since()`: około 0,023 ms → 3,774 ms,
+- `messages_since()`: około 0,037 ms → 4,047 ms.
 
-Instrumentacja:
+Przyczyną było wielokrotne kopiowanie coraz większych buforów podglądu podczas odświeżania GUI. Pełny zapis sesji nie był źródłem problemu.
 
-- nie zmienia `CaptureService`,
-- nie zmienia `kvaser/backend.py` ani lifecycle CANlib,
-- nie wpływa na odbiór CAN,
-- nie zmienia kolejności pełnego zapisu surowej ramki przed dekodowaniem,
-- nie zmienia formatów sesji,
-- nie dodaje kontrolek, etykiet ani paneli diagnostycznych do GUI,
-- nie odrzuca ramek i nie wprowadza limitu sprzętowej kolejki odbiorczej.
+## Eksperyment H2
 
-## Faza H1 — pomiary bazowe
-
-Dekorator `InstrumentedLiveCaptureController` obserwuje wyłącznie wywołania na granicy
-`LiveCaptureWidget → LiveCaptureController`:
-
-- odstęp pomiędzy kolejnymi odpytywaniami statusu,
-- czas wykonania `status()`, `frames_since()` i `messages_since()`,
-- liczbę ramek i wiadomości zwróconych w paczkach,
-- maksymalny rozmiar paczki,
-- liczbę przypadków `snapshot.truncated`,
-- tempo ramek i wiadomości na sekundę,
-- pojemność, zajętość i przepełnienie ograniczonych buforów Live,
-- CPU procesu liczone względem jednego rdzenia,
-- pamięć procesu: bieżący working set/RSS, a na platformach bez takiego odczytu
-  wartość szczytową.
-
-Pomiary są agregowane i zapisywane domyślnie raz na sekundę. Nie jest zapisywany rekord
-na każde odświeżenie GUI ani na każdą ramkę CAN.
-
-## Wynik H1 — bufor 250 000 / 100 000
-
-Pierwszy pomiar stanowiskowy trwał około 220 s i objął 69 068 ramek oraz 65 966
-wiadomości logicznych. Nie wystąpiło `snapshot.truncated`, ale wykryto progresywny koszt
-rosnących buforów podglądu:
-
-- working set wzrósł z około 116,8 MB do 281,5 MB,
-- tempo wzrostu pamięci wynosiło około 45 MB/min,
-- średni czas `status()` wzrósł od około 0,055 ms do 3,126 ms,
-- średni czas `frames_since()` wzrósł od około 0,023 ms do 3,774 ms,
-- średni czas `messages_since()` wzrósł od około 0,037 ms do 4,047 ms.
-
-Przyczyną było wielokrotne kopiowanie całych, wciąż rosnących buforów podczas każdego
-odświeżenia Live. Pełny zapis sesji nie był źródłem problemu.
-
-## Faza H2 — ograniczony podgląd
-
-Eksperyment H2 ograniczył wyłącznie bufory prezentacyjne i odpowiadające im snapshoty do:
+Ograniczono wyłącznie bufory prezentacyjne Live do:
 
 ```text
 20 000 ramek
 5 000 wiadomości logicznych
 ```
 
-Drugi pomiar trwał około 243 s i objął 76 344 ramki oraz 72 907 wiadomości logicznych.
-Bufor wiadomości osiągnął limit po około 17 s, a bufor ramek po około 65 s. Po tym
-momencie koszty przestały rosnąć proporcjonalnie do długości sesji:
+Pomiar trwał około 243 s i objął 76 344 ramki oraz 72 907 wiadomości logicznych.
 
-- working set wzrósł z około 114,6 MB do 132,6 MB,
-- po zapełnieniu buforów wzrost wynosił około 0,4–0,5 MB/min,
-- mediana `status()` wyniosła około 0,623 ms,
-- mediana `frames_since()` wyniosła około 1,314 ms,
-- mediana `messages_since()` wyniosła około 0,344 ms,
-- rytm GUI pozostał stabilny na poziomie około 96–97 ms,
-- nie wystąpiło `snapshot.truncated`.
+Wyniki:
 
-Wynik H2 potwierdził, że limity 20 000 / 5 000 rozwiązują regresję bez ingerencji w
-`CaptureService`, Kvasera ani pełny zapis sesji. Limity zostały przeniesione do zwykłego
-produkcyjnego widoku Live. Tymczasowa klasa `StageHLiveCaptureWidget` została usunięta.
+- working set: około 114,6 MB → 132,6 MB,
+- po zapełnieniu buforów wzrost pamięci spadł do około 0,4–0,5 MB/min,
+- mediana `status()`: około 0,623 ms,
+- mediana `frames_since()`: około 1,314 ms,
+- mediana `messages_since()`: około 0,344 ms,
+- rytm GUI: około 96–97 ms,
+- brak `snapshot.truncated`.
 
-## Uruchomienie na Windows PowerShell
+## Końcowe potwierdzenie H3
 
-Zalecane uruchomienie korzysta ze skryptu, który ustawia zmienne środowiskowe w tym
-samym procesie PowerShell co aplikacja i wypisuje potwierdzenie aktywacji:
+Test trwał około 902,8 s z aktywnym pełnym zapisem sesji.
 
-```powershell
-.\tools\run_stage_h.ps1
-```
+Zakres:
 
-Inny interwał próbkowania:
+- 301 436 ramek CAN,
+- 288 622 wiadomości logicznych,
+- średnio około 333 ramek/s,
+- średnio około 319 wiadomości/s,
+- aktywne filtry Live,
+- około 37 s pauzy widoku,
+- pełny zapis na dysk.
 
-```powershell
-.\tools\run_stage_h.ps1 -IntervalSeconds 2.0
-```
+Wyniki:
 
-Uruchomienie ręczne pozostaje dostępne:
+- working set: około 152,5 MB → 168,1 MB,
+- wzrost przez ostatnie 5 minut: około 0,24 MB/min,
+- mediana `status()`: około 0,434 ms,
+- mediana `frames_since()`: około 1,142 ms,
+- mediana `messages_since()`: około 0,321 ms,
+- rytm GUI: mediana około 91,5 ms.
 
-```powershell
-$env:CRT_LIVE_PERF = "1"
-$env:CRT_LIVE_PERF_INTERVAL_S = "1.0"
-python .\crt_gui.py
-```
+Po długiej pauzie wystąpiło jedno `message_snapshot.truncated`, ponieważ w czasie pauzy powstało więcej niż 5 000 wiadomości. Ograniczenie dotyczy wyłącznie podglądu GUI. Pełna sesja na dysku pozostała kompletna.
 
-Ważne: aplikacja musi zostać uruchomiona z tego samego terminala, w którym ustawiono
-zmienne. Uruchomienie później przez skrót, osobny terminal albo przycisk Run w innym
-procesie może nie odziedziczyć `CRT_LIVE_PERF`.
+## Rozwiązanie produkcyjne
 
-Po otwarciu projektu i rozpoczęciu Capture raport zostanie zapisany w:
+Pozostają:
 
-```text
-<projekt>\reports\live-performance-YYYYMMDD_HHMMSS-<sesja>.jsonl
-```
+- `BoundedLiveCaptureWidget`,
+- limit 20 000 ramek podglądu,
+- limit 5 000 wiadomości logicznych podglądu,
+- niezmieniony pełny zapis surowych ramek i wiadomości,
+- test pojemności podglądu,
+- test rzeczywistej ścieżki filtrowania nowych ramek podczas aktywnego Capture,
+- narzędzie `tools/diagnose_live_filters.py` do kontroli zapisanych presetów i decyzji filtra.
 
-Katalog i raport powstają dopiero po kliknięciu `Start` dla Live Capture.
+Usunięto po zakończeniu pomiarów:
 
-Wyłączenie trybu diagnostycznego:
+- `InstrumentedLiveCaptureController`,
+- zmienne `CRT_LIVE_PERF` i `CRT_LIVE_PERF_INTERVAL_S`,
+- generator raportów JSONL,
+- skrypt `tools/run_stage_h.ps1`,
+- testy dotyczące wyłącznie tymczasowej instrumentacji.
 
-```powershell
-Remove-Item Env:CRT_LIVE_PERF -ErrorAction SilentlyContinue
-Remove-Item Env:CRT_LIVE_PERF_INTERVAL_S -ErrorAction SilentlyContinue
-```
+## Granice zachowane
 
-Bez `CRT_LIVE_PERF=1` aplikacja nadal korzysta z ograniczonego produkcyjnego podglądu,
-ale używa bezpośrednio zwykłego `LiveCaptureController`. Nie jest wtedy tworzony raport
-i nie jest wykonywane próbkowanie zasobów.
+Etap H nie zmienił:
 
-## Faza H3 — końcowe potwierdzenie
+- `CaptureService`,
+- Kvasera i lifecycle CANlib,
+- kolejności odbioru lub zapisu ramek,
+- formatów sesji,
+- logiki pełnego zapisu,
+- sprzętowej kolejki odbiorczej.
 
-Ostatni pomiar powinien trwać co najmniej 15 minut na aktywnej magistrali i potwierdzić:
+## Wniosek
 
-1. stabilny working set po zapełnieniu obu buforów,
-2. brak progresywnego wzrostu czasów snapshotów,
-3. brak `snapshot.truncated`,
-4. stabilny rytm GUI,
-5. niezmieniony pełny zapis sesji.
-
-Po H3 instrumentacja `InstrumentedLiveCaptureController`, skrypt `run_stage_h.ps1` oraz
-workflow pomiarowy zostaną ocenione do usunięcia. Produkcyjne limity podglądu pozostaną,
-ponieważ ich skuteczność została potwierdzona pomiarem stanowiskowym.
+Produkcjny podgląd 20 000 / 5 000 usuwa progresywny wzrost kosztu snapshotów i stabilizuje pamięć przy długim Capture. Etap H został zakończony.
