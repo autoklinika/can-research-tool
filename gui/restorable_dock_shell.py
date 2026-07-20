@@ -1,8 +1,28 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+from collections.abc import Callable
+
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPropertyAnimation,
+    QTimer,
+    Qt,
+)
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDockWidget, QTableView, QWidget
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QSizePolicy,
+    QStyle,
+    QTableView,
+    QToolButton,
+    QWidget,
+)
 
 from .engineering_shell import EngineeringShellMainWindow
 
@@ -14,11 +34,89 @@ class _LogicalMessageTooltipSuppressor(QObject):
         return event.type() == QEvent.Type.ToolTip
 
 
+class _ProjectDockTitleBar(QWidget):
+    """Compact title bar with float, animated-collapse and close controls."""
+
+    def __init__(
+        self,
+        dock: QDockWidget,
+        collapse_requested: Callable[[], None],
+    ) -> None:
+        super().__init__(dock)
+        self._dock = dock
+        self.setObjectName("projectDockTitleBar")
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 4, 2)
+        layout.setSpacing(2)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+
+        title = QLabel(dock.windowTitle(), self)
+        title.setObjectName("projectDockTitle")
+        title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(title, 1)
+
+        style = dock.style()
+        standard = QStyle.StandardPixmap
+
+        self.float_button = self._button(
+            "projectDockFloatButton",
+            style.standardIcon(standard.SP_TitleBarNormalButton),
+            self._toggle_floating,
+        )
+        layout.addWidget(self.float_button)
+
+        self.collapse_button = self._button(
+            "projectDockCollapseButton",
+            style.standardIcon(standard.SP_ArrowLeft),
+            collapse_requested,
+        )
+        self.collapse_button.setToolTip("Zwiń panel Projekt")
+        layout.addWidget(self.collapse_button)
+
+        self.close_button = self._button(
+            "projectDockCloseButton",
+            style.standardIcon(standard.SP_TitleBarCloseButton),
+            dock.close,
+        )
+        self.close_button.setToolTip("Zamknij panel Projekt")
+        layout.addWidget(self.close_button)
+
+        dock.topLevelChanged.connect(self._sync_float_tooltip)
+        dock.windowTitleChanged.connect(title.setText)
+        self._sync_float_tooltip(dock.isFloating())
+
+    def _button(
+        self,
+        object_name: str,
+        icon,
+        callback: Callable[[], None],
+    ) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName(object_name)
+        button.setAutoRaise(True)
+        button.setIcon(icon)
+        button.setFixedSize(22, 22)
+        button.clicked.connect(callback)
+        return button
+
+    def _toggle_floating(self) -> None:
+        self._dock.setFloating(not self._dock.isFloating())
+
+    def _sync_float_tooltip(self, floating: bool) -> None:
+        self.float_button.setToolTip(
+            "Dokuj panel Projekt" if floating else "Odepnij panel Projekt"
+        )
+
+
 class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
     """Engineering shell with compact, restorable project and inspector docks."""
 
-    # Revision 4 permanently removes the former bottom Output dock from layouts.
-    WORKSPACE_STATE_VERSION = 4
+    # Revision 5 adds the custom project title bar and makes Inspector opt-in.
+    WORKSPACE_STATE_VERSION = 5
+    PROJECT_DOCK_COLLAPSE_MS = 180
 
     def __init__(self, services) -> None:
         super().__init__(services)
@@ -66,12 +164,82 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         super()._build_docks()
         self._rewire_dock_toggle(self.toggle_explorer_action, self.explorer_dock)
         self._rewire_dock_toggle(self.toggle_inspector_action, self.inspector_dock)
+        self._install_project_title_bar()
         self._remove_output_panel()
+
+    def _set_project(self, project) -> None:
+        inspector_was_visible = not self.inspector_dock.isHidden()
+        super()._set_project(project)
+        if not inspector_was_visible:
+            self._hide_inspector_by_default()
 
     def _apply_default_layout(self) -> None:
         super()._apply_default_layout()
         self._remove_activity_bar()
         self._remove_output_panel()
+        self._hide_inspector_by_default()
+
+    def _install_project_title_bar(self) -> None:
+        dock = self.explorer_dock
+        if bool(dock.property("crtCustomTitleBarInstalled")):
+            return
+
+        self._project_dock_normal_min_width = max(1, dock.minimumWidth())
+        self._project_dock_normal_max_width = dock.maximumWidth()
+        self._project_collapse_animation: QPropertyAnimation | None = None
+        self.project_dock_title_bar = _ProjectDockTitleBar(
+            dock,
+            self._collapse_project_dock,
+        )
+        dock.setTitleBarWidget(self.project_dock_title_bar)
+        dock.visibilityChanged.connect(self._project_dock_visibility_changed)
+        dock.setProperty("crtCustomTitleBarInstalled", True)
+
+    def _collapse_project_dock(self) -> None:
+        dock = self.explorer_dock
+        if dock.isHidden():
+            return
+
+        animation = self._project_collapse_animation
+        if (
+            animation is not None
+            and animation.state() == QAbstractAnimation.State.Running
+        ):
+            return
+
+        current_width = max(1, dock.width())
+        dock.setMinimumWidth(0)
+
+        animation = QPropertyAnimation(dock, b"maximumWidth", self)
+        animation.setDuration(self.PROJECT_DOCK_COLLAPSE_MS)
+        animation.setStartValue(current_width)
+        animation.setEndValue(0)
+        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        animation.finished.connect(self._finish_project_dock_collapse)
+        self._project_collapse_animation = animation
+        animation.start()
+
+    def _finish_project_dock_collapse(self) -> None:
+        self.explorer_dock.hide()
+        self._restore_project_dock_width()
+
+    def _project_dock_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            self._restore_project_dock_width()
+
+    def _restore_project_dock_width(self) -> None:
+        animation = getattr(self, "_project_collapse_animation", None)
+        if (
+            animation is not None
+            and animation.state() == QAbstractAnimation.State.Running
+        ):
+            animation.stop()
+        self.explorer_dock.setMinimumWidth(self._project_dock_normal_min_width)
+        self.explorer_dock.setMaximumWidth(self._project_dock_normal_max_width)
+
+    def _hide_inspector_by_default(self) -> None:
+        self.inspector_dock.hide()
+        self.toggle_inspector_action.setChecked(False)
 
     def _remove_activity_bar(self) -> None:
         activity_bar = getattr(self, "activity_bar", None)
