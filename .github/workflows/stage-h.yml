@@ -24,3 +24,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_preview_capacity_smoke.py
+      - name: Verify Live filter tables stay bound to filtered models
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_filter_display_binding_smoke.py
