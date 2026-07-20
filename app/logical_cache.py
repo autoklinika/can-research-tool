@@ -7,7 +7,8 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Iterator
+from time import sleep
+from typing import Callable, Iterable
 
 from .dbc import DbcDecoder
 from .logical_records import (
@@ -60,13 +61,13 @@ def ensure_logical_cache(
     session = Path(session_path).resolve()
     active_dbc_paths = tuple(Path(item).resolve() for item in dbc_paths)
     cache_path = logical_cache_path_for_session(session)
-    source_fingerprint, dbc_signature = _analysis_fingerprint(session, active_dbc_paths)
+    fingerprint, dbc_signature = _analysis_fingerprint(session, active_dbc_paths)
 
     if not force:
         cached = read_logical_cache_info(cache_path)
         if (
             cached is not None
-            and cached.fingerprint == source_fingerprint
+            and cached.fingerprint == fingerprint
             and cached.decoder_signature == DECODER_SIGNATURE
             and cached.dbc_signature == dbc_signature
         ):
@@ -87,7 +88,7 @@ def ensure_logical_cache(
         session,
         cache_path,
         active_dbc_paths,
-        source_fingerprint,
+        fingerprint,
         dbc_signature,
         progress=progress,
         status=status,
@@ -98,29 +99,33 @@ def read_logical_cache_info(path: str | Path) -> LogicalCacheInfo | None:
     cache_path = Path(path)
     if not cache_path.is_file():
         return None
+    connection: sqlite3.Connection | None = None
     try:
-        with sqlite3.connect(cache_path) as connection:
-            rows = dict(connection.execute("SELECT key, value FROM metadata"))
-            if rows.get("format") != CACHE_FORMAT:
-                return None
-            if int(rows.get("version", "0")) != CACHE_VERSION:
-                return None
-            total = int(rows.get("total_messages", "0"))
-            actual = int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
-            if total != actual:
-                return None
+        connection = sqlite3.connect(cache_path)
+        rows = dict(connection.execute("SELECT key, value FROM metadata"))
+        if rows.get("format") != CACHE_FORMAT:
+            return None
+        if int(rows.get("version", "0")) != CACHE_VERSION:
+            return None
+        total = int(rows.get("total_messages", "0"))
+        actual = int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
+        if total != actual:
+            return None
+        return LogicalCacheInfo(
+            path=cache_path,
+            total_messages=total,
+            source=rows.get("source", "unknown"),
+            fingerprint=rows.get("fingerprint", ""),
+            decoder_signature=rows.get("decoder_signature", ""),
+            dbc_signature=rows.get("dbc_signature", ""),
+            created_at_utc=rows.get("created_at_utc", ""),
+            reused=False,
+        )
     except (OSError, sqlite3.Error, TypeError, ValueError):
         return None
-    return LogicalCacheInfo(
-        path=cache_path,
-        total_messages=total,
-        source=rows.get("source", "unknown"),
-        fingerprint=rows.get("fingerprint", ""),
-        decoder_signature=rows.get("decoder_signature", ""),
-        dbc_signature=rows.get("dbc_signature", ""),
-        created_at_utc=rows.get("created_at_utc", ""),
-        reused=False,
-    )
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def open_logical_cache_readonly(path: str | Path) -> sqlite3.Connection:
@@ -137,7 +142,7 @@ def open_logical_cache_readonly(path: str | Path) -> sqlite3.Connection:
 
 def record_from_cache_row(row: sqlite3.Row) -> LogicalMessageRecord:
     fields_text = str(row["fields_json"] or "")
-    frame_sequences_text = str(row["frame_sequences_json"] or "[]")
+    sequences_text = str(row["frame_sequences_json"] or "[]")
     return LogicalMessageRecord(
         sequence=int(row["sequence"]),
         first_timestamp_ns=int(row["first_timestamp_ns"]),
@@ -159,7 +164,7 @@ def record_from_cache_row(row: sqlite3.Row) -> LogicalMessageRecord:
             else int(row["destination_address"])
         ),
         complete=bool(row["complete"]),
-        frame_sequences=tuple(int(value) for value in json.loads(frame_sequences_text)),
+        frame_sequences=tuple(int(value) for value in json.loads(sequences_text)),
         payload=bytes(row["payload"] or b""),
         error=str(row["error"] or ""),
         confidence=float(row["confidence"]),
@@ -178,85 +183,87 @@ def _build_logical_cache(
     status: StatusCallback | None,
 ) -> LogicalCacheInfo:
     temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    temporary.unlink(missing_ok=True)
+    _safe_unlink(temporary)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     message_path = logical_message_path_for_session(session)
     active_dbc = DbcDecoder(dbc_paths) if dbc_paths else None
     base_registry = ProtocolRegistry()
     source = "messages-csv+dbc" if active_dbc is not None else "messages-csv"
+    connection: sqlite3.Connection | None = None
+    created_at = ""
+    total = 0
 
     try:
-        with sqlite3.connect(temporary) as connection:
-            connection.execute("PRAGMA journal_mode = OFF")
-            connection.execute("PRAGMA synchronous = OFF")
-            connection.execute("PRAGMA temp_store = MEMORY")
-            _create_schema(connection)
+        connection = sqlite3.connect(temporary)
+        connection.execute("PRAGMA journal_mode = OFF")
+        connection.execute("PRAGMA synchronous = OFF")
+        connection.execute("PRAGMA temp_store = MEMORY")
+        _create_schema(connection)
 
-            if message_path.is_file():
-                _emit_status(status, f"Zliczanie rekordów w {message_path.name}…")
-                _emit_progress(progress, 5)
-                total_hint = _count_csv_records(message_path)
-                _emit_progress(progress, 12)
-                records = (
-                    reinterpret_raw_record(
-                        record,
-                        base_registry=base_registry,
-                        dbc_decoder=active_dbc,
-                    )
-                    for record in iter_logical_message_csv(message_path)
+        if message_path.is_file():
+            _emit_status(status, f"Zliczanie rekordów w {message_path.name}…")
+            _emit_progress(progress, 5)
+            total_hint = _count_csv_records(message_path)
+            _emit_progress(progress, 12)
+            records = (
+                reinterpret_raw_record(
+                    record,
+                    base_registry=base_registry,
+                    dbc_decoder=active_dbc,
                 )
-                total = _insert_records(
-                    connection,
-                    records,
-                    total_hint=total_hint,
-                    progress=progress,
-                    status=status,
-                    progress_start=12,
-                    progress_end=88,
-                )
-            else:
-                source = "reconstructed+dbc" if dbc_paths else "reconstructed"
-                reader = SessionPagedReader(session)
-                frame_count = reader.frame_count
-                _emit_status(status, "Rekonstrukcja transportu z surowych ramek…")
-                _emit_progress(progress, 5)
-                protocols = ProtocolRegistry(dbc_paths=dbc_paths)
-                pipeline = StreamingTransportPipeline()
-                total = _reconstruct_and_insert(
-                    connection,
-                    session,
-                    frame_count,
-                    pipeline,
-                    protocols,
-                    progress=progress,
-                    status=status,
-                )
-
-            _emit_status(status, "Budowanie indeksów analitycznych…")
-            _emit_progress(progress, 90)
-            _create_indexes(connection)
-            created_at = datetime.now(timezone.utc).isoformat()
-            metadata = {
-                "format": CACHE_FORMAT,
-                "version": str(CACHE_VERSION),
-                "total_messages": str(total),
-                "source": source,
-                "fingerprint": fingerprint,
-                "decoder_signature": DECODER_SIGNATURE,
-                "dbc_signature": dbc_signature,
-                "created_at_utc": created_at,
-                "session_path": str(session),
-            }
-            connection.executemany(
-                "INSERT INTO metadata(key, value) VALUES (?, ?)",
-                metadata.items(),
+                for record in iter_logical_message_csv(message_path)
             )
-            connection.commit()
-            connection.execute("PRAGMA optimize")
+            total = _insert_records(
+                connection,
+                records,
+                total_hint=total_hint,
+                progress=progress,
+                status=status,
+                progress_start=12,
+                progress_end=88,
+            )
+        else:
+            source = "reconstructed+dbc" if dbc_paths else "reconstructed"
+            frame_count = SessionPagedReader(session).frame_count
+            _emit_status(status, "Rekonstrukcja transportu z surowych ramek…")
+            _emit_progress(progress, 5)
+            total = _reconstruct_and_insert(
+                connection,
+                session,
+                frame_count,
+                StreamingTransportPipeline(),
+                ProtocolRegistry(dbc_paths=dbc_paths),
+                progress=progress,
+                status=status,
+            )
+
+        _emit_status(status, "Budowanie indeksów analitycznych…")
+        _emit_progress(progress, 90)
+        _create_indexes(connection)
+        created_at = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "format": CACHE_FORMAT,
+            "version": str(CACHE_VERSION),
+            "total_messages": str(total),
+            "source": source,
+            "fingerprint": fingerprint,
+            "decoder_signature": DECODER_SIGNATURE,
+            "dbc_signature": dbc_signature,
+            "created_at_utc": created_at,
+            "session_path": str(session),
+        }
+        connection.executemany(
+            "INSERT INTO metadata(key, value) VALUES (?, ?)",
+            metadata.items(),
+        )
+        connection.commit()
+        connection.execute("PRAGMA optimize")
+        connection.close()
+        connection = None
 
         _emit_progress(progress, 97)
-        os.replace(temporary, cache_path)
+        _atomic_replace(temporary, cache_path)
         _emit_status(
             status,
             f"Zapisano obraz analityczny: {total:,} wiadomości".replace(",", " "),
@@ -273,7 +280,9 @@ def _build_logical_cache(
             reused=False,
         )
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        if connection is not None:
+            connection.close()
+        _safe_unlink(temporary)
         raise
 
 
@@ -380,28 +389,29 @@ def _reconstruct_and_insert(
 ) -> int:
     batch: list[tuple[object, ...]] = []
     inserted = 0
-    processed_frames = 0
+    processed = 0
     for frame in iter_session_frames(session):
-        processed_frames += 1
+        processed += 1
         for message in pipeline.feed(frame):
             inserted += 1
-            batch.append(_record_row(inserted, LogicalMessageRecord.from_decoded(protocols.decode(message))))
+            decoded = LogicalMessageRecord.from_decoded(protocols.decode(message))
+            batch.append(_record_row(inserted, decoded))
         if len(batch) >= INSERT_BATCH_SIZE:
             _flush_batch(connection, batch)
             batch.clear()
-        if processed_frames % 4_096 == 0:
-            value = 8 + int(78 * processed_frames / max(1, frame_count))
-            _emit_progress(progress, min(86, value))
+        if processed % 4_096 == 0:
+            _emit_progress(progress, min(86, 8 + int(78 * processed / max(1, frame_count))))
             _emit_status(
                 status,
                 (
-                    f"Rekonstrukcja: {processed_frames:,}/{frame_count:,} ramek, "
+                    f"Rekonstrukcja: {processed:,}/{frame_count:,} ramek, "
                     f"{inserted:,} wiadomości"
                 ).replace(",", " "),
             )
     for message in pipeline.flush():
         inserted += 1
-        batch.append(_record_row(inserted, LogicalMessageRecord.from_decoded(protocols.decode(message))))
+        decoded = LogicalMessageRecord.from_decoded(protocols.decode(message))
+        batch.append(_record_row(inserted, decoded))
     if batch:
         _flush_batch(connection, batch)
     _emit_progress(progress, 88)
@@ -425,13 +435,13 @@ def _flush_batch(connection: sqlite3.Connection, batch: list[tuple[object, ...]]
 def _record_row(identifier: int, record: LogicalMessageRecord) -> tuple[object, ...]:
     fields = dict(record.fields or {})
     sender = _sender_text(record, fields)
-    can_text = ""
     if record.arbitration_id is not None:
         width = 8 if record.is_extended_id else 3
         can_text = f"0x{record.arbitration_id:0{width}X}"
     elif record.pgn is not None:
         can_text = f"PGN 0x{record.pgn:05X}"
-    identity = f"{can_text} {record.name}".casefold()
+    else:
+        can_text = ""
     return (
         identifier,
         int(record.sequence),
@@ -446,7 +456,7 @@ def _record_row(identifier: int, record: LogicalMessageRecord) -> tuple[object, 
         record.source_address,
         record.destination_address,
         sender,
-        identity,
+        f"{can_text} {record.name}".casefold(),
         int(bool(record.complete)),
         json.dumps(list(record.frame_sequences), separators=(",", ":")),
         sqlite3.Binary(record.payload),
@@ -461,6 +471,9 @@ def _sender_text(record: LogicalMessageRecord, fields: dict[str, object]) -> str
         value = fields.get(key)
         if value not in (None, ""):
             return str(value)
+    senders = fields.get("senders")
+    if isinstance(senders, (list, tuple)) and senders:
+        return ", ".join(str(value) for value in senders)
     if record.source_address is not None:
         return f"0x{record.source_address:02X}"
     return "—"
@@ -510,6 +523,28 @@ def _file_content_signature(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return f"{path.resolve()}:{digest.hexdigest()}"
+
+
+def _atomic_replace(source: Path, destination: Path) -> None:
+    for attempt in range(10):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            sleep(0.05 * (attempt + 1))
+
+
+def _safe_unlink(path: Path) -> None:
+    for attempt in range(5):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            sleep(0.05 * (attempt + 1))
 
 
 def _emit_progress(callback: ProgressCallback | None, value: int) -> None:
