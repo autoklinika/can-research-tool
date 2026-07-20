@@ -47,6 +47,7 @@ jobs:
             @{ Name = "Unit tests"; Command = "python -m pytest -q" },
             @{ Name = "Application startup smoke"; Command = "python .\tests_gui\application_startup_smoke.py" },
             @{ Name = "Engineering shell smoke"; Command = "python .\tests_gui\engineering_shell_smoke.py" },
+            @{ Name = "Project overview session details smoke"; Command = "python .\tests_gui\project_overview_session_details_smoke.py" },
             @{ Name = "Static filter editor smoke"; Command = "python .\tests_gui\static_filter_editor_smoke.py" },
             @{ Name = "Filter manager window smoke"; Command = "python .\tests_gui\filter_manager_window_smoke.py" },
             @{ Name = "Static filter Live and stored smoke"; Command = "python .\tests_gui\static_filter_live_stored_smoke.py" },
