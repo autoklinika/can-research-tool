@@ -12,6 +12,7 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setOrganizationName("Autoklinika")
     app.setApplicationName("CAN Research Tool")
+    app.setStyle("Fusion")
     apply_engineering_theme(app)
     container = ApplicationContainer()
     window = container.create_main_window()
