@@ -113,11 +113,54 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         super().__init__(services)
         self._remove_activity_bar()
         self._remove_output_panel()
-        self._install_primary_toolbar_toggle()
         self._hide_primary_toolbar_by_default()
         self._table_tooltip_suppressor = _LogicalMessageTooltipSuppressor(self)
         self.tabs.currentChanged.connect(self._schedule_tooltip_suppressor_scan)
         QTimer.singleShot(0, self._install_logical_message_tooltip_suppressors)
+
+    def _build_actions(self) -> None:
+        super()._build_actions()
+        self.toggle_primary_toolbar_action = QAction("Narzędzia główne", self)
+        self.toggle_primary_toolbar_action.setObjectName("togglePrimaryToolbarAction")
+        self.toggle_primary_toolbar_action.setCheckable(True)
+        self.toggle_primary_toolbar_action.setChecked(False)
+        self.toggle_primary_toolbar_action.setToolTip(
+            "Pokaż lub ukryj pasek Narzędzia główne"
+        )
+
+    def _build_menu(self) -> None:
+        super()._build_menu()
+        view_menu = None
+        for menu_action in reversed(self.menuBar().actions()):
+            if menu_action.text().replace("&", "") != "Widok":
+                continue
+            candidate = menu_action.menu()
+            if candidate is None:
+                continue
+            try:
+                candidate.actions()
+            except RuntimeError:
+                continue
+            view_menu = candidate
+            break
+        if view_menu is None:
+            raise RuntimeError("Nie można zbudować menu Widok")
+        view_menu.insertAction(
+            self.reset_layout_action,
+            self.toggle_primary_toolbar_action,
+        )
+
+    def _build_activity_bar(self) -> None:
+        super()._build_activity_bar()
+        self.toggle_primary_toolbar_action.toggled.connect(
+            self.primary_toolbar.setVisible
+        )
+        self.primary_toolbar.visibilityChanged.connect(
+            self.toggle_primary_toolbar_action.setChecked
+        )
+        self.toggle_primary_toolbar_action.setChecked(
+            not self.primary_toolbar.isHidden()
+        )
 
     def _set_capture_status(self, text: str) -> None:
         """Update the indicator without rebuilding native Qt style internals."""
@@ -172,27 +215,6 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         self._remove_output_panel()
         self._hide_inspector_by_default()
         self._hide_primary_toolbar_by_default()
-
-    def _install_primary_toolbar_toggle(self) -> None:
-        if hasattr(self, "toggle_primary_toolbar_action"):
-            return
-
-        action = self.primary_toolbar.toggleViewAction()
-        action.setText("Narzędzia główne")
-        action.setObjectName("togglePrimaryToolbarAction")
-        action.setToolTip("Pokaż lub ukryj pasek Narzędzia główne")
-        self.toggle_primary_toolbar_action = action
-
-        view_menu = next(
-            (
-                menu_action.menu()
-                for menu_action in self.menuBar().actions()
-                if menu_action.text().replace("&", "") == "Widok"
-            ),
-            None,
-        )
-        if view_menu is not None:
-            view_menu.insertAction(self.reset_layout_action, action)
 
     def _hide_primary_toolbar_by_default(self) -> None:
         toolbar = getattr(self, "primary_toolbar", None)
