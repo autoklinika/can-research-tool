@@ -201,11 +201,9 @@ class ProtocolBadgeDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-
 def protocol_label(protocol: str) -> str:
     normalized = str(protocol or "unknown").strip().lower()
     return _PROTOCOL_LABELS.get(normalized, normalized.upper() or "Proprietary")
-
 
 
 def sender_text(message: LogicalMessageRecord) -> str:
@@ -219,7 +217,6 @@ def sender_text(message: LogicalMessageRecord) -> str:
     return "—"
 
 
-
 def format_message_id(message: LogicalMessageRecord) -> str:
     if message.arbitration_id is not None:
         width = 8 if message.is_extended_id else 3
@@ -227,7 +224,6 @@ def format_message_id(message: LogicalMessageRecord) -> str:
     if message.pgn is not None:
         return f"PGN 0x{message.pgn:05X}"
     return "—"
-
 
 
 def format_logical_time(timestamp_ns: int) -> str:
@@ -238,9 +234,11 @@ def format_logical_time(timestamp_ns: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{micros:06d}"
 
 
-
 def decoded_values_text(message: LogicalMessageRecord) -> str:
     fields = message.fields or {}
+    if str(message.protocol).lower() == "uds":
+        return _uds_decoded_values_text(fields)
+
     excluded = {
         "addressing",
         "complete",
@@ -288,12 +286,119 @@ def decoded_values_text(message: LogicalMessageRecord) -> str:
         "security_level": "Level",
         "block_sequence_counter": "Block",
     }
+    return _compose_values(fields, preferred, labels, excluded)
+
+
+def _uds_decoded_values_text(fields: dict[str, object]) -> str:
+    preferred = (
+        "requested_service_name",
+        "service_name",
+        "negative_response_name",
+        "negative_response_code_hex",
+        "diagnostic_session_type_hex",
+        "p2_server_max_ms",
+        "p2_star_server_max_ms",
+        "did_list_hex",
+        "did_hex",
+        "data_record_ascii",
+        "data_record_hex",
+        "scaling_data_record_hex",
+        "security_access_type",
+        "security_level",
+        "seed_hex",
+        "key_hex",
+        "routine_id_hex",
+        "routine_option_record_hex",
+        "routine_status_record_hex",
+        "memory_address_hex",
+        "memory_size_hex",
+        "max_number_of_block_length",
+        "block_sequence_counter",
+        "transfer_data_hex",
+        "transfer_response_parameter_record_hex",
+        "dtc_count",
+        "dtc_summary",
+        "group_of_dtc_hex",
+        "control_type_hex",
+        "communication_type_hex",
+        "io_control_parameter_hex",
+        "control_state_record_hex",
+        "control_status_record_hex",
+        "parameter_record_hex",
+    )
+    labels = {
+        "requested_service_name": "Requested",
+        "service_name": "Service",
+        "negative_response_name": "NRC",
+        "negative_response_code_hex": "NRC code",
+        "diagnostic_session_type_hex": "Session",
+        "p2_server_max_ms": "P2 [ms]",
+        "p2_star_server_max_ms": "P2* [ms]",
+        "did_list_hex": "DIDs",
+        "did_hex": "DID",
+        "data_record_ascii": "ASCII",
+        "data_record_hex": "Data",
+        "scaling_data_record_hex": "Scaling",
+        "security_access_type": "Security",
+        "security_level": "Level",
+        "seed_hex": "Seed",
+        "key_hex": "Key",
+        "routine_id_hex": "RID",
+        "routine_option_record_hex": "Option",
+        "routine_status_record_hex": "Status",
+        "memory_address_hex": "Address",
+        "memory_size_hex": "Size",
+        "max_number_of_block_length": "Max block",
+        "block_sequence_counter": "Block",
+        "transfer_data_hex": "Transfer data",
+        "transfer_response_parameter_record_hex": "Transfer response",
+        "dtc_count": "DTC count",
+        "dtc_summary": "DTC",
+        "group_of_dtc_hex": "DTC group",
+        "control_type_hex": "Control",
+        "communication_type_hex": "Communication",
+        "io_control_parameter_hex": "IO control",
+        "control_state_record_hex": "Control state",
+        "control_status_record_hex": "Control status",
+        "parameter_record_hex": "Parameters",
+    }
+    excluded = {
+        "addressing",
+        "application_payload_hex",
+        "base_service_id",
+        "base_service_id_hex",
+        "complete",
+        "destination_address",
+        "direction",
+        "frame_count",
+        "payload_length",
+        "requested_service_id",
+        "requested_service_id_hex",
+        "response_type",
+        "service_id",
+        "service_id_hex",
+        "source_address",
+        "subfunction_raw",
+        "suppress_positive_response",
+    }
+    return _compose_values(fields, preferred, labels, excluded)
+
+
+def _compose_values(
+    fields: dict[str, object],
+    preferred: tuple[str, ...],
+    labels: dict[str, str],
+    excluded: set[str],
+) -> str:
     parts: list[str] = []
     emitted: set[str] = set()
     for key in preferred:
         if key not in fields or key in excluded:
             continue
-        parts.append(f"{labels.get(key, _display_key(key))}: {_format_value(fields[key])}")
+        value = fields[key]
+        if value in (None, ""):
+            continue
+        parts.append(f"{labels.get(key, _display_key(key))}: {_format_preview_value(key, value)}")
         emitted.add(key)
         if len(parts) >= 6:
             return "    ".join(parts)
@@ -301,13 +406,18 @@ def decoded_values_text(message: LogicalMessageRecord) -> str:
         if key in emitted or key in excluded:
             continue
         value = fields[key]
-        if isinstance(value, (dict, list, tuple, bytes, bytearray)):
+        if value in (None, "") or isinstance(value, (dict, list, tuple, bytes, bytearray)):
             continue
-        parts.append(f"{_display_key(key)}: {_format_value(value)}")
+        parts.append(f"{labels.get(key, _display_key(key))}: {_format_preview_value(key, value)}")
         if len(parts) >= 6:
             break
     return "    ".join(parts) if parts else "—"
 
+
+def _format_preview_value(key: str, value: object) -> str:
+    text = _format_value(value)
+    limit = 72 if key.endswith("_hex") else 64
+    return text if len(text) <= limit else f"{text[:limit]}…"
 
 
 def parse_time_filter(text: str) -> int | None:
@@ -325,7 +435,6 @@ def parse_time_filter(text: str) -> int | None:
     return max(0, int(round((hours * 3600 + minutes * 60 + seconds) * 1_000_000_000)))
 
 
-
 def parse_data_pattern(text: str) -> bytes:
     value = text.strip()
     if not value:
@@ -341,7 +450,6 @@ def parse_data_pattern(text: str) -> bytes:
     return bytes((number,))
 
 
-
 def _passes_project_filter(message: LogicalMessageRecord, filter_set: object | None) -> bool:
     if filter_set is None or not getattr(filter_set, "active_count", 0):
         return True
@@ -350,7 +458,6 @@ def _passes_project_filter(message: LogicalMessageRecord, filter_set: object | N
         relative_time_us=int(message.first_timestamp_ns // 1_000),
     )
     return bool(decision.visible)
-
 
 
 def _matches_criteria(
@@ -401,10 +508,8 @@ def _matches_criteria(
     return True
 
 
-
 def _display_key(key: str) -> str:
     return "".join(part.capitalize() for part in str(key).split("_"))
-
 
 
 def _format_value(value: object) -> str:
