@@ -52,7 +52,6 @@ class DbcDecoder:
         self._exact_messages: dict[tuple[int, bool], tuple[str, Any]] = {}
         self._extended_candidates: list[tuple[str, Any]] = []
         self._loaded_files: list[str] = []
-
         for path_like in paths:
             path = Path(path_like)
             database = cantools.database.load_file(str(path), strict=False)
@@ -77,8 +76,8 @@ class DbcDecoder:
         match = self._find_message(message)
         if match is None:
             raise KeyError("DBC decoder does not contain a matching CAN message")
-
         source_name, dbc_message, match_mode, match_score = match
+        senders = list(dbc_message.senders)
         fields: dict[str, Any] = {
             "dbc_file": source_name,
             "dbc_message": dbc_message.name,
@@ -88,7 +87,8 @@ class DbcDecoder:
             "is_extended_frame": bool(dbc_message.is_extended_frame),
             "declared_length": int(dbc_message.length),
             "cycle_time_ms": dbc_message.cycle_time,
-            "senders": list(dbc_message.senders),
+            "senders": senders,
+            "sender_name": ", ".join(senders) if senders else "",
         }
         try:
             decoded = dbc_message.decode(
@@ -113,7 +113,6 @@ class DbcDecoder:
             fields["signals"] = {}
             name = f"DBC {dbc_message.name} (decode error)"
             confidence = 0.5
-
         return DecodedMessage(
             message=message,
             protocol=ProtocolKind.DBC,
@@ -128,7 +127,6 @@ class DbcDecoder:
     ) -> tuple[str, Any, str, int] | None:
         if message.transport is not TransportKind.RAW or message.arbitration_id is None:
             return None
-
         arbitration_id = _normalize_frame_id(
             int(message.arbitration_id),
             bool(message.is_extended_id),
@@ -136,10 +134,8 @@ class DbcDecoder:
         exact = self._exact_messages.get((arbitration_id, message.is_extended_id))
         if exact is not None:
             return exact[0], exact[1], "exact-id", 100
-
         if not message.is_extended_id:
             return None
-
         best: tuple[str, Any, str, int] | None = None
         best_score = -1
         for source_name, dbc_message in self._extended_candidates:
@@ -167,16 +163,12 @@ def _split_j1939_id(frame_id: int) -> tuple[int, int, int, int]:
 def _j1939_match_score(received_id: int, dbc_id: int) -> int | None:
     rx_priority, rx_pf, rx_ps, rx_sa = _split_j1939_id(received_id)
     dbc_priority, dbc_pf, dbc_ps, dbc_sa = _split_j1939_id(dbc_id)
-
     if dbc_pf != rx_pf:
         return None
-
     score = 0
     if dbc_priority == rx_priority:
         score += 2
-
     if rx_pf < 240:
-        # PDU1: PF identifies the PGN; PS is the destination address.
         if dbc_ps == rx_ps:
             score += 8
         elif dbc_ps in (0xFE, 0xFF):
@@ -184,18 +176,15 @@ def _j1939_match_score(received_id: int, dbc_id: int) -> int | None:
         else:
             return None
     else:
-        # PDU2: PS is the group extension and therefore part of the PGN.
         if dbc_ps != rx_ps:
             return None
         score += 8
-
     if dbc_sa == rx_sa:
         score += 6
     elif dbc_sa in (0xFE, 0xFF):
         score += 2
     else:
         return None
-
     return score
 
 
