@@ -68,8 +68,8 @@ class CanIdPattern:
                 mask |= 0xF
 
             _validate_can_id_component(value, "CAN ID value")
-            _validate_can_id_component(mask, "CAN ID mask")
-            return cls(value=value, mask=mask)
+            mask &= CAN_ID_MAX
+            return cls(value=value & mask, mask=mask)
 
         value = _parse_int(text, label="CAN ID")
         _validate_can_id_component(value, "CAN ID")
