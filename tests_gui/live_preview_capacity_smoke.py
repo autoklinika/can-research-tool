@@ -33,9 +33,9 @@ def main() -> None:
 
         assert isinstance(view, BoundedLiveCaptureWidget)
         assert view.LIVE_CAPACITY == LIVE_PREVIEW_FRAME_CAPACITY == 20_000
-        assert view.LIVE_MESSAGE_CAPACITY == LIVE_PREVIEW_MESSAGE_CAPACITY == 5_000
+        assert view.LIVE_MESSAGE_CAPACITY == LIVE_PREVIEW_MESSAGE_CAPACITY == 1
         assert view.frame_model.capacity == 20_000
-        assert view.message_model._capacity == 5_000
+        assert view.message_model._capacity == 1
         assert not hasattr(view, "performance_panel")
         assert not hasattr(view, "performance_label")
 
