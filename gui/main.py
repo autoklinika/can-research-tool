@@ -9,7 +9,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from .application_container import ApplicationContainer
-from .engineering_theme import apply_engineering_theme
+from .theme_manager import apply_saved_theme
 
 _CLEAN_SHUTDOWN_KEY = "runtime/lastShutdownClean"
 _LAYOUT_MIGRATION_KEY = "ui/engineeringShellSafeRestoreVersion"
@@ -72,14 +72,13 @@ def main() -> int:
     app.setApplicationName("CAN Research Tool")
     _checkpoint("03 identity ready")
 
-    # Keep the engineering QSS and typography, but do not replace the global
-    # Windows style engine with Fusion. Installing Fusion globally has produced
-    # unrecoverable native aborts before the first window is constructed.
-    apply_engineering_theme(app)
-    _checkpoint("04 engineering theme ready")
-
     startup_settings = _prepare_startup_settings()
-    _checkpoint("05 settings ready")
+    _checkpoint("04 settings ready")
+
+    # Keep the native Qt/Windows renderer. The persisted Day/Night theme changes
+    # only the application palette and QSS, without replacing the platform style.
+    apply_saved_theme(app, startup_settings)
+    _checkpoint("05 engineering theme ready")
 
     container = ApplicationContainer()
     _checkpoint("06 container ready")
