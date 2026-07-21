@@ -18,8 +18,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libegl1
-      - name: Install GUI
-        run: python -m pip install -q -e ".[gui]"
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Verify search and SQLite core
+        run: >-
+          python -m pytest
+          tests/test_search_engine.py
+          tests/test_project_search_index.py
+          tests/test_sqlite_architecture.py
+          -q
       - name: Verify engineering IDE shell
         env:
           QT_QPA_PLATFORM: offscreen
