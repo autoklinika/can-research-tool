@@ -44,7 +44,7 @@ class SearchQuery:
     mode: SearchMode = SearchMode.CONTAINS
     fields: frozenset[str] = frozenset()
     case_sensitive: bool = False
-    logic: SearchLogic | None = None
+    logic: SearchLogic = SearchLogic.ANY
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,14 +103,17 @@ class _CompiledTerm:
 
 class CompiledSearchQuery:
     def __init__(self, query: SearchQuery) -> None:
-        terms, detected_logic = _parse_terms(query.text)
+        terms = _parse_terms(query.text)
         if not terms:
             raise SearchQueryError("Zapytanie wyszukiwania nie może być puste.")
         self.query = query
-        self.logic = query.logic or detected_logic
+        self.logic = query.logic
         self.terms = tuple(_CompiledTerm(term, query) for term in terms)
 
-    def match_fields(self, fields: Iterable[tuple[str, str]]) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+    def match_fields(
+        self,
+        fields: Iterable[tuple[str, str]],
+    ) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
         materialized = [(name, str(value or "")) for name, value in fields]
         matched_fields: list[str] = []
         matched_terms: list[str] = []
@@ -172,25 +175,14 @@ class SearchEngine:
         return hits
 
 
-def _parse_terms(text: str) -> tuple[tuple[str, ...], SearchLogic]:
+def _parse_terms(text: str) -> tuple[str, ...]:
     normalized = text.strip()
     if not normalized:
-        return (), SearchLogic.ANY
-
-    if "&&" in normalized:
-        parts = normalized.split("&&")
-        logic = SearchLogic.ALL
-    elif ";" in normalized or "\n" in normalized:
-        parts = re.split(r"[;\n]+", normalized)
-        logic = SearchLogic.ANY
-    else:
-        parts = [normalized]
-        logic = SearchLogic.ANY
-
-    terms = tuple(part.strip() for part in parts if part.strip())
+        return ()
+    terms = tuple(part.strip() for part in normalized.split(",") if part.strip())
     if not terms:
         raise SearchQueryError("Podaj co najmniej jeden niepusty element wyszukiwania.")
-    return terms, logic
+    return terms
 
 
 def _compact_hex(text: str) -> str | None:
