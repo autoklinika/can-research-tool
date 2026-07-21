@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from app.capture_service import CaptureState
 
@@ -28,11 +38,12 @@ class BoundedLiveCaptureWidget(LiveCaptureWidget):
     def __init__(self, *args, **kwargs) -> None:
         self._analysis_session_path: Path | None = None
         super().__init__(*args, **kwargs)
-        self.marker_setup_button.setMinimumSize(150, 44)
+        self.marker_setup_button.setMinimumSize(190, 40)
         self.marker_setup_button.setStyleSheet(
             "QPushButton { text-align: center; padding: 5px 10px; font-weight: 600; }"
         )
         self._update_marker_tile()
+        self._install_space_capture_shortcut()
         self._install_deferred_logical_controls()
 
     def _update_marker_tile(self) -> None:
@@ -43,6 +54,29 @@ class BoundedLiveCaptureWidget(LiveCaptureWidget):
             "Otwórz konfigurację znaczników. "
             f"Aktywne: {active}, wszystkie: {len(presets)}."
         )
+
+    def _install_space_capture_shortcut(self) -> None:
+        self.capture_space_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        self.capture_space_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        self.capture_space_shortcut.setAutoRepeat(False)
+        self.capture_space_shortcut.activated.connect(self._toggle_capture_from_space)
+        self.start_button.setToolTip("Rozpocznij rejestrację — Spacja")
+        self.stop_button.setToolTip("Zatrzymaj rejestrację — Spacja")
+
+    def _toggle_capture_from_space(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QComboBox, QPushButton, QCheckBox)):
+            return
+
+        if self._controller.is_active:
+            if self.stop_button.isEnabled():
+                self._stop_capture()
+            return
+
+        if self.start_button.isEnabled():
+            self._start_capture()
 
     def _install_deferred_logical_controls(self) -> None:
         page = self.data_tabs.widget(self.message_tab_index)
