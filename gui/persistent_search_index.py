@@ -107,8 +107,15 @@ class PersistentSessionSearchIndex(QObject):
 
     def start(self) -> None:
         self._active = True
-        if self._ready or self._task is not None:
+        if self._task is not None:
             return
+
+        # Re-read project metadata and SQLite immediately before scheduling work.
+        # This is the final guard against a stale GUI adapter causing a complete
+        # rebuild even though another run already committed a ready durable index.
+        if self._refresh_ready_state():
+            return
+
         self._error = ""
         task = _PersistentBuildTask(self.project, self.session, self.repository)
         task.signals.progress.connect(self._build_progress)
@@ -128,6 +135,28 @@ class PersistentSessionSearchIndex(QObject):
         self._task = None
         if task is not None:
             task.cancel()
+
+    def _refresh_ready_state(self) -> bool:
+        absolute = self.project.absolute_path(self.session.relative_path)
+        latest = self.project.session_by_path(absolute)
+        if latest is not None:
+            self.session = latest
+        fingerprint = self.repository.fingerprint(self.project, self.session, absolute)
+        ready = self.repository.is_current(fingerprint)
+        self._fingerprint = fingerprint
+        self._ready = ready
+        if ready:
+            self._progress = (fingerprint.frame_count, fingerprint.frame_count)
+            self.progress_changed.emit(*self._progress)
+            self.ready_changed.emit(True)
+            return True
+
+        state = self.repository.state(fingerprint.source_id)
+        current = 0
+        if state is not None and state.total_rows == fingerprint.frame_count:
+            current = min(state.indexed_rows, state.total_rows)
+        self._progress = (current, fingerprint.frame_count)
+        return False
 
     @Slot(int, int)
     def _build_progress(self, current: int, total: int) -> None:
