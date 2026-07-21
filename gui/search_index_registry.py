@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
 from time import perf_counter
 from weakref import WeakKeyDictionary
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal
 from PySide6.QtWidgets import QTableView, QWidget
 
+from app.project import CrtProject
+from app.project_search_index import ProjectSearchIndex
 from app.search_engine import SearchDocument
+
+from .persistent_search_index import PersistentSessionSearchIndex
 
 
 _INDEX_TIME_BUDGET_MS = 4.0
@@ -35,9 +40,6 @@ class QtTableSearchIndex(QObject):
         self._activated = False
         self._last_ready_state = self.is_ready
 
-        # A zero-interval timer intentionally schedules the next slice as soon
-        # as the event loop is free. The strict time budget below prevents one
-        # slice from monopolising the GUI thread.
         self._timer = QTimer(self)
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._build_slice)
@@ -75,7 +77,6 @@ class QtTableSearchIndex(QObject):
         return self._next_row, model.rowCount() if model is not None else 0
 
     def start(self) -> None:
-        """Activate the index and continue building it without blocking GUI."""
         self._activated = True
         if self._model is not None and not self.is_ready and not self._timer.isActive():
             self._timer.start()
@@ -130,13 +131,9 @@ class QtTableSearchIndex(QObject):
     def _rows_inserted(self, _parent, first: int, _last: int) -> None:
         if self._model is None:
             return
-
-        # Inserts before an already indexed prefix invalidate row mappings.
-        # Pure appends preserve the prefix and are queued for a later slice.
         if first < self._next_row:
             self._mark_dirty()
             return
-
         self._publish_ready_state()
         if self._activated and not self._timer.isActive():
             self._timer.start()
@@ -189,17 +186,47 @@ class QtTableSearchIndex(QObject):
         self._connections.clear()
 
 
+SearchIndex = QtTableSearchIndex | PersistentSessionSearchIndex
+
+
 class SearchIndexRegistry(QObject):
-    """Creates indexes only for tables whose search function is actually used."""
+    """Own lazy memory indexes and durable per-session project indexes."""
 
     def __init__(self, root: QWidget | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._root = root  # retained for API compatibility; no periodic discovery
+        self._root = root
         self._indexes: WeakKeyDictionary[object, QtTableSearchIndex] = WeakKeyDictionary()
+        self._persistent_indexes: dict[
+            tuple[str, str], PersistentSessionSearchIndex
+        ] = {}
 
-    def index_for_table(self, table: QTableView | None) -> QtTableSearchIndex | None:
+    def index_for_table(
+        self,
+        table: QTableView | None,
+        *,
+        project: CrtProject | None = None,
+        session_path: str | Path | None = None,
+    ) -> SearchIndex | None:
         if table is None or table.model() is None:
             return None
+
+        if project is not None and session_path is not None:
+            session = project.session_by_path(session_path)
+            model = table.model()
+            if (
+                session is not None
+                and session.status != "recording"
+                and callable(getattr(model, "frame_at", None))
+                and int(model.rowCount()) == int(session.frame_count)
+            ):
+                persistent = self.persistent_index_for_session(
+                    project,
+                    session_path,
+                    activate=True,
+                )
+                if persistent is not None:
+                    return persistent
+
         return self.ensure_model(table.model(), activate=True)
 
     def ensure_model(self, model, *, activate: bool = False) -> QtTableSearchIndex:
@@ -211,10 +238,43 @@ class SearchIndexRegistry(QObject):
             index.start()
         return index
 
+    def persistent_index_for_session(
+        self,
+        project: CrtProject,
+        session_path: str | Path,
+        *,
+        activate: bool = False,
+    ) -> PersistentSessionSearchIndex | None:
+        session = project.session_by_path(session_path)
+        if session is None or session.status == "recording":
+            return None
+        path = project.absolute_path(session.relative_path)
+        if not path.is_file():
+            return None
+        key = (project.manifest.id, session.id)
+        index = self._persistent_indexes.get(key)
+        if index is None:
+            index = PersistentSessionSearchIndex(project, session, self)
+            self._persistent_indexes[key] = index
+        if activate:
+            index.start()
+        return index
+
+    def remove_session(self, project: CrtProject, session_id: str) -> None:
+        key = (project.manifest.id, session_id)
+        index = self._persistent_indexes.pop(key, None)
+        if index is not None:
+            index.close()
+            index.deleteLater()
+        ProjectSearchIndex(project).remove_session(session_id)
+
     def close(self) -> None:
         for index in list(self._indexes.values()):
             index.close()
         self._indexes.clear()
+        for index in list(self._persistent_indexes.values()):
+            index.close()
+        self._persistent_indexes.clear()
 
 
 def _model_headers(model) -> list[str]:
