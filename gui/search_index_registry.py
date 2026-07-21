@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import perf_counter
 from weakref import WeakKeyDictionary
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal
@@ -8,12 +9,17 @@ from PySide6.QtWidgets import QTableView, QWidget
 from app.search_engine import SearchDocument
 
 
-_INDEX_CHUNK_ROWS = 2_000
-_DISCOVERY_INTERVAL_MS = 250
+_INDEX_TIME_BUDGET_MS = 4.0
+_MAX_ROWS_PER_SLICE = 512
 
 
 class QtTableSearchIndex(QObject):
-    """Incremental search document index associated with one Qt item model."""
+    """Lazy, time-sliced search index associated with one Qt item model.
+
+    The index is dormant until ``start()`` is called. Once activated it keeps
+    itself synchronized with later model appends, which is suitable for Live
+    Capture without imposing work during normal application startup.
+    """
 
     progress_changed = Signal(int, int)
     ready_changed = Signal(bool)
@@ -26,10 +32,15 @@ class QtTableSearchIndex(QObject):
         self._connections: list[tuple[object, object]] = []
         self._next_row = 0
         self._dirty = False
+        self._activated = False
+        self._last_ready_state = self.is_ready
 
+        # A zero-interval timer intentionally schedules the next slice as soon
+        # as the event loop is free. The strict time budget below prevents one
+        # slice from monopolising the GUI thread.
         self._timer = QTimer(self)
         self._timer.setInterval(0)
-        self._timer.timeout.connect(self._build_chunk)
+        self._timer.timeout.connect(self._build_slice)
 
         self._connect(model.rowsInserted, self._rows_inserted)
         self._connect(model.rowsRemoved, self._structure_changed)
@@ -40,7 +51,6 @@ class QtTableSearchIndex(QObject):
         self._connect(model.columnsInserted, self._headers_changed)
         self._connect(model.columnsRemoved, self._headers_changed)
         self._connect(model.destroyed, self._model_destroyed)
-        self.start()
 
     @property
     def model(self):
@@ -56,11 +66,17 @@ class QtTableSearchIndex(QObject):
         return model is not None and not self._dirty and self._next_row >= model.rowCount()
 
     @property
+    def is_active(self) -> bool:
+        return self._activated
+
+    @property
     def progress(self) -> tuple[int, int]:
         model = self._model
         return self._next_row, model.rowCount() if model is not None else 0
 
     def start(self) -> None:
+        """Activate the index and continue building it without blocking GUI."""
+        self._activated = True
         if self._model is not None and not self.is_ready and not self._timer.isActive():
             self._timer.start()
 
@@ -68,36 +84,40 @@ class QtTableSearchIndex(QObject):
         return tuple(self._documents)
 
     def close(self) -> None:
+        self._activated = False
         self._timer.stop()
         self._disconnect()
         self._model = None
         self._documents.clear()
         self._next_row = 0
 
-    def _build_chunk(self) -> None:
+    def _build_slice(self) -> None:
         model = self._model
-        if model is None:
+        if model is None or not self._activated:
             self._timer.stop()
             return
-        was_ready = self.is_ready
+
         if self._dirty:
             self._headers = _model_headers(model)
             self._documents.clear()
             self._next_row = 0
             self._dirty = False
 
-        stop = min(model.rowCount(), self._next_row + _INDEX_CHUNK_ROWS)
-        for row in range(self._next_row, stop):
-            self._documents.append(self._read_document(row))
-        self._next_row = stop
-        current, total = self.progress
-        self.progress_changed.emit(current, total)
+        row_count = model.rowCount()
+        started = perf_counter()
+        processed = 0
 
-        ready = self.is_ready
-        if ready:
+        while self._next_row < row_count and processed < _MAX_ROWS_PER_SLICE:
+            self._documents.append(self._read_document(self._next_row))
+            self._next_row += 1
+            processed += 1
+            if (perf_counter() - started) * 1000.0 >= _INDEX_TIME_BUDGET_MS:
+                break
+
+        self.progress_changed.emit(*self.progress)
+        self._publish_ready_state()
+        if self.is_ready:
             self._timer.stop()
-        if ready != was_ready:
-            self.ready_changed.emit(ready)
 
     def _read_document(self, row: int) -> SearchDocument:
         model = self._model
@@ -107,24 +127,19 @@ class QtTableSearchIndex(QObject):
         }
         return SearchDocument(row=row, fields=fields)
 
-    def _rows_inserted(self, _parent, first: int, last: int) -> None:
-        model = self._model
-        if model is None:
+    def _rows_inserted(self, _parent, first: int, _last: int) -> None:
+        if self._model is None:
             return
 
-        # Appends beyond the already indexed prefix never invalidate that prefix.
-        if first >= self._next_row:
-            if first == self._next_row and self._next_row == len(self._documents):
-                for row in range(first, last + 1):
-                    self._documents.append(self._read_document(row))
-                self._next_row = last + 1
-                self.progress_changed.emit(*self.progress)
-                self.ready_changed.emit(self.is_ready)
-            else:
-                self.start()
+        # Inserts before an already indexed prefix invalidate row mappings.
+        # Pure appends preserve the prefix and are queued for a later slice.
+        if first < self._next_row:
+            self._mark_dirty()
             return
 
-        self._mark_dirty()
+        self._publish_ready_state()
+        if self._activated and not self._timer.isActive():
+            self._timer.start()
 
     def _structure_changed(self, *_args) -> None:
         self._mark_dirty()
@@ -134,24 +149,32 @@ class QtTableSearchIndex(QObject):
 
     def _mark_dirty(self) -> None:
         self._dirty = True
-        self.ready_changed.emit(False)
-        self.start()
+        self._publish_ready_state()
+        if self._activated and not self._timer.isActive():
+            self._timer.start()
 
     def _data_changed(self, top_left, bottom_right, *_roles) -> None:
-        if self._model is None:
+        if self._model is None or not self._documents:
             return
         first = max(0, top_left.row())
         last = min(bottom_right.row(), len(self._documents) - 1)
         for row in range(first, last + 1):
             self._documents[row] = self._read_document(row)
 
+    def _publish_ready_state(self) -> None:
+        ready = self.is_ready
+        if ready != self._last_ready_state:
+            self._last_ready_state = ready
+            self.ready_changed.emit(ready)
+
     def _model_destroyed(self, *_args) -> None:
+        self._activated = False
         self._timer.stop()
         self._connections.clear()
         self._model = None
         self._documents.clear()
         self._next_row = 0
-        self.ready_changed.emit(False)
+        self._publish_ready_state()
 
     def _connect(self, signal, slot) -> None:
         signal.connect(slot)
@@ -167,43 +190,28 @@ class QtTableSearchIndex(QObject):
 
 
 class SearchIndexRegistry(QObject):
-    """Discovers CRT tables and prepares their indexes before Ctrl+F is used."""
+    """Creates indexes only for tables whose search function is actually used."""
 
-    def __init__(self, root: QWidget, parent: QObject | None = None) -> None:
+    def __init__(self, root: QWidget | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._root = root
+        self._root = root  # retained for API compatibility; no periodic discovery
         self._indexes: WeakKeyDictionary[object, QtTableSearchIndex] = WeakKeyDictionary()
-        self._discovery_timer = QTimer(self)
-        self._discovery_timer.setInterval(_DISCOVERY_INTERVAL_MS)
-        self._discovery_timer.timeout.connect(self.discover_tables)
-        self._discovery_timer.start()
-        QTimer.singleShot(0, self.discover_tables)
 
     def index_for_table(self, table: QTableView | None) -> QtTableSearchIndex | None:
         if table is None or table.model() is None:
             return None
-        return self.ensure_model(table.model())
+        return self.ensure_model(table.model(), activate=True)
 
-    def ensure_model(self, model) -> QtTableSearchIndex:
+    def ensure_model(self, model, *, activate: bool = False) -> QtTableSearchIndex:
         index = self._indexes.get(model)
         if index is None:
             index = QtTableSearchIndex(model, self)
             self._indexes[model] = index
-        else:
+        if activate:
             index.start()
         return index
 
-    def discover_tables(self) -> None:
-        root = self._root
-        if root is None:
-            return
-        for table in root.findChildren(QTableView):
-            model = table.model()
-            if model is not None:
-                self.ensure_model(model)
-
     def close(self) -> None:
-        self._discovery_timer.stop()
         for index in list(self._indexes.values()):
             index.close()
         self._indexes.clear()
