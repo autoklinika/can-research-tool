@@ -23,6 +23,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         self._search_index_registry: SearchIndexRegistry | None = None
         self._tracked_search_indexes: dict[int, tuple[str, str]] = {}
         self._stored_search_navigator: StoredSearchNavigator | None = None
+        self._stored_search_builtin_navigation_suspended = False
         super().__init__(services)
 
         self.project_preparation = ProjectPreparationProgress(self)
@@ -86,21 +87,39 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
     ) -> None:
         self._replace_stored_search_navigator(None)
         current = self.tabs.currentWidget()
-        if (
-            current is None
-            or table is None
-            or index is None
-            or getattr(index, "source_id", None) is None
-            or getattr(current, "frame_table", None) is not table
-            or not hasattr(current, "_stored_session_controller")
-            or not hasattr(current, "_stored_session_integration")
-        ):
+        persistent_raw_target = (
+            current is not None
+            and table is not None
+            and index is not None
+            and getattr(index, "source_id", None) is not None
+            and getattr(current, "frame_table", None) is table
+            and hasattr(current, "_stored_session_controller")
+            and hasattr(current, "_stored_session_integration")
+        )
+        self._set_builtin_result_navigation_enabled(window, not persistent_raw_target)
+        if not persistent_raw_target:
             return
         self._stored_search_navigator = StoredSearchNavigator(
             current,
             cancel_widget=window,
             parent=self,
         )
+
+    def _set_builtin_result_navigation_enabled(
+        self,
+        window: LogSearchWindow,
+        enabled: bool,
+    ) -> None:
+        signal = window.results.selectionModel().currentChanged
+        if enabled and self._stored_search_builtin_navigation_suspended:
+            signal.connect(window._result_selection_changed)
+            self._stored_search_builtin_navigation_suspended = False
+        elif not enabled and not self._stored_search_builtin_navigation_suspended:
+            try:
+                signal.disconnect(window._result_selection_changed)
+            except (RuntimeError, TypeError):
+                pass
+            self._stored_search_builtin_navigation_suspended = True
 
     def _stored_search_result_changed(
         self,
@@ -306,6 +325,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         target = self._log_search_window._target_table if self._log_search_window else None
         if target is not None and current is not None and current.isAncestorOf(target):
             self._replace_stored_search_navigator(None)
+            self._set_builtin_result_navigation_enabled(self._log_search_window, True)
             self._log_search_window.set_target_index(None, None)
         super()._close_tab(index)
 
