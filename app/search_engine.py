@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Iterable, Mapping, Sequence
 
@@ -30,6 +30,16 @@ class SearchQueryError(ValueError):
 class SearchDocument:
     row: int
     fields: Mapping[str, str]
+    normalized_fields: Mapping[str, str] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        materialized = {name: str(value or "") for name, value in self.fields.items()}
+        object.__setattr__(self, "fields", materialized)
+        object.__setattr__(
+            self,
+            "normalized_fields",
+            {name: value.casefold() for name, value in materialized.items()},
+        )
 
     @classmethod
     def from_columns(cls, row: int, columns: Sequence[object]) -> "SearchDocument":
@@ -75,17 +85,25 @@ class _CompiledTerm:
             flags = 0 if query.case_sensitive else re.IGNORECASE
             self._regex = re.compile(fnmatch.translate(text), flags)
 
-    def matches(self, value: str) -> bool:
+    @property
+    def uses_raw_value(self) -> bool:
+        return self._regex is not None or self.case_sensitive
+
+    def matches_prepared(self, raw_value: str, normalized_value: str) -> bool:
         if self._regex is not None:
-            return self._regex.search(value) is not None
-        candidate = value if self.case_sensitive else value.casefold()
+            return self._regex.search(raw_value) is not None
+        candidate = raw_value if self.case_sensitive else normalized_value
         if self.mode == SearchMode.EXACT:
-            return any(candidate == item for item in self._alternatives)
+            return candidate in self._alternatives
         if self.mode == SearchMode.PREFIX:
-            return any(candidate.startswith(item) for item in self._alternatives)
+            return candidate.startswith(self._alternatives)
         if self.mode == SearchMode.SUFFIX:
-            return any(candidate.endswith(item) for item in self._alternatives)
+            return candidate.endswith(self._alternatives)
         return any(item in candidate for item in self._alternatives)
+
+    def matches(self, value: str) -> bool:
+        raw_value = str(value or "")
+        return self.matches_prepared(raw_value, raw_value.casefold())
 
     def _build_alternatives(self, text: str) -> tuple[str, ...]:
         values = [text]
@@ -111,27 +129,51 @@ class CompiledSearchQuery:
         self.logic = query.logic
         self.terms = tuple(_CompiledTerm(term, query) for term in terms)
 
+    def match_document(
+        self,
+        document: SearchDocument,
+    ) -> tuple[bool, tuple[str, ...], tuple[str, ...], tuple[tuple[str, str], ...]]:
+        selected_fields = self.query.fields
+        if selected_fields:
+            fields = tuple(
+                (name, value)
+                for name, value in document.fields.items()
+                if name in selected_fields
+            )
+        else:
+            fields = tuple(document.fields.items())
+
+        normalized = document.normalized_fields
+        matched_fields: list[str] = []
+        matched_field_set: set[str] = set()
+        matched_terms: list[str] = []
+
+        for term in self.terms:
+            term_matched = False
+            for name, raw_value in fields:
+                if term.matches_prepared(raw_value, normalized.get(name, raw_value.casefold())):
+                    term_matched = True
+                    if name not in matched_field_set:
+                        matched_field_set.add(name)
+                        matched_fields.append(name)
+
+            if term_matched:
+                matched_terms.append(term.text)
+                if self.logic == SearchLogic.ANY:
+                    return True, tuple(matched_fields), tuple(matched_terms), fields
+            elif self.logic == SearchLogic.ALL:
+                return False, (), (), fields
+
+        matched = len(matched_terms) == len(self.terms) if self.logic == SearchLogic.ALL else False
+        return matched, tuple(matched_fields), tuple(matched_terms), fields
+
     def match_fields(
         self,
         fields: Iterable[tuple[str, str]],
     ) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
-        materialized = [(name, str(value or "")) for name, value in fields]
-        matched_fields: list[str] = []
-        matched_terms: list[str] = []
-
-        for term in self.terms:
-            term_fields = [name for name, value in materialized if term.matches(value)]
-            if term_fields:
-                matched_terms.append(term.text)
-                for name in term_fields:
-                    if name not in matched_fields:
-                        matched_fields.append(name)
-
-        if self.logic == SearchLogic.ALL:
-            matched = len(matched_terms) == len(self.terms)
-        else:
-            matched = bool(matched_terms)
-        return matched, tuple(matched_fields), tuple(matched_terms)
+        document = SearchDocument(-1, dict(fields))
+        matched, matched_fields, matched_terms, _ = self.match_document(document)
+        return matched, matched_fields, matched_terms
 
     def matches(self, value: str) -> bool:
         matched, _, _ = self.match_fields((("value", value),))
@@ -155,27 +197,26 @@ class SearchEngine:
     ) -> list[SearchHit]:
         compiled = query if isinstance(query, CompiledSearchQuery) else self.compile(query)
         hits: list[SearchHit] = []
-        selected_fields = compiled.query.fields
+        append_hit = hits.append
+
         for index, document in enumerate(documents):
             if should_cancel is not None and index % 256 == 0 and should_cancel():
                 return []
-            fields = list(
-                document.fields.items()
-                if not selected_fields
-                else ((name, value) for name, value in document.fields.items() if name in selected_fields)
-            )
-            matched, matched_fields, matched_terms = compiled.match_fields(fields)
-            if matched:
-                hits.append(
-                    SearchHit(
-                        row=document.row,
-                        preview=" | ".join(str(value or "") for _, value in fields)[:preview_limit],
-                        matched_fields=matched_fields,
-                        matched_terms=matched_terms,
-                    )
+
+            matched, matched_fields, matched_terms, fields = compiled.match_document(document)
+            if not matched:
+                continue
+
+            append_hit(
+                SearchHit(
+                    row=document.row,
+                    preview=" | ".join(value for _, value in fields)[:preview_limit],
+                    matched_fields=matched_fields,
+                    matched_terms=matched_terms,
                 )
-                if result_limit is not None and len(hits) >= result_limit:
-                    break
+            )
+            if result_limit is not None and len(hits) >= result_limit:
+                break
         return hits
 
 
