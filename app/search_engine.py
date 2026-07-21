@@ -85,10 +85,6 @@ class _CompiledTerm:
             flags = 0 if query.case_sensitive else re.IGNORECASE
             self._regex = re.compile(fnmatch.translate(text), flags)
 
-    @property
-    def uses_raw_value(self) -> bool:
-        return self._regex is not None or self.case_sensitive
-
     def matches_prepared(self, raw_value: str, normalized_value: str) -> bool:
         if self._regex is not None:
             return self._regex.search(raw_value) is not None
@@ -151,7 +147,7 @@ class CompiledSearchQuery:
         for term in self.terms:
             term_matched = False
             for name, raw_value in fields:
-                if term.matches_prepared(raw_value, normalized.get(name, raw_value.casefold())):
+                if term.matches_prepared(raw_value, normalized[name]):
                     term_matched = True
                     if name not in matched_field_set:
                         matched_field_set.add(name)
@@ -159,12 +155,14 @@ class CompiledSearchQuery:
 
             if term_matched:
                 matched_terms.append(term.text)
-                if self.logic == SearchLogic.ANY:
-                    return True, tuple(matched_fields), tuple(matched_terms), fields
             elif self.logic == SearchLogic.ALL:
                 return False, (), (), fields
 
-        matched = len(matched_terms) == len(self.terms) if self.logic == SearchLogic.ALL else False
+        matched = (
+            len(matched_terms) == len(self.terms)
+            if self.logic == SearchLogic.ALL
+            else bool(matched_terms)
+        )
         return matched, tuple(matched_fields), tuple(matched_terms), fields
 
     def match_fields(
