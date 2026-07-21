@@ -10,7 +10,6 @@ from app.enhanced_stored_session_controller import (
 )
 from app.live_capture_controller import LiveCaptureController
 from app.project import CrtProject
-from app.session_stream import SessionPagedReader
 from infrastructure.desktop import reveal_path
 
 from .async_dbc_manager import AsyncDbcManagerWidget
@@ -33,6 +32,9 @@ from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
+
+
+_STORED_SESSION_PAGE_SIZE = 20_000
 
 
 class ApplicationContainer:
@@ -91,18 +93,20 @@ class ApplicationContainer:
         dbc_paths: tuple[Path, ...] = (),
     ) -> SessionViewWidget:
         session_path = Path(path)
-        frame_count = SessionPagedReader(session_path).frame_count
-        raw_frame_capacity = max(1, frame_count)
+        # A stored session is always presented through a bounded page. The complete
+        # raw log remains on disk and the durable project search index covers all
+        # frames in SQLite. Loading frame_count rows here made every session reopen
+        # repeat a full-log scan and looked like the search index was rebuilding.
         controller = self._stored_controller_factory(
             session_path,
-            page_size=raw_frame_capacity,
+            page_size=_STORED_SESSION_PAGE_SIZE,
         )
         return SessionViewWidget(
             session_path,
             dbc_paths=dbc_paths,
             controller=controller,
             stored_integration_factory=EnhancedStoredSessionIntegration,
-            raw_frame_capacity=raw_frame_capacity,
+            raw_frame_capacity=_STORED_SESSION_PAGE_SIZE,
         )
 
     def create_project_overview(self, project: CrtProject) -> ProjectOverviewWidget:
