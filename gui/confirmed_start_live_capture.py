@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from pathlib import Path
 
 from PySide6.QtWidgets import QDialog, QInputDialog, QLabel, QMessageBox
 
@@ -86,7 +85,6 @@ class ConfirmedStartLiveSaveIntegration(LiveSaveIntegration):
             dialog.setLabelText("Nazwa logu:")
             dialog.setInputMode(QInputDialog.InputMode.TextInput)
             dialog.setTextValue(suggested)
-            dialog.selectAll()
 
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return None
