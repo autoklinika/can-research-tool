@@ -32,6 +32,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/deferred_live_logical_smoke.py
+      - name: Verify deferred Live project save
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/deferred_log_save_smoke.py
       - name: Verify Live temp cleanup
         env:
           QT_QPA_PLATFORM: offscreen
