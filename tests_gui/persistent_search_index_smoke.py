@@ -20,6 +20,7 @@ def main() -> None:
 
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(f"{temporary}/project", name="Persistent smoke")
+        project_database = project.database_path
         path = project.imported_sessions_dir / "sample.crt.jsonl"
         frames = [
             CanFrame(1, 1_000_000, 0x123, b"\x27\x07"),
@@ -73,10 +74,12 @@ def main() -> None:
         app.processEvents()
 
         # Windows refuses to unlink an SQLite database while any connection or
-        # cursor still owns a file handle. This assertion therefore verifies the
+        # cursor still owns a file handle. These assertions therefore verify the
         # real lifecycle contract instead of relying on POSIX cleanup semantics.
         search_database.unlink()
         assert not search_database.exists()
+        project_database.unlink()
+        assert not project_database.exists()
 
 
 if __name__ == "__main__":
