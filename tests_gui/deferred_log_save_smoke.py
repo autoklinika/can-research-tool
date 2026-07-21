@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-from tempfile import TemporaryDirectory
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QCheckBox
+from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
 
 from app.capture_service import CapturePaths, CaptureState, CaptureStatus
 from app.project import CrtProject
@@ -30,6 +30,12 @@ def main() -> None:
         integration = live._live_save_integration
 
         assert live.findChild(QCheckBox, "armSessionSaveButton") is None
+        assert live.session_name.isHidden()
+        assert not any(
+            label.isVisible() and label.text().strip() == "Nazwa sesji:"
+            for label in live.findChildren(QLabel)
+        )
+
         file_menu = next(
             action.menu()
             for action in window.menuBar().actions()
@@ -42,10 +48,10 @@ def main() -> None:
         temp_dir = project.root / ".crt" / "temp" / "live"
         temp_dir.mkdir(parents=True, exist_ok=True)
         paths = CapturePaths(
-            session=temp_dir / "bench_case.crt.jsonl",
-            raw_frames_csv=temp_dir / "bench_case.frames.csv",
-            logical_messages_csv=temp_dir / "bench_case.messages.csv",
-            markers=temp_dir / "bench_case.markers.jsonl",
+            session=temp_dir / "live_temp_technical.crt.jsonl",
+            raw_frames_csv=temp_dir / "live_temp_technical.frames.csv",
+            logical_messages_csv=temp_dir / "live_temp_technical.messages.csv",
+            markers=temp_dir / "live_temp_technical.markers.jsonl",
         )
         paths.session.write_text('{"record":"session"}\n', encoding="utf-8")
         paths.raw_frames_csv.write_text("timestamp_ns\n", encoding="utf-8")
@@ -73,8 +79,9 @@ def main() -> None:
         )
         integration._pending_paths = paths
         integration._pending_status = status
-        integration._pending_name = "bench_case"
+        integration._pending_name = "live_temp_technical"
         integration._transient_finalized = True
+        integration._request_log_name = lambda: "EGR próba 01"
         live._analysis_session_path = paths.session
 
         window._sync_save_log_action()
@@ -82,11 +89,12 @@ def main() -> None:
         window._save_pending_live_log()
         app.processEvents()
 
-        saved = project.live_sessions_dir / "bench_case.crt.jsonl"
+        saved = project.live_sessions_dir / "EGR_pr_ba_01.crt.jsonl"
         assert saved.is_file()
         assert not paths.session.exists()
         record = project.session_by_path(saved)
         assert record is not None
+        assert record.name == "EGR próba 01"
         assert record.status == "ready"
         assert record.frame_count == 42
         assert record.marker_count == 2
