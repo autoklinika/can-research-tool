@@ -5,14 +5,17 @@ from PySide6.QtWidgets import QTableView
 
 from .fixed_marker_menu_shell import FixedMarkerMenuMainWindow
 from .log_search_window import LogSearchWindow
+from .search_index_registry import SearchIndexRegistry
 
 
 class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
-    """Engineering shell with an independent, non-modal log search window."""
+    """Engineering shell with prebuilt indexes for every visible CRT table."""
 
     def __init__(self, services) -> None:
         self._log_search_window: LogSearchWindow | None = None
+        self._search_index_registry: SearchIndexRegistry | None = None
         super().__init__(services)
+        self._search_index_registry = SearchIndexRegistry(self.tabs, self)
 
     def _build_actions(self) -> None:
         super()._build_actions()
@@ -30,7 +33,12 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         if window is None:
             window = LogSearchWindow(self)
             self._log_search_window = window
-        window.set_target_table(self._active_search_table())
+
+        table = self._active_search_table()
+        registry = self._search_index_registry
+        index = registry.index_for_table(table) if registry is not None else None
+        window.set_target_index(table, index)
+
         if window.isMinimized():
             window.showNormal()
         else:
@@ -63,5 +71,10 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         current = self.tabs.widget(index)
         target = self._log_search_window._target_table if self._log_search_window else None
         if target is not None and current is not None and current.isAncestorOf(target):
-            self._log_search_window.set_target_table(None)
+            self._log_search_window.set_target_index(None, None)
         super()._close_tab(index)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._search_index_registry is not None:
+            self._search_index_registry.close()
+        super().closeEvent(event)
