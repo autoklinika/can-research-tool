@@ -28,6 +28,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/project_preparation_progress_smoke.py
+      - name: Verify persistent project search index
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/persistent_search_index_smoke.py
       - name: Verify project overview session details
         env:
           QT_QPA_PLATFORM: offscreen
