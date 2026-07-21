@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from tempfile import TemporaryDirectory
 
@@ -59,6 +60,12 @@ def main() -> None:
         assert [hit.row for hit in result.hits] == [1]
         registry.close()
 
+        # Reproduce metadata drift seen on Windows between application launches.
+        # The content hash is unchanged, so the existing SQLite index must be
+        # accepted immediately without scheduling another build worker.
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+
         reopened_project = CrtProject.open(project.root)
         reopened_registry = SearchIndexRegistry()
         reused = reopened_registry.index_for_table(
@@ -69,6 +76,7 @@ def main() -> None:
         assert isinstance(reused, PersistentSessionSearchIndex)
         assert reused.is_ready
         assert reused.progress == (len(frames), len(frames))
+        assert reused._task is None
         reopened_registry.close()
         table.deleteLater()
         app.processEvents()
