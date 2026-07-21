@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -46,6 +47,21 @@ def _prepare_startup_settings() -> QSettings:
     return settings
 
 
+def _cleanup_live_temp(settings: QSettings) -> None:
+    """Remove deferred Live Capture artifacts after all GUI sessions are closed."""
+
+    project_path = settings.value("project/lastPath", "", str).strip()
+    if not project_path:
+        return
+
+    live_temp_dir = Path(project_path) / ".crt" / "temp" / "live"
+    if not live_temp_dir.exists():
+        return
+
+    shutil.rmtree(live_temp_dir)
+    _checkpoint(f"10 removed Live temp directory: {live_temp_dir}")
+
+
 def main() -> int:
     _STARTUP_LOG.write_text("CRT startup\n", encoding="utf-8")
     _checkpoint("01 before QApplication")
@@ -74,6 +90,11 @@ def main() -> int:
 
     exit_code = app.exec()
     _checkpoint(f"09 event loop finished: {exit_code}")
+
+    try:
+        _cleanup_live_temp(startup_settings)
+    except OSError as exc:
+        _checkpoint(f"10 Live temp cleanup failed: {exc}")
 
     startup_settings.setValue(_CLEAN_SHUTDOWN_KEY, True)
     startup_settings.sync()
