@@ -20,7 +20,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.search_engine import SearchDocument, SearchEngine, SearchHit, SearchMode, SearchQuery
+from app.search_engine import (
+    SearchDocument,
+    SearchEngine,
+    SearchHit,
+    SearchLogic,
+    SearchMode,
+    SearchQuery,
+)
 
 
 _MODE_LABELS: tuple[tuple[str, SearchMode], ...] = (
@@ -30,6 +37,11 @@ _MODE_LABELS: tuple[tuple[str, SearchMode], ...] = (
     ("Kończy się na", SearchMode.SUFFIX),
     ("Wildcard (*, ?)", SearchMode.WILDCARD),
     ("Regex", SearchMode.REGEX),
+)
+
+_LOGIC_LABELS: tuple[tuple[str, SearchLogic], ...] = (
+    ("Dowolny element (OR)", SearchLogic.ANY),
+    ("Wszystkie elementy (AND)", SearchLogic.ALL),
 )
 
 
@@ -55,23 +67,19 @@ class _SearchTask(QRunnable):
         try:
             hits = SearchEngine().search(self.documents, self.query)
             self.signals.finished.emit(self.generation, hits)
-        except Exception as exc:  # pragma: no cover - defensive worker boundary
+        except Exception as exc:  # pragma: no cover
             self.signals.failed.emit(self.generation, str(exc))
 
 
 class LogSearchWindow(QMainWindow):
-    """Independent SearchEngine front-end for the currently active table.
-
-    Search only reads a snapshot of display data. It never changes filtering,
-    capture, source-model visibility or persisted session contents.
-    """
+    """Independent SearchEngine front-end for the active table."""
 
     def __init__(self, parent: QMainWindow) -> None:
         super().__init__(parent, Qt.Window)
         self.setObjectName("logSearchWindow")
         self.setWindowTitle("SearchEngine — wyszukiwanie w logach")
-        self.setMinimumSize(780, 520)
-        self.resize(980, 680)
+        self.setMinimumSize(800, 540)
+        self.resize(1000, 700)
 
         self._generation = 0
         self._target_table: QTableView | None = None
@@ -88,41 +96,58 @@ class LogSearchWindow(QMainWindow):
         query_row = QHBoxLayout()
         self.query_edit = QLineEdit(root_widget)
         self.query_edit.setObjectName("logSearchQuery")
-        self.query_edit.setPlaceholderText("CAN ID, HEX, ASCII, SID, DID, PGN, tekst…")
+        self.query_edit.setPlaceholderText(
+            "Wpisz jeden lub kilka elementów rozdzielonych przecinkami, np. seed, key"
+        )
+
         self.mode_combo = QComboBox(root_widget)
         self.mode_combo.setObjectName("logSearchMode")
         for label, mode in _MODE_LABELS:
             self.mode_combo.addItem(label, mode.value)
         self.mode_combo.setMinimumWidth(170)
+
+        self.logic_combo = QComboBox(root_widget)
+        self.logic_combo.setObjectName("logSearchLogic")
+        for label, logic in _LOGIC_LABELS:
+            self.logic_combo.addItem(label, logic.value)
+        self.logic_combo.setMinimumWidth(205)
+
         self.search_button = QPushButton("Szukaj", root_widget)
         self.search_button.setObjectName("logSearchStart")
         self.search_button.setDefault(True)
+
         query_row.addWidget(self.query_edit, 1)
         query_row.addWidget(self.mode_combo)
+        query_row.addWidget(self.logic_combo)
         query_row.addWidget(self.search_button)
         root.addLayout(query_row)
 
-        options_row = QHBoxLayout()
-        self.case_sensitive_check = QCheckBox("Uwzględniaj wielkość liter", root_widget)
-        self.case_sensitive_check.setObjectName("logSearchCaseSensitive")
+        hint_row = QHBoxLayout()
+        self.multi_hint_label = QLabel(
+            "Wiele elementów: seed, key, 27 07 — logikę OR/AND wybierz obok pola wyszukiwania",
+            root_widget,
+        )
+        self.multi_hint_label.setObjectName("logSearchMultiHint")
         self.hex_hint_label = QLabel(
             "HEX inteligentny: 18DAF900 = 18 DA F9 00 = 0x18DAF900",
             root_widget,
         )
         self.hex_hint_label.setObjectName("logSearchHexHint")
         self.hex_hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        options_row.addWidget(self.case_sensitive_check)
-        options_row.addStretch(1)
-        options_row.addWidget(self.hex_hint_label)
-        root.addLayout(options_row)
+        hint_row.addWidget(self.multi_hint_label)
+        hint_row.addStretch(1)
+        hint_row.addWidget(self.hex_hint_label)
+        root.addLayout(hint_row)
 
         self.fields_group = QGroupBox("Zakres wyszukiwania", root_widget)
         self.fields_group.setObjectName("logSearchFieldsGroup")
         fields_root = QVBoxLayout(self.fields_group)
+
         self.all_fields_check = QCheckBox("Wszystkie kolumny aktywnej tabeli", self.fields_group)
         self.all_fields_check.setObjectName("logSearchAllFields")
         self.all_fields_check.setChecked(True)
         fields_root.addWidget(self.all_fields_check)
+
         self.fields_widget = QWidget(self.fields_group)
         self.fields_layout = QGridLayout(self.fields_widget)
         self.fields_layout.setContentsMargins(0, 0, 0, 0)
@@ -175,13 +200,16 @@ class LogSearchWindow(QMainWindow):
         geometry = settings.value("windows/logSearchGeometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
+
         saved_mode = str(settings.value("windows/logSearchMode", SearchMode.CONTAINS.value))
         mode_index = self.mode_combo.findData(saved_mode)
         if mode_index >= 0:
             self.mode_combo.setCurrentIndex(mode_index)
-        self.case_sensitive_check.setChecked(
-            settings.value("windows/logSearchCaseSensitive", False, type=bool)
-        )
+
+        saved_logic = str(settings.value("windows/logSearchLogic", SearchLogic.ANY.value))
+        logic_index = self.logic_combo.findData(saved_logic)
+        if logic_index >= 0:
+            self.logic_combo.setCurrentIndex(logic_index)
 
     def set_target_table(self, table: QTableView | None) -> None:
         self._target_table = table
@@ -235,12 +263,11 @@ class LogSearchWindow(QMainWindow):
             }
             documents.append(SearchDocument(row=row, fields=fields))
 
-        mode = SearchMode(str(self.mode_combo.currentData()))
         query = SearchQuery(
             text=query_text,
-            mode=mode,
+            mode=SearchMode(str(self.mode_combo.currentData())),
             fields=frozenset(selected_fields),
-            case_sensitive=self.case_sensitive_check.isChecked(),
+            logic=SearchLogic(str(self.logic_combo.currentData())),
         )
         task = _SearchTask(generation, query, documents)
         task.signals.finished.connect(self._search_finished)
@@ -256,7 +283,10 @@ class LogSearchWindow(QMainWindow):
         self.results.clear()
         for hit in self._hits:
             fields = ", ".join(hit.matched_fields)
-            item = QListWidgetItem(f"Wiersz {hit.row + 1}  [{fields}]\n{hit.preview}")
+            terms = ", ".join(hit.matched_terms)
+            item = QListWidgetItem(
+                f"Wiersz {hit.row + 1}  [{fields}]  Dopasowano: {terms}\n{hit.preview}"
+            )
             item.setData(Qt.UserRole, hit.row)
             self.results.addItem(item)
         self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
@@ -276,16 +306,14 @@ class LogSearchWindow(QMainWindow):
         QMessageBox.critical(self, "Wyszukiwanie", error)
 
     def next_result(self) -> None:
-        if not self._hits:
-            return
-        current = self.results.currentRow()
-        self.results.setCurrentRow((current + 1) % len(self._hits))
+        if self._hits:
+            current = self.results.currentRow()
+            self.results.setCurrentRow((current + 1) % len(self._hits))
 
     def previous_result(self) -> None:
-        if not self._hits:
-            return
-        current = self.results.currentRow()
-        self.results.setCurrentRow((current - 1) % len(self._hits))
+        if self._hits:
+            current = self.results.currentRow()
+            self.results.setCurrentRow((current - 1) % len(self._hits))
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         if (
@@ -348,7 +376,7 @@ class LogSearchWindow(QMainWindow):
         for index, header in enumerate(headers):
             checkbox = QCheckBox(header, self.fields_widget)
             checkbox.setObjectName(f"logSearchField{index}")
-            checkbox.setChecked(True)
+            checkbox.setChecked(False)
             checkbox.setEnabled(not self.all_fields_check.isChecked())
             self.fields_layout.addWidget(checkbox, index // 4, index % 4)
             self._field_checkboxes[header] = checkbox
@@ -356,6 +384,8 @@ class LogSearchWindow(QMainWindow):
 
     def _all_fields_toggled(self, checked: bool) -> None:
         for checkbox in self._field_checkboxes.values():
+            if not checked:
+                checkbox.setChecked(False)
             checkbox.setEnabled(not checked)
 
     def _selected_fields(self) -> set[str]:
@@ -382,7 +412,7 @@ class LogSearchWindow(QMainWindow):
         settings = QSettings()
         settings.setValue("windows/logSearchGeometry", self.saveGeometry())
         settings.setValue("windows/logSearchMode", self.mode_combo.currentData())
-        settings.setValue("windows/logSearchCaseSensitive", self.case_sensitive_check.isChecked())
+        settings.setValue("windows/logSearchLogic", self.logic_combo.currentData())
         super().closeEvent(event)
 
     def __del__(self) -> None:
