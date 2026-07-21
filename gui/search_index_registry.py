@@ -217,8 +217,11 @@ class SearchIndexRegistry(QObject):
                 session is not None
                 and session.status != "recording"
                 and callable(getattr(model, "frame_at", None))
-                and int(model.rowCount()) == int(session.frame_count)
             ):
+                # Stored-session frame tables are paged and normally expose only
+                # a small slice of a much larger log. Requiring rowCount() to equal
+                # session.frame_count would reject the durable SQLite index and
+                # rebuild an in-memory page index on every application launch.
                 persistent = self.persistent_index_for_session(
                     project,
                     session_path,
