@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QModelIndex, Qt, Slot
-from PySide6.QtWidgets import QAbstractItemView, QPushButton
+from PySide6.QtWidgets import QAbstractItemView
 
 from app.markers import CaptureMarker
 
@@ -19,28 +19,18 @@ class DetailedLogicalSessionViewWidget(SqliteLogicalSessionViewWidget):
         self._marker_window: SessionMarkerWindow | None = None
         self._pending_marker: CaptureMarker | None = None
         self.message_table.doubleClicked.connect(self._open_message_details)
-        self._replace_marker_tab_with_window_button()
+        self._remove_marker_tab()
 
-    def _replace_marker_tab_with_window_button(self) -> None:
+    def _remove_marker_tab(self) -> None:
         marker_page = self.marker_table.parentWidget()
         marker_index = self.tabs.indexOf(marker_page)
         if marker_index >= 0:
             self.tabs.removeTab(marker_index)
             marker_page.hide()
 
-        marker_count = self.marker_model.rowCount()
-        self.marker_window_button = QPushButton(f"Znaczniki ({marker_count})", self.tabs)
-        self.marker_window_button.setObjectName("openSessionMarkerWindow")
-        self.marker_window_button.setToolTip(
-            "Otwórz znaczniki tej sesji w osobnym oknie nawigacyjnym."
-        )
-        self.marker_window_button.clicked.connect(self._open_marker_window)
-        self.tabs.setCornerWidget(
-            self.marker_window_button,
-            Qt.Corner.TopRightCorner,
-        )
+    def open_marker_window(self) -> None:
+        """Open the non-modal marker navigator for this stored session."""
 
-    def _open_marker_window(self) -> None:
         window = self._marker_window
         if window is None:
             window = SessionMarkerWindow(self.path, parent=self.window())
@@ -157,10 +147,7 @@ class DetailedLogicalSessionViewWidget(SqliteLogicalSessionViewWidget):
         candidates = [
             row for row in (low - 1, low) if 0 <= row < len(identifiers)
         ]
-        timed = [
-            (row, timestamp_at(row))
-            for row in candidates
-        ]
+        timed = [(row, timestamp_at(row)) for row in candidates]
         timed = [(row, value) for row, value in timed if value is not None]
         if not timed:
             return None
