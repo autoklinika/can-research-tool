@@ -40,8 +40,8 @@ _MODE_LABELS: tuple[tuple[str, SearchMode], ...] = (
 )
 
 _LOGIC_LABELS: tuple[tuple[str, SearchLogic], ...] = (
-    ("Dowolny element (OR)", SearchLogic.ANY),
-    ("Wszystkie elementy (AND)", SearchLogic.ALL),
+    ("OR", SearchLogic.ANY),
+    ("AND", SearchLogic.ALL),
 )
 
 
@@ -77,9 +77,9 @@ class LogSearchWindow(QMainWindow):
     def __init__(self, parent: QMainWindow) -> None:
         super().__init__(parent, Qt.Window)
         self.setObjectName("logSearchWindow")
-        self.setWindowTitle("SearchEngine — wyszukiwanie w logach")
-        self.setMinimumSize(800, 540)
-        self.resize(1000, 700)
+        self.setWindowTitle("Wyszukiwanie w logach")
+        self.setMinimumSize(800, 500)
+        self.resize(1000, 660)
 
         self._generation = 0
         self._target_table: QTableView | None = None
@@ -96,9 +96,7 @@ class LogSearchWindow(QMainWindow):
         query_row = QHBoxLayout()
         self.query_edit = QLineEdit(root_widget)
         self.query_edit.setObjectName("logSearchQuery")
-        self.query_edit.setPlaceholderText(
-            "Wpisz jeden lub kilka elementów rozdzielonych przecinkami, np. seed, key"
-        )
+        self.query_edit.setPlaceholderText("Szukaj; kilka elementów rozdziel przecinkami")
 
         self.mode_combo = QComboBox(root_widget)
         self.mode_combo.setObjectName("logSearchMode")
@@ -110,7 +108,7 @@ class LogSearchWindow(QMainWindow):
         self.logic_combo.setObjectName("logSearchLogic")
         for label, logic in _LOGIC_LABELS:
             self.logic_combo.addItem(label, logic.value)
-        self.logic_combo.setMinimumWidth(205)
+        self.logic_combo.setMinimumWidth(75)
 
         self.search_button = QPushButton("Szukaj", root_widget)
         self.search_button.setObjectName("logSearchStart")
@@ -122,28 +120,11 @@ class LogSearchWindow(QMainWindow):
         query_row.addWidget(self.search_button)
         root.addLayout(query_row)
 
-        hint_row = QHBoxLayout()
-        self.multi_hint_label = QLabel(
-            "Wiele elementów: seed, key, 27 07 — logikę OR/AND wybierz obok pola wyszukiwania",
-            root_widget,
-        )
-        self.multi_hint_label.setObjectName("logSearchMultiHint")
-        self.hex_hint_label = QLabel(
-            "HEX inteligentny: 18DAF900 = 18 DA F9 00 = 0x18DAF900",
-            root_widget,
-        )
-        self.hex_hint_label.setObjectName("logSearchHexHint")
-        self.hex_hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        hint_row.addWidget(self.multi_hint_label)
-        hint_row.addStretch(1)
-        hint_row.addWidget(self.hex_hint_label)
-        root.addLayout(hint_row)
-
-        self.fields_group = QGroupBox("Zakres wyszukiwania", root_widget)
+        self.fields_group = QGroupBox("Zakres", root_widget)
         self.fields_group.setObjectName("logSearchFieldsGroup")
         fields_root = QVBoxLayout(self.fields_group)
 
-        self.all_fields_check = QCheckBox("Wszystkie kolumny aktywnej tabeli", self.fields_group)
+        self.all_fields_check = QCheckBox("Wszystkie kolumny", self.fields_group)
         self.all_fields_check.setObjectName("logSearchAllFields")
         self.all_fields_check.setChecked(True)
         fields_root.addWidget(self.all_fields_check)
@@ -155,10 +136,6 @@ class LogSearchWindow(QMainWindow):
         self.fields_layout.setVerticalSpacing(4)
         fields_root.addWidget(self.fields_widget)
         root.addWidget(self.fields_group)
-
-        self.scope_label = QLabel("Źródło: aktywna tabela", root_widget)
-        self.scope_label.setObjectName("logSearchScope")
-        root.addWidget(self.scope_label)
 
         nav_row = QHBoxLayout()
         self.previous_button = QPushButton("Poprzedni (V)", root_widget)
@@ -214,17 +191,6 @@ class LogSearchWindow(QMainWindow):
     def set_target_table(self, table: QTableView | None) -> None:
         self._target_table = table
         self._rebuild_field_choices()
-        if table is None:
-            self.scope_label.setText("Źródło: brak aktywnej tabeli")
-            return
-        model = table.model()
-        if model is None:
-            name = table.objectName() or "tabela"
-            rows = 0
-        else:
-            name = table.objectName() or model.__class__.__name__
-            rows = model.rowCount()
-        self.scope_label.setText(f"Źródło: {name} — {rows:,} wierszy".replace(",", " "))
 
     def start_search(self) -> None:
         query_text = self.query_edit.text().strip()
@@ -284,9 +250,7 @@ class LogSearchWindow(QMainWindow):
         for hit in self._hits:
             fields = ", ".join(hit.matched_fields)
             terms = ", ".join(hit.matched_terms)
-            item = QListWidgetItem(
-                f"Wiersz {hit.row + 1}  [{fields}]  Dopasowano: {terms}\n{hit.preview}"
-            )
+            item = QListWidgetItem(f"{hit.row + 1}  [{fields}]  {terms}\n{hit.preview}")
             item.setData(Qt.UserRole, hit.row)
             self.results.addItem(item)
         self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
@@ -338,7 +302,7 @@ class LogSearchWindow(QMainWindow):
 
     def _result_selection_changed(self, index: int) -> None:
         if 0 <= index < len(self._hits):
-            self.position_label.setText(f"Pozycja {index + 1} / {len(self._hits)}")
+            self.position_label.setText(f"{index + 1} / {len(self._hits)}")
         else:
             self.position_label.clear()
         self._navigate_to_hit(index)
