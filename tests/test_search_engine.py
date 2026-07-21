@@ -111,3 +111,22 @@ def test_result_limit_stops_scan_output() -> None:
     hits = SearchEngine().search(documents, SearchQuery("match"), result_limit=3)
 
     assert [hit.row for hit in hits] == [0, 1, 2]
+
+
+def test_cancelled_scan_returns_no_partial_results() -> None:
+    documents = [SearchDocument(index, {"text": "match"}) for index in range(1_000)]
+    checks = 0
+
+    def should_cancel() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    hits = SearchEngine().search(
+        documents,
+        SearchQuery("match"),
+        should_cancel=should_cancel,
+    )
+
+    assert hits == []
+    assert checks == 2
