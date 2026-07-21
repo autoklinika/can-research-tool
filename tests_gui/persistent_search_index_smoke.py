@@ -72,6 +72,12 @@ def main() -> None:
         table.deleteLater()
         app.processEvents()
 
+        # Windows refuses to unlink an SQLite database while any connection or
+        # cursor still owns a file handle. This assertion therefore verifies the
+        # real lifecycle contract instead of relying on POSIX cleanup semantics.
+        search_database.unlink()
+        assert not search_database.exists()
+
 
 if __name__ == "__main__":
     main()
