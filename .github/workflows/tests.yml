@@ -220,14 +220,16 @@ jobs:
               assert window.explorer.tree.model().rowCount() == 1
 
               QThreadPool.globalInstance().waitForDone(5_000)
-              window.navigator.close_all()
               if window._filter_window is not None:
                   window._filter_window.close()
-                  window._filter_window.deleteLater()
+              window.navigator.close_all()
               window.close()
+              # Drain queued callbacks while the window hierarchy still exists.
+              app.processEvents()
+              if window._filter_window is not None:
+                  window._filter_window.deleteLater()
               window.deleteLater()
               QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-              app.processEvents()
 
               del manager
               del decoders
