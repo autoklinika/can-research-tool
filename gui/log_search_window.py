@@ -3,9 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -114,13 +112,6 @@ class LogSearchWindow(QMainWindow):
         self.results.itemActivated.connect(self._activate_item)
         self.results.currentRowChanged.connect(self._navigate_to_hit)
 
-        self._next_shortcut = QShortcut(QKeySequence("N"), self)
-        self._next_shortcut.setContext(Qt.WindowShortcut)
-        self._next_shortcut.activated.connect(self._next_shortcut_requested)
-        self._previous_shortcut = QShortcut(QKeySequence("V"), self)
-        self._previous_shortcut.setContext(Qt.WindowShortcut)
-        self._previous_shortcut.activated.connect(self._previous_shortcut_requested)
-
         geometry = QSettings().value("windows/logSearchGeometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
@@ -131,8 +122,12 @@ class LogSearchWindow(QMainWindow):
             self.scope_label.setText("Zakres: brak aktywnej tabeli")
             return
         model = table.model()
-        name = table.objectName() or model.__class__.__name__ if model is not None else "tabela"
-        rows = model.rowCount() if model is not None else 0
+        if model is None:
+            name = table.objectName() or "tabela"
+            rows = 0
+        else:
+            name = table.objectName() or model.__class__.__name__
+            rows = model.rowCount()
         self.scope_label.setText(f"Zakres: {name} ({rows:,} wierszy)".replace(",", " "))
 
     def start_search(self) -> None:
@@ -198,15 +193,16 @@ class LogSearchWindow(QMainWindow):
         current = self.results.currentRow()
         self.results.setCurrentRow((current - 1) % len(self._hits))
 
-    def _next_shortcut_requested(self) -> None:
-        if QApplication.focusWidget() is self.query_edit:
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.modifiers() == Qt.NoModifier and event.key() == Qt.Key_N:
+            self.next_result()
+            event.accept()
             return
-        self.next_result()
-
-    def _previous_shortcut_requested(self) -> None:
-        if QApplication.focusWidget() is self.query_edit:
+        if event.modifiers() == Qt.NoModifier and event.key() == Qt.Key_V:
+            self.previous_result()
+            event.accept()
             return
-        self.previous_result()
+        super().keyPressEvent(event)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
         self._navigate_to_hit(self.results.row(item))
