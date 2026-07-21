@@ -16,6 +16,11 @@ class SearchMode(StrEnum):
     REGEX = "regex"
 
 
+class SearchLogic(StrEnum):
+    ANY = "any"
+    ALL = "all"
+
+
 class SearchQueryError(ValueError):
     """Raised when a search query cannot be compiled."""
 
@@ -39,6 +44,7 @@ class SearchQuery:
     mode: SearchMode = SearchMode.CONTAINS
     fields: frozenset[str] = frozenset()
     case_sensitive: bool = False
+    logic: SearchLogic | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,15 +52,14 @@ class SearchHit:
     row: int
     preview: str
     matched_fields: tuple[str, ...]
+    matched_terms: tuple[str, ...] = ()
 
 
-class CompiledSearchQuery:
-    def __init__(self, query: SearchQuery) -> None:
-        text = query.text.strip()
-        if not text:
-            raise SearchQueryError("Zapytanie wyszukiwania nie może być puste.")
-        self.query = query
-        self._needle = text if query.case_sensitive else text.casefold()
+class _CompiledTerm:
+    def __init__(self, text: str, query: SearchQuery) -> None:
+        self.text = text
+        self.mode = query.mode
+        self.case_sensitive = query.case_sensitive
         self._alternatives = self._build_alternatives(text)
         self._regex: re.Pattern[str] | None = None
         if query.mode == SearchMode.REGEX:
@@ -62,7 +67,9 @@ class CompiledSearchQuery:
             try:
                 self._regex = re.compile(text, flags)
             except re.error as exc:
-                raise SearchQueryError(f"Nieprawidłowe wyrażenie regularne: {exc}") from exc
+                raise SearchQueryError(
+                    f"Nieprawidłowe wyrażenie regularne „{text}”: {exc}"
+                ) from exc
         elif query.mode == SearchMode.WILDCARD:
             flags = 0 if query.case_sensitive else re.IGNORECASE
             self._regex = re.compile(fnmatch.translate(text), flags)
@@ -70,12 +77,12 @@ class CompiledSearchQuery:
     def matches(self, value: str) -> bool:
         if self._regex is not None:
             return self._regex.search(value) is not None
-        candidate = value if self.query.case_sensitive else value.casefold()
-        if self.query.mode == SearchMode.EXACT:
+        candidate = value if self.case_sensitive else value.casefold()
+        if self.mode == SearchMode.EXACT:
             return any(candidate == item for item in self._alternatives)
-        if self.query.mode == SearchMode.PREFIX:
+        if self.mode == SearchMode.PREFIX:
             return any(candidate.startswith(item) for item in self._alternatives)
-        if self.query.mode == SearchMode.SUFFIX:
+        if self.mode == SearchMode.SUFFIX:
             return any(candidate.endswith(item) for item in self._alternatives)
         return any(item in candidate for item in self._alternatives)
 
@@ -90,8 +97,41 @@ class CompiledSearchQuery:
                     f"0x{compact}",
                 )
             )
-        normalized = values if self.query.case_sensitive else [value.casefold() for value in values]
+        normalized = values if self.case_sensitive else [value.casefold() for value in values]
         return tuple(dict.fromkeys(normalized))
+
+
+class CompiledSearchQuery:
+    def __init__(self, query: SearchQuery) -> None:
+        terms, detected_logic = _parse_terms(query.text)
+        if not terms:
+            raise SearchQueryError("Zapytanie wyszukiwania nie może być puste.")
+        self.query = query
+        self.logic = query.logic or detected_logic
+        self.terms = tuple(_CompiledTerm(term, query) for term in terms)
+
+    def match_fields(self, fields: Iterable[tuple[str, str]]) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+        materialized = [(name, str(value or "")) for name, value in fields]
+        matched_fields: list[str] = []
+        matched_terms: list[str] = []
+
+        for term in self.terms:
+            term_fields = [name for name, value in materialized if term.matches(value)]
+            if term_fields:
+                matched_terms.append(term.text)
+                for name in term_fields:
+                    if name not in matched_fields:
+                        matched_fields.append(name)
+
+        if self.logic == SearchLogic.ALL:
+            matched = len(matched_terms) == len(self.terms)
+        else:
+            matched = bool(matched_terms)
+        return matched, tuple(matched_fields), tuple(matched_terms)
+
+    def matches(self, value: str) -> bool:
+        matched, _, _ = self.match_fields((("value", value),))
+        return matched
 
 
 class SearchEngine:
@@ -112,29 +152,45 @@ class SearchEngine:
         hits: list[SearchHit] = []
         selected_fields = compiled.query.fields
         for document in documents:
-            fields = (
+            fields = list(
                 document.fields.items()
                 if not selected_fields
                 else ((name, value) for name, value in document.fields.items() if name in selected_fields)
             )
-            matched: list[str] = []
-            preview_parts: list[str] = []
-            for name, raw_value in fields:
-                value = str(raw_value or "")
-                preview_parts.append(value)
-                if compiled.matches(value):
-                    matched.append(name)
+            matched, matched_fields, matched_terms = compiled.match_fields(fields)
             if matched:
                 hits.append(
                     SearchHit(
                         row=document.row,
-                        preview=" | ".join(preview_parts)[:preview_limit],
-                        matched_fields=tuple(matched),
+                        preview=" | ".join(str(value or "") for _, value in fields)[:preview_limit],
+                        matched_fields=matched_fields,
+                        matched_terms=matched_terms,
                     )
                 )
                 if result_limit is not None and len(hits) >= result_limit:
                     break
         return hits
+
+
+def _parse_terms(text: str) -> tuple[tuple[str, ...], SearchLogic]:
+    normalized = text.strip()
+    if not normalized:
+        return (), SearchLogic.ANY
+
+    if "&&" in normalized:
+        parts = normalized.split("&&")
+        logic = SearchLogic.ALL
+    elif ";" in normalized or "\n" in normalized:
+        parts = re.split(r"[;\n]+", normalized)
+        logic = SearchLogic.ANY
+    else:
+        parts = [normalized]
+        logic = SearchLogic.ANY
+
+    terms = tuple(part.strip() for part in parts if part.strip())
+    if not terms:
+        raise SearchQueryError("Podaj co najmniej jeden niepusty element wyszukiwania.")
+    return terms, logic
 
 
 def _compact_hex(text: str) -> str | None:
