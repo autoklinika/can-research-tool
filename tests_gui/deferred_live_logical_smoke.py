@@ -105,9 +105,9 @@ def main() -> None:
 
         widget.shutdown()
         widget.close()
+        app.processEvents()
         widget.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
 
         del widget
         del controller
