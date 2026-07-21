@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gc
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
 
 from app.capture_service import CapturePaths, CaptureState, CaptureStatus
@@ -101,9 +103,19 @@ def main() -> None:
         assert not integration.has_unsaved_log
         assert not window.save_log_action.isEnabled()
 
+        window.navigator.close_all()
         window.close()
         window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+        del file_menu
+        del record
+        del integration
+        del live
+        del window
+        del project
+        gc.collect()
 
 
 if __name__ == "__main__":
