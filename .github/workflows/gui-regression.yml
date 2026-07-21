@@ -32,6 +32,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/deferred_live_logical_smoke.py
+      - name: Verify Live temp cleanup
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_temp_cleanup_smoke.py
       - name: Verify DBC activation controls
         env:
           QT_QPA_PLATFORM: offscreen
