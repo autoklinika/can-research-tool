@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.filters import FilterMode, FilterPreset
 from app.live_filters import ActiveFilterSet
 from app.models import CanFrame, CaptureSession
 from app.session_stream import SessionStreamWriter
-from app.stored_search_navigation import locate_stored_search_row
+from app.stored_search_navigation import (
+    StoredSearchNavigationCancelled,
+    locate_stored_search_row,
+)
 
 
 def _write_session(path: Path) -> None:
@@ -97,3 +102,17 @@ def test_filtered_hidden_source_row_is_reported_without_page_location(
     assert location.visible_index is None
     assert location.page_start is None
     assert location.local_row is None
+
+
+def test_cancelled_location_does_not_scan_or_return_a_page(tmp_path: Path) -> None:
+    path = tmp_path / "stored.crt.jsonl"
+    _write_session(path)
+
+    with pytest.raises(StoredSearchNavigationCancelled):
+        locate_stored_search_row(
+            path,
+            _only_100_filter(),
+            4,
+            page_size=2,
+            should_cancel=lambda: True,
+        )
