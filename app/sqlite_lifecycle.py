@@ -10,8 +10,8 @@ class ClosingSqliteConnection(sqlite3.Connection):
 
     ``sqlite3.Connection.__exit__`` commits or rolls back a transaction but does
     not close the connection. That distinction is mostly invisible on POSIX,
-    where an open database file can still be unlinked, but it leaves project
-    cache files locked on Windows until cyclic garbage collection runs.
+    where an open database file can still be unlinked, but it leaves CRT SQLite
+    files locked on Windows until garbage collection eventually runs.
     """
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
@@ -36,15 +36,19 @@ class ClosingSqliteModule:
 
 
 def install_project_search_index_sqlite_lifecycle() -> None:
-    """Make project-search context-managed connections close deterministically.
+    """Close context-managed CRT project and search-index connections.
 
-    The patch is intentionally scoped to ``app.project_search_index`` instead
-    of replacing ``sqlite3.connect`` process-wide. Existing project and logical
-    cache repositories therefore retain their current lifecycle contracts.
+    The patch is intentionally scoped to the two application modules that use
+    ``with sqlite3.connect(...)`` semantics. Other SQLite consumers that already
+    own explicit ``try/finally: connection.close()`` lifecycles are untouched.
+
+    The historical function name is retained to avoid changing package startup
+    imports while broadening the fix to the main ``project.sqlite`` repository.
     """
 
-    from . import project_search_index
+    from . import project, project_search_index
 
-    if isinstance(project_search_index.sqlite3, ClosingSqliteModule):
-        return
-    project_search_index.sqlite3 = ClosingSqliteModule()
+    for consumer in (project, project_search_index):
+        if isinstance(consumer.sqlite3, ClosingSqliteModule):
+            continue
+        consumer.sqlite3 = ClosingSqliteModule(consumer.sqlite3)
