@@ -4,7 +4,6 @@ import hashlib
 import json
 import re
 import shutil
-import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +12,7 @@ from uuid import uuid4
 
 from kvaser.csv_import import iter_monitor_csv
 
+from . import sqlite_connection as sqlite3
 from .marker_stream import iter_markers, marker_path_for_session
 from .markers import CaptureMarker, MarkerPreset
 from .models import CaptureSession
