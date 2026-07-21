@@ -4,10 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .filters import CanFrameRecord
-from .live_filters import ActiveFilterSet
+from .session_filters import FrameFilterSet, frame_record_for_filter_set
 from .session_stream import SessionPagedReader
-from .static_frame_adapter import static_frame_record
 
 
 class StoredSearchNavigationCancelled(RuntimeError):
@@ -28,7 +26,7 @@ class StoredSearchLocation:
 
 def locate_stored_search_row(
     path: str | Path,
-    filter_set,
+    filter_set: FrameFilterSet,
     source_row: int,
     *,
     page_size: int,
@@ -75,7 +73,9 @@ def locate_stored_search_row(
         if should_cancel is not None and current_row % 1024 == 0 and should_cancel():
             raise StoredSearchNavigationCancelled()
 
-        visible = filter_set.decide(_frame_record(frame, filter_set)).visible
+        visible = filter_set.decide(
+            frame_record_for_filter_set(frame, filter_set)
+        ).visible
         if current_row == requested:
             if not visible:
                 return StoredSearchLocation(
@@ -99,17 +99,3 @@ def locate_stored_search_row(
             visible_index += 1
 
     raise IndexError(f"source_row {requested} could not be located")
-
-
-def _frame_record(frame, filter_set):
-    """Preserve the same evaluator boundary as stored-session pagination."""
-
-    if isinstance(filter_set, ActiveFilterSet):
-        return CanFrameRecord(
-            can_id=int(frame.arbitration_id),
-            extended=bool(frame.is_extended_id),
-            dlc=int(frame.dlc),
-            relative_time_us=int(frame.timestamp_ns // 1_000),
-            channel=int(frame.channel),
-        )
-    return static_frame_record(frame)
