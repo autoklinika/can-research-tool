@@ -51,6 +51,45 @@ def test_exact_prefix_suffix_wildcard_and_regex_modes() -> None:
     assert engine.search(documents, SearchQuery(r"18DAF9\d{2}", SearchMode.REGEX))
 
 
+def test_semicolon_search_matches_any_term() -> None:
+    documents = [
+        SearchDocument(0, {"service": "SecurityAccess request seed"}),
+        SearchDocument(1, {"service": "SecurityAccess send key"}),
+        SearchDocument(2, {"service": "ReadDataByIdentifier"}),
+    ]
+
+    hits = SearchEngine().search(documents, SearchQuery("seed; key"))
+
+    assert [hit.row for hit in hits] == [0, 1]
+    assert hits[0].matched_terms == ("seed",)
+    assert hits[1].matched_terms == ("key",)
+
+
+def test_double_ampersand_requires_all_terms_across_selected_fields() -> None:
+    documents = [
+        SearchDocument(0, {"service": "SecurityAccess seed", "payload": "27 07"}),
+        SearchDocument(1, {"service": "SecurityAccess key", "payload": "27 08"}),
+        SearchDocument(2, {"service": "seed response", "comment": "key calculated"}),
+    ]
+
+    hits = SearchEngine().search(documents, SearchQuery("seed && key"))
+
+    assert [hit.row for hit in hits] == [2]
+    assert hits[0].matched_terms == ("seed", "key")
+    assert hits[0].matched_fields == ("service", "comment")
+
+
+def test_multi_term_hex_keeps_intelligent_normalization() -> None:
+    documents = [
+        SearchDocument(0, {"payload": "27 07"}),
+        SearchDocument(1, {"payload": "67 08 A1 E4 10 55"}),
+    ]
+
+    hits = SearchEngine().search(documents, SearchQuery("2707; 0x6708"))
+
+    assert [hit.row for hit in hits] == [0, 1]
+
+
 def test_invalid_regex_is_rejected() -> None:
     with pytest.raises(SearchQueryError):
         SearchEngine().compile(SearchQuery("[", SearchMode.REGEX))
