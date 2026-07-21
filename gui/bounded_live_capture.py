@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -44,6 +45,7 @@ class BoundedLiveCaptureWidget(LiveCaptureWidget):
         )
         self._update_marker_tile()
         self._install_space_capture_shortcut()
+        self._install_marker_history_navigation()
         self._install_deferred_logical_controls()
 
     def _update_marker_tile(self) -> None:
@@ -77,6 +79,81 @@ class BoundedLiveCaptureWidget(LiveCaptureWidget):
 
         if self.start_button.isEnabled():
             self._start_capture()
+
+    def _install_marker_history_navigation(self) -> None:
+        self.marker_history.setToolTip(
+            "Kliknij dwukrotnie znacznik, aby przejść do najbliższej surowej ramki."
+        )
+        self.marker_history.itemDoubleClicked.connect(
+            self._jump_to_marker_from_history
+        )
+
+    def _trigger_marker(self, preset, *, source: str) -> None:
+        before = self.marker_history.count()
+        super()._trigger_marker(preset, source=source)
+        if self.marker_history.count() <= before:
+            return
+        item = self.marker_history.item(self.marker_history.count() - 1)
+        if item is None:
+            return
+        try:
+            timestamp_ms = float(item.text().split("ms", 1)[0].strip())
+        except (TypeError, ValueError):
+            return
+        item.setData(Qt.ItemDataRole.UserRole, int(round(timestamp_ms * 1_000_000)))
+
+    def _jump_to_marker_from_history(self, item, _column: int = 0) -> None:
+        timestamp_ns = item.data(Qt.ItemDataRole.UserRole)
+        if timestamp_ns is None:
+            try:
+                timestamp_ms = float(item.text().split("ms", 1)[0].strip())
+            except (TypeError, ValueError):
+                self.output_message.emit("Nie można odczytać czasu wybranego znacznika.")
+                return
+            timestamp_ns = int(round(timestamp_ms * 1_000_000))
+
+        model = self.frame_table.model()
+        frame_at = getattr(model, "frame_at", None)
+        if not callable(frame_at) or model.rowCount() <= 0:
+            self.output_message.emit("Brak surowych ramek dostępnych dla znacznika.")
+            return
+
+        target_row = -1
+        target_frame = None
+        best_delta = None
+        for row in range(model.rowCount()):
+            frame = frame_at(row)
+            if frame is None:
+                continue
+            delta = abs(int(frame.timestamp_ns) - int(timestamp_ns))
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                target_row = row
+                target_frame = frame
+            if int(frame.timestamp_ns) >= int(timestamp_ns) and best_delta == delta:
+                break
+
+        if target_row < 0 or target_frame is None:
+            self.output_message.emit("Nie znaleziono ramki odpowiadającej znacznikowi.")
+            return
+
+        self.data_tabs.setCurrentIndex(self.raw_tab_index)
+        self.pause_view.setChecked(True)
+        self.auto_scroll.setChecked(False)
+        index = model.index(target_row, 0)
+        self.frame_table.setCurrentIndex(index)
+        self.frame_table.selectRow(target_row)
+        self.frame_table.scrollTo(
+            index,
+            QAbstractItemView.ScrollHint.PositionAtCenter,
+        )
+        self.frame_table.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.output_message.emit(
+            "Przejście do znacznika: "
+            f"ramka {target_frame.sequence}, "
+            f"czas {target_frame.timestamp_ns / 1_000_000:.3f} ms, "
+            f"różnica {int(best_delta or 0) / 1_000_000:.3f} ms."
+        )
 
     def _install_deferred_logical_controls(self) -> None:
         page = self.data_tabs.widget(self.message_tab_index)
