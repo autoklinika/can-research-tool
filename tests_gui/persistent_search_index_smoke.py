@@ -80,6 +80,16 @@ def main() -> None:
         assert reused.is_ready
         assert reused.progress == (len(frames), len(frames))
         assert reused._task is None
+
+        # Even if a stale GUI object incorrectly forgets its ready state, start()
+        # must revalidate SQLite and refuse to create a second build worker.
+        reused._ready = False
+        reused._progress = (0, len(frames))
+        reused.start()
+        assert reused.is_ready
+        assert reused.progress == (len(frames), len(frames))
+        assert reused._task is None
+
         reopened_registry.close()
         table.deleteLater()
         app.processEvents()
