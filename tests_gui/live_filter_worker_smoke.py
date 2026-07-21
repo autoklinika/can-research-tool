@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from types import SimpleNamespace
 
-from PySide6.QtCore import QThreadPool, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool, QTimer
 from PySide6.QtWidgets import QApplication
 
 from app.capture_service import CaptureState
@@ -81,10 +81,17 @@ def _logical_message(sequence: int) -> LogicalMessageRecord:
 
 def _dispose_widget(app: QApplication, widget: LiveCaptureWidget) -> None:
     widget.shutdown()
-    widget.close()
-    widget.deleteLater()
+    for timer in widget.findChildren(QTimer):
+        timer.stop()
     QThreadPool.globalInstance().waitForDone(5_000)
+    widget.close()
+    # Deliver worker completions and queued callbacks while the project path and
+    # widget hierarchy are still valid.
     app.processEvents()
+    for timer in widget.findChildren(QTimer):
+        timer.stop()
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def main() -> None:
@@ -266,9 +273,8 @@ def main() -> None:
         _dispose_widget(app, active_widget)
         del active_widget
         del repository
+        del project
         collect()
-
-    app.processEvents()
 
 
 if __name__ == "__main__":
