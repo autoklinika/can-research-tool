@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from tempfile import TemporaryDirectory
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from PySide6.QtWidgets import QApplication, QTableView
 
@@ -108,7 +108,7 @@ def main() -> None:
         assert index.is_ready
         assert index.progress == (1, 1)
 
-        result = QueryEngine().search(index.snapshot(), SearchQuery("J1939.dbc"))
+        result = QueryEngine().search(index.snapshot(), SearchQuery("EngineSpeed"))
         assert [hit.row for hit in result.hits] == [0]
         assert result.scanned_documents == 1
 
