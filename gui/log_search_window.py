@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -68,6 +69,7 @@ class LogSearchWindow(QMainWindow):
         self._target_table: QTableView | None = None
         self._hits: list[SearchHit] = []
         self._tasks: list[_SearchTask] = []
+        self._event_filter_installed = False
 
         root_widget = QWidget(self)
         root = QVBoxLayout(root_widget)
@@ -111,6 +113,11 @@ class LogSearchWindow(QMainWindow):
         self.previous_button.clicked.connect(self.previous_result)
         self.results.itemActivated.connect(self._activate_item)
         self.results.currentRowChanged.connect(self._navigate_to_hit)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self._event_filter_installed = True
 
         geometry = QSettings().value("windows/logSearchGeometry")
         if geometry is not None:
@@ -173,6 +180,7 @@ class LogSearchWindow(QMainWindow):
         self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
         if self._hits:
             self.results.setCurrentRow(0)
+            self.results.setFocus(Qt.OtherFocusReason)
         self._tasks = self._tasks[-2:]
 
     def _search_failed(self, generation: int, error: str) -> None:
@@ -193,16 +201,20 @@ class LogSearchWindow(QMainWindow):
         current = self.results.currentRow()
         self.results.setCurrentRow((current - 1) % len(self._hits))
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        if event.modifiers() == Qt.NoModifier and event.key() == Qt.Key_N:
-            self.next_result()
-            event.accept()
-            return
-        if event.modifiers() == Qt.NoModifier and event.key() == Qt.Key_V:
-            self.previous_result()
-            event.accept()
-            return
-        super().keyPressEvent(event)
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and self.isVisible()
+            and QApplication.focusWidget() is not self.query_edit
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            if event.key() == Qt.Key.Key_N:
+                self.next_result()
+                return True
+            if event.key() == Qt.Key.Key_V:
+                self.previous_result()
+                return True
+        return super().eventFilter(watched, event)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
         self._navigate_to_hit(self.results.row(item))
@@ -221,8 +233,12 @@ class LogSearchWindow(QMainWindow):
         table.setCurrentIndex(target)
         table.selectRow(row)
         table.scrollTo(target, QTableView.PositionAtCenter)
-        table.setFocus(Qt.OtherFocusReason)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         QSettings().setValue("windows/logSearchGeometry", self.saveGeometry())
         super().closeEvent(event)
+
+    def __del__(self) -> None:
+        app = QApplication.instance()
+        if app is not None and self._event_filter_installed:
+            app.removeEventFilter(self)
