@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from threading import Event
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QEvent,
+    QModelIndex,
+    QObject,
+    QRunnable,
+    QSettings,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -12,8 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -46,8 +56,6 @@ _LOGIC_LABELS: tuple[tuple[str, SearchLogic], ...] = (
     ("AND", SearchLogic.ALL),
 )
 
-_RESULT_RENDER_LIMIT = 5_000
-_RESULT_SCAN_LIMIT = _RESULT_RENDER_LIMIT + 1
 _CACHE_CHUNK_ROWS = 500
 
 
@@ -173,6 +181,52 @@ class _SearchDocumentCache:
             self._documents[row] = self._read_document(row)
 
 
+class _SearchResultModel(QAbstractListModel):
+    """Virtual result list: all hits are addressable without QListWidgetItem objects."""
+
+    SourceRowRole = Qt.UserRole + 1
+    HitRole = Qt.UserRole + 2
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._hits: list[SearchHit] = []
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802, B008
+        return 0 if parent.isValid() else len(self._hits)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid() or not 0 <= index.row() < len(self._hits):
+            return None
+        hit = self._hits[index.row()]
+        if role == Qt.DisplayRole:
+            fields = ", ".join(hit.matched_fields)
+            terms = ", ".join(hit.matched_terms)
+            return f"{hit.row + 1}  [{fields}]  {terms}\n{hit.preview}"
+        if role == self.SourceRowRole:
+            return hit.row
+        if role == self.HitRole:
+            return hit
+        return None
+
+    def roleNames(self) -> dict[int, bytes]:  # noqa: N802
+        roles = super().roleNames()
+        roles[self.SourceRowRole] = b"sourceRow"
+        roles[self.HitRole] = b"searchHit"
+        return roles
+
+    def set_hits(self, hits: list[SearchHit]) -> None:
+        self.beginResetModel()
+        self._hits = hits
+        self.endResetModel()
+
+    def clear(self) -> None:
+        if self._hits:
+            self.set_hits([])
+
+    def hit_at(self, row: int) -> SearchHit | None:
+        return self._hits[row] if 0 <= row < len(self._hits) else None
+
+
 class _SearchSignals(QObject):
     finished = Signal(int, object)
     failed = Signal(int, str)
@@ -200,7 +254,7 @@ class _SearchTask(QRunnable):
             hits = SearchEngine().search(
                 self.documents,
                 self.query,
-                result_limit=_RESULT_SCAN_LIMIT,
+                result_limit=None,
                 should_cancel=self.cancel_event.is_set,
             )
             if not self.cancel_event.is_set():
@@ -299,9 +353,13 @@ class LogSearchWindow(QMainWindow):
         nav_row.addStretch(1)
         root.addLayout(nav_row)
 
-        self.results = QListWidget(root_widget)
+        self._result_model = _SearchResultModel(self)
+        self.results = QListView(root_widget)
         self.results.setObjectName("logSearchResults")
         self.results.setAlternatingRowColors(True)
+        self.results.setUniformItemSizes(True)
+        self.results.setWordWrap(False)
+        self.results.setModel(self._result_model)
         root.addWidget(self.results, 1)
         self.setCentralWidget(root_widget)
 
@@ -309,8 +367,8 @@ class LogSearchWindow(QMainWindow):
         self.query_edit.returnPressed.connect(self.start_search)
         self.next_button.clicked.connect(self.next_result)
         self.previous_button.clicked.connect(self.previous_result)
-        self.results.itemActivated.connect(self._activate_item)
-        self.results.currentRowChanged.connect(self._result_selection_changed)
+        self.results.activated.connect(self._activate_index)
+        self.results.selectionModel().currentChanged.connect(self._result_selection_changed)
         self.all_fields_check.toggled.connect(self._all_fields_toggled)
 
         app = QApplication.instance()
@@ -386,8 +444,8 @@ class LogSearchWindow(QMainWindow):
         self._cancel_tasks()
         self._generation += 1
         generation = self._generation
-        self.results.clear()
-        self._hits.clear()
+        self._hits = []
+        self._result_model.clear()
         self.position_label.clear()
         self.result_label.setText("Wyszukiwanie…")
 
@@ -411,27 +469,13 @@ class LogSearchWindow(QMainWindow):
     def _search_finished(self, generation: int, hits: object) -> None:
         if generation != self._generation:
             return
-        all_hits = list(hits)
-        truncated = len(all_hits) > _RESULT_RENDER_LIMIT
-        self._hits = all_hits[:_RESULT_RENDER_LIMIT]
-        self.results.clear()
-        self.results.setUpdatesEnabled(False)
-        try:
-            for hit in self._hits:
-                fields = ", ".join(hit.matched_fields)
-                terms = ", ".join(hit.matched_terms)
-                item = QListWidgetItem(f"{hit.row + 1}  [{fields}]  {terms}\n{hit.preview}")
-                item.setData(Qt.UserRole, hit.row)
-                self.results.addItem(item)
-        finally:
-            self.results.setUpdatesEnabled(True)
-
-        if truncated:
-            self.result_label.setText(f"{_RESULT_RENDER_LIMIT:,}+ wyników".replace(",", " "))
-        else:
-            self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
+        self._hits = list(hits)
+        self._result_model.set_hits(self._hits)
+        self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
         if self._hits:
-            self.results.setCurrentRow(0)
+            first = self._result_model.index(0, 0)
+            self.results.setCurrentIndex(first)
+            self.results.scrollTo(first, QListView.PositionAtTop)
             self.results.setFocus(Qt.OtherFocusReason)
         else:
             self.position_label.clear()
@@ -446,14 +490,25 @@ class LogSearchWindow(QMainWindow):
         QMessageBox.critical(self, "Wyszukiwanie", error)
 
     def next_result(self) -> None:
-        if self._hits:
-            current = self.results.currentRow()
-            self.results.setCurrentRow((current + 1) % len(self._hits))
+        if not self._hits:
+            return
+        current = self.results.currentIndex().row()
+        row = 0 if current < 0 else (current + 1) % len(self._hits)
+        self._select_result(row)
 
     def previous_result(self) -> None:
-        if self._hits:
-            current = self.results.currentRow()
-            self.results.setCurrentRow((current - 1) % len(self._hits))
+        if not self._hits:
+            return
+        current = self.results.currentIndex().row()
+        row = len(self._hits) - 1 if current < 0 else (current - 1) % len(self._hits)
+        self._select_result(row)
+
+    def _select_result(self, row: int) -> None:
+        index = self._result_model.index(row, 0)
+        if not index.isValid():
+            return
+        self.results.setCurrentIndex(index)
+        self.results.scrollTo(index, QListView.PositionAtCenter)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         if (
@@ -473,10 +528,11 @@ class LogSearchWindow(QMainWindow):
                 return True
         return super().eventFilter(watched, event)
 
-    def _activate_item(self, item: QListWidgetItem) -> None:
-        self._navigate_to_hit(self.results.row(item))
+    def _activate_index(self, index: QModelIndex) -> None:
+        self._navigate_to_hit(index.row())
 
-    def _result_selection_changed(self, index: int) -> None:
+    def _result_selection_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
+        index = current.row()
         if 0 <= index < len(self._hits):
             self.position_label.setText(f"{index + 1} / {len(self._hits)}")
         else:
