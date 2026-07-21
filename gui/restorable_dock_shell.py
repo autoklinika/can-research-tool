@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QMessageBox,
     QSizePolicy,
     QStyle,
     QTableView,
@@ -136,6 +137,17 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
             "Pokaż lub ukryj pasek Narzędzia główne"
         )
 
+        self.session_markers_action = QAction("Znaczniki", self)
+        self.session_markers_action.setObjectName("openSessionMarkersAction")
+        self.session_markers_action.setShortcut("Ctrl+M")
+        self.session_markers_action.setShortcutContext(
+            Qt.ShortcutContext.ApplicationShortcut
+        )
+        self.session_markers_action.setToolTip(
+            "Otwórz znaczniki bieżącej zapisanej sesji (Ctrl+M)"
+        )
+        self.session_markers_action.triggered.connect(self._open_session_markers)
+
         try:
             self.settings_action.triggered.disconnect()
         except (RuntimeError, TypeError):
@@ -145,9 +157,9 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
     def _build_menu(self) -> None:
         super()._build_menu()
         view_menu = None
+        tools_menu = None
         for menu_action in reversed(self.menuBar().actions()):
-            if menu_action.text().replace("&", "") != "Widok":
-                continue
+            menu_name = menu_action.text().replace("&", "")
             candidate = menu_action.menu()
             if candidate is None:
                 continue
@@ -155,14 +167,20 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
                 candidate.actions()
             except RuntimeError:
                 continue
-            view_menu = candidate
-            break
+            if menu_name == "Widok" and view_menu is None:
+                view_menu = candidate
+            elif menu_name == "Narzędzia" and tools_menu is None:
+                tools_menu = candidate
         if view_menu is None:
             raise RuntimeError("Nie można zbudować menu Widok")
         view_menu.insertAction(
             self.reset_layout_action,
             self.toggle_primary_toolbar_action,
         )
+        if tools_menu is None:
+            raise RuntimeError("Nie można zbudować menu Narzędzia")
+        before = self.settings_action
+        tools_menu.insertAction(before, self.session_markers_action)
 
     def _build_activity_bar(self) -> None:
         super()._build_activity_bar()
@@ -230,6 +248,18 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         widget = SettingsViewWidget(self)
         widget.output_message.connect(self._append_output)
         self._add_tab(key, widget, "Ustawienia")
+
+    def _open_session_markers(self) -> None:
+        current = self.tabs.currentWidget()
+        opener = getattr(current, "open_marker_window", None)
+        if callable(opener):
+            opener()
+            return
+        QMessageBox.information(
+            self,
+            "Znaczniki",
+            "Otwórz zapisaną lub tymczasową sesję, aby wyświetlić jej znaczniki.",
+        )
 
     def _apply_default_layout(self) -> None:
         super()._apply_default_layout()
