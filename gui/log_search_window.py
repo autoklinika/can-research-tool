@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,11 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
-@dataclass(frozen=True, slots=True)
-class SearchHit:
-    row: int
-    preview: str
+from app.search_engine import SearchDocument, SearchEngine, SearchHit, SearchQuery
 
 
 class _SearchSignals(QObject):
@@ -31,31 +25,32 @@ class _SearchSignals(QObject):
 
 
 class _SearchTask(QRunnable):
-    def __init__(self, generation: int, query: str, rows: list[tuple[int, str]]) -> None:
+    def __init__(
+        self,
+        generation: int,
+        query: SearchQuery,
+        documents: list[SearchDocument],
+    ) -> None:
         super().__init__()
         self.generation = generation
-        self.query = query.casefold()
-        self.rows = rows
+        self.query = query
+        self.documents = documents
         self.signals = _SearchSignals()
 
     def run(self) -> None:
         try:
-            hits = [
-                SearchHit(row=row, preview=text[:240])
-                for row, text in self.rows
-                if self.query in text.casefold()
-            ]
+            hits = SearchEngine().search(self.documents, self.query)
             self.signals.finished.emit(self.generation, hits)
         except Exception as exc:  # pragma: no cover - defensive worker boundary
             self.signals.failed.emit(self.generation, str(exc))
 
 
 class LogSearchWindow(QMainWindow):
-    """Independent search window that navigates an existing table model.
+    """Independent search window backed by the Qt-independent SearchEngine.
 
-    The window never changes source-model visibility. It snapshots display text,
-    evaluates the query in a worker and stores stable row references for the
-    current model generation.
+    The window never changes source-model visibility. It snapshots display data,
+    evaluates a compiled query in a worker and keeps stable source row references
+    for the current model generation.
     """
 
     def __init__(self, parent: QMainWindow) -> None:
@@ -138,10 +133,10 @@ class LogSearchWindow(QMainWindow):
         self.scope_label.setText(f"Zakres: {name} ({rows:,} wierszy)".replace(",", " "))
 
     def start_search(self) -> None:
-        query = self.query_edit.text().strip()
+        query_text = self.query_edit.text().strip()
         table = self._target_table
         model = table.model() if table is not None else None
-        if not query:
+        if not query_text:
             self.query_edit.setFocus()
             return
         if table is None or model is None:
@@ -154,15 +149,19 @@ class LogSearchWindow(QMainWindow):
         self._hits.clear()
         self.result_label.setText("Wyszukiwanie…")
 
-        rows: list[tuple[int, str]] = []
+        headers = [
+            str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"column_{column}")
+            for column in range(model.columnCount())
+        ]
+        documents: list[SearchDocument] = []
         for row in range(model.rowCount()):
-            columns = [
-                str(model.data(model.index(row, column), Qt.DisplayRole) or "")
+            fields = {
+                headers[column]: str(model.data(model.index(row, column), Qt.DisplayRole) or "")
                 for column in range(model.columnCount())
-            ]
-            rows.append((row, " | ".join(columns)))
+            }
+            documents.append(SearchDocument(row=row, fields=fields))
 
-        task = _SearchTask(generation, query, rows)
+        task = _SearchTask(generation, SearchQuery(query_text), documents)
         task.signals.finished.connect(self._search_finished)
         task.signals.failed.connect(self._search_failed)
         self._tasks.append(task)
