@@ -54,9 +54,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .restorable_dock_shell import (
-            RestorableDockEngineeringShellMainWindow as MainWindow,
-        )
+        from .fixed_marker_menu_shell import FixedMarkerMenuMainWindow as MainWindow
 
         return MainWindow(self)
 
