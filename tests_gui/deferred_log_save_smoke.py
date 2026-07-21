@@ -105,9 +105,10 @@ def main() -> None:
 
         window.navigator.close_all()
         window.close()
+        # Drain queued callbacks while the main window and its tab widget still exist.
+        app.processEvents()
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
 
         del file_menu
         del record
