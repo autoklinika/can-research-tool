@@ -2,15 +2,15 @@
 
 ## Status dokumentu
 
-Ten dokument opisuje **docelową organizację i kierunek rozwoju CAN Research Tool**. Nie oznacza, że wszystkie wymienione funkcje są już zaimplementowane.
+Ten dokument opisuje **docelową organizację, zasady architektoniczne i kierunek rozwoju CAN Research Tool**. Nie oznacza, że wszystkie wymienione funkcje są już zaimplementowane.
 
-Plan stanowi podstawę do projektowania kolejnych etapów bez przypadkowego rozbudowywania GUI i bez tworzenia odseparowanych funkcji, których później nie da się spójnie połączyć.
+Plan stanowi podstawę do projektowania kolejnych etapów bez przypadkowego rozbudowywania GUI, bez tworzenia odseparowanych funkcji oraz bez uzależniania aplikacji od pojedynczego dostawcy sprzętu, dekodera albo modelu AI.
 
 Najważniejsza decyzja organizacyjna:
 
 > **Jeden projekt CRT dotyczy jednego badanego ECU.**
 
-Projekt nie jest pojedynczym logiem. Jest kompletną, przenośną teczką badawczą konkretnego sterownika, zawierającą sesje, profil ECU, obszary badań, porównania, wyniki analiz, odzyskane payloady, hipotezy, dekodery, filtry, scenariusze i raporty.
+Projekt nie jest pojedynczym logiem. Jest kompletną, przenośną teczką badawczą konkretnego sterownika, zawierającą sesje, profil ECU, obszary badań, zestawy porównawcze, wyniki analiz, odzyskane payloady, hipotezy, dekodery, filtry, wzorce, scenariusze, raporty oraz historię badań.
 
 ---
 
@@ -33,15 +33,17 @@ W projekcie mogą znajdować się liczne sesje wykonane:
 - z różnymi wersjami oprogramowania,
 - z udaną i nieudaną procedurą,
 - przy różnych temperaturach i napięciach,
-- w różnych obszarach badawczych.
+- w różnych obszarach badawczych,
+- na różnych kanałach CAN,
+- z różnymi wersjami dekoderów i reguł.
 
 ## 1.2. Surowe dane pozostają źródłem prawdy
 
 Surowe ramki i oryginalne pliki sesji są niezmiennym materiałem źródłowym.
 
-Filtry, grupowanie, DBC, dekodery, rekonstrukcja protokołów, analiza statystyczna i CAN Intelligence Engine tworzą wyłącznie warstwy interpretacji.
+Filtry, grupowanie, DBC, dekodery, rekonstrukcja protokołów, analiza statystyczna, wzorce oraz CAN Intelligence Engine tworzą wyłącznie warstwy interpretacji.
 
-Żaden moduł analityczny nie może po cichu modyfikować materiału wejściowego.
+Żaden moduł analityczny ani model AI nie może po cichu modyfikować materiału wejściowego.
 
 ## 1.3. Analizy tworzą trwałe artefakty
 
@@ -53,11 +55,15 @@ Każda istotna analiza może utworzyć zapisany artefakt zawierający:
 - zakres wykorzystanych ramek,
 - parametry analizy,
 - wersję algorytmu,
+- wersję modułu,
+- wersję wzorców,
 - wynik,
 - poziom pewności,
 - ostrzeżenia,
 - pliki wynikowe,
-- datę wykonania.
+- datę wykonania,
+- autora lub operatora,
+- odniesienia do dowodów.
 
 ## 1.4. Funkcje pasywne i aktywne są rozdzielone
 
@@ -67,7 +73,37 @@ Transmisja aktywna nie może uruchamiać się automatycznie ani być ukrytym sku
 
 ## 1.5. Pełny zapis jest niezależny od prezentacji
 
-Filtry, pauza widoku, grupowanie po CAN ID, ograniczony bufor GUI oraz przyszłe statystyki nie mogą wpływać na kompletność i kolejność pełnego zapisu surowych ramek.
+Filtry, pauza widoku, grupowanie po CAN ID, ograniczony bufor GUI, statystyki, analizy oraz AI nie mogą wpływać na kompletność i kolejność pełnego zapisu surowych ramek.
+
+## 1.6. CRT jest platformą rozszerzalną
+
+Nowe funkcje powinny być dodawane jako rejestrowane moduły korzystające ze stabilnego API, a nie przez dopisywanie kolejnych wyjątków do głównego okna.
+
+Dotyczy to między innymi:
+
+- filtrów,
+- analiz,
+- wzorców,
+- dekoderów,
+- porównań,
+- rekonstruktorów transferów,
+- eksporterów,
+- reguł Intelligence,
+- dostawców AI,
+- scenariuszy aktywnych.
+
+## 1.7. AI jest warstwą wspomagającą, nie źródłem prawdy
+
+AI może tworzyć hipotezy, objaśnienia, propozycje filtrów, wzorców i kolejnych kroków badania.
+
+AI nie może:
+
+- zmieniać surowych danych,
+- oznaczać hipotezy jako potwierdzonej bez decyzji użytkownika,
+- wysyłać ramek CAN bezpośrednio,
+- uruchamiać scenariuszy aktywnych,
+- zastępować deterministycznego dekodera,
+- ukrywać ramek będących podstawą wniosku.
 
 ---
 
@@ -84,10 +120,12 @@ PROJEKT ECU
 ├── Analizy
 ├── Payloady i transfery
 ├── Znaleziska
+├── Wzorce
 ├── Scenariusze testowe
 ├── Filtry
 ├── Dekodery
 ├── Reguły Intelligence
+├── Asystent AI
 ├── Notatki i załączniki
 └── Raporty
 ```
@@ -118,7 +156,7 @@ Dane profilu mogą pochodzić z trzech źródeł:
 
 1. wpis użytkownika,
 2. potwierdzony odczyt diagnostyczny,
-3. automatyczna hipoteza CRT.
+3. automatyczna hipoteza CRT lub AI.
 
 Automatycznie rozpoznane informacje muszą pozostać hipotezami do czasu potwierdzenia.
 
@@ -212,6 +250,7 @@ Typowe artefakty:
 - odcisk ECU,
 - wykryta anomalia,
 - znalezisko Intelligence,
+- raport AI,
 - raport naprawy.
 
 ## 2.6. Znaleziska
@@ -222,6 +261,7 @@ Statusy:
 
 - `Hipoteza`,
 - `Do sprawdzenia`,
+- `Częściowo potwierdzone`,
 - `Potwierdzone`,
 - `Odrzucone`.
 
@@ -232,6 +272,7 @@ Znalezisko powinno zawierać:
 - czas lub zakres czasu,
 - odwołania do ramek i wiadomości,
 - algorytm i jego wersję,
+- model AI i jego wersję, jeżeli uczestniczył,
 - poziom pewności,
 - dowody,
 - wątpliwości,
@@ -311,6 +352,7 @@ Sesja: ETC3_security_access_ok
 [Transfery i payloady]
 [Znaczniki]
 [Znaleziska]
+[Asystent AI]
 [Notatki]
 ```
 
@@ -365,8 +407,6 @@ Wspólna prezentacja semantyczna:
 
 Oś czasu łączy surowe dane z interpretacją wysokiego poziomu.
 
-Przykład:
-
 ```text
 00.000 s  ECU rozpoczęło transmisję
 01.253 s  DiagnosticSessionControl 0x10 03
@@ -395,8 +435,6 @@ Po podłączeniu ECU kreator pomiaru może wykonać:
 8. utworzenie profilu sieci ECU.
 
 Rozpoznawanie bitrate powinno rozpoczynać się pasywnie. Aktywne sondowanie musi być jawnie włączone i oznaczone jako transmisja.
-
-Przykładowy wynik:
 
 ```text
 Profil sieci ECU
@@ -476,8 +514,6 @@ Przykłady wyzwalaczy:
 - pojawienie się error frame,
 - zmiana sygnału,
 - rozpoczęcie RequestDownload.
-
-Przykładowe działanie:
 
 ```text
 Dodaj znacznik
@@ -588,8 +624,6 @@ CRT może budować odcisk zachowania badanego sterownika na podstawie:
 
 Wynik powinien być probabilistyczny i wyjaśnialny.
 
-Przykład:
-
 ```text
 Najbardziej prawdopodobna rodzina: Bosch EDC17
 
@@ -613,8 +647,6 @@ CRT nie może przedstawiać niepotwierdzonej klasyfikacji jako pewnego faktu.
 # 11. Automatyczna analiza logów
 
 Po zakończeniu sesji CRT może uruchomić zestaw nieinwazyjnych analiz.
-
-Przykładowe podsumowanie:
 
 ```text
 Wykryto 37 CAN ID.
@@ -732,8 +764,6 @@ CAN Intelligence Engine jest centralną warstwą tworzącą z danych pomiarowych
 
 Nie zastępuje surowych danych i nie ukrywa podstawy rozumowania.
 
-Przykładowa sekwencja:
-
 ```text
 10 03
 22 F1 90
@@ -771,8 +801,6 @@ Każdy wniosek musi zawierać:
 - wątpliwości,
 - status użytkownika.
 
-Przykładowe zaawansowane znalezisko:
-
 ```text
 Możliwy payload wykonywany w RAM
 
@@ -803,8 +831,6 @@ Laboratorium aktywne powinno obsługiwać:
 - symulowanie EGR, VGT, BPV, SCR i czujników,
 - scenariusze UDS,
 - reakcje warunkowe.
-
-Przykład scenariusza:
 
 ```text
 Po otrzymaniu PGN X:
@@ -872,12 +898,47 @@ Celem jest możliwość odtworzenia warunków każdej analizy.
 
 ---
 
-# 17. Modułowa architektura analiz
+# 17. System rozszerzeń CRT
 
-Każdy moduł analityczny powinien jawnie deklarować:
+System rozszerzeń jest podstawą łatwego dodawania nowych funkcji bez przebudowy całej aplikacji.
+
+## 17.1. Główna struktura
 
 ```text
-Nazwa modułu
+CRT Core
+├── Extension Registry
+├── Filter Providers
+├── Analysis Providers
+├── Pattern Providers
+├── Decoder Providers
+├── Comparison Providers
+├── Artifact Providers
+├── Export Providers
+├── AI Providers
+└── Active Scenario Providers
+```
+
+`Extension Registry` odpowiada za:
+
+- wykrywanie modułów,
+- walidację manifestów,
+- sprawdzanie wersji API,
+- rejestrowanie możliwości,
+- udostępnianie funkcji GUI,
+- kontrolę zależności,
+- wyłączanie niekompatybilnych rozszerzeń,
+- raportowanie błędów ładowania.
+
+## 17.2. Kontrakt modułu
+
+Każdy moduł powinien deklarować:
+
+```text
+ID modułu
+Nazwa
+Wersja modułu
+Wersja API CRT
+Typ rozszerzenia
 Obsługiwane źródła
 Wymagane dane
 Parametry wejściowe
@@ -885,34 +946,491 @@ Typ wyniku
 Czy działa na żywo
 Czy działa na jednej sesji
 Czy działa na wielu sesjach
-Czy wymaga transmisji
-Wersja algorytmu
+Czy korzysta z AI
+Czy wymaga transmisji CAN
+Wymagane uprawnienia
 ```
 
 Przykład:
 
 ```text
-Moduł: UDS Response Timing
-
-Źródło:
-- pojedyncza sesja
-- zestaw porównawczy
-
-Wejście:
-- wiadomości UDS
-
-Wynik:
-- TimingProfile
-
-Tryb aktywny:
-- nie
+ID: crt.analysis.uds_timing
+Typ: analysis
+Źródło: session, comparison_set
+Wymagane dane: logical_messages.uds
+Wynik: UdsTimingArtifact
+Tryb Live: tak
+AI: nie
+CAN TX: nie
 ```
 
-Taki kontrakt pozwala dodawać kolejne funkcje bez przebudowy całego GUI.
+## 17.3. Typy rozszerzeń
+
+### Filter Provider
+
+Dostarcza:
+
+- pola filtra,
+- typy wartości,
+- operatory,
+- walidację,
+- kompilację do deterministycznego predykatu,
+- opis dla edytora GUI,
+- opcjonalny podgląd wyniku.
+
+Przykładowe przyszłe filtry:
+
+- częstotliwość CAN ID,
+- jitter,
+- zmiana konkretnego bajtu,
+- wykryty licznik,
+- UDS SID,
+- NRC,
+- adres pamięci,
+- typ transferu,
+- status znaleziska,
+- wynik modułu analizy.
+
+GUI nie powinno mieć wszystkich pól wpisanych na stałe. Powinno pobierać definicje z rejestru filtrów.
+
+### Analysis Provider
+
+Otrzymuje jawny kontekst analizy i tworzy wersjonowany artefakt.
+
+Przykłady:
+
+- statystyki CAN ID,
+- analiza jitteru,
+- czasy odpowiedzi UDS,
+- wykrywanie liczników,
+- wykrywanie sum kontrolnych,
+- rekonstrukcja TransferData,
+- korelacja ramek,
+- wykrywanie anomalii.
+
+### Pattern Provider
+
+Dostarcza pakiety wiedzy i sygnatury:
+
+- konkretne rodziny ECU,
+- wzorce SecurityAccess,
+- procedury programowania,
+- sekwencje startowe,
+- charakterystyczne DID,
+- charakterystyczne PGN,
+- sygnatury transferów,
+- reguły czasowe.
+
+Pakiet wzorca może dotyczyć na przykład:
+
+```text
+Bosch EDC17
+Mercedes MCM
+DAF ETC3
+Cummins CM2350
+SecurityAccess
+RequestDownload
+J1939 DM1
+niestandardowy bootloader
+```
+
+Aktualizacja wiedzy o ECU nie powinna wymagać modyfikacji głównego kodu CRT.
+
+### Decoder Provider
+
+Obsługuje:
+
+- DBC,
+- J1939,
+- ISO-TP,
+- UDS,
+- protokoły producenta,
+- formaty blokowe,
+- reguły użytkownika.
+
+### Comparison Provider
+
+Dostarcza określony rodzaj porównania wielu sesji:
+
+- CAN ID,
+- payloady,
+- częstotliwości,
+- czasy odpowiedzi,
+- osie zdarzeń,
+- protokoły,
+- transfery,
+- zachowanie ECU przed i po naprawie.
+
+### Artifact Provider
+
+Definiuje trwałe wyniki, ich schemat, prezentację, eksport i migrację wersji.
+
+### Export Provider
+
+Pozwala dodawać eksporty bez zmian w głównym GUI:
+
+- CSV,
+- JSON,
+- raport Markdown,
+- raport PDF,
+- BIN,
+- paczka dowodowa,
+- formaty kompatybilne z innymi narzędziami.
+
+### Active Scenario Provider
+
+Definiuje funkcje aktywne, ale zawsze podlega osobnym zabezpieczeniom transmisji.
+
+## 17.4. Struktura rozszerzenia
+
+Docelowy pakiet może wyglądać tak:
+
+```text
+extensions/
+└── uds_timing/
+    ├── manifest.json
+    ├── provider.py
+    ├── schemas.py
+    ├── ui.py
+    ├── migrations.py
+    ├── tests/
+    └── README.md
+```
+
+Przykładowy manifest:
+
+```json
+{
+  "id": "crt.analysis.uds_timing",
+  "name": "UDS Response Timing",
+  "version": "1.0.0",
+  "crt_api": "1",
+  "type": "analysis",
+  "inputs": ["session", "comparison_set"],
+  "outputs": ["uds_timing_artifact"],
+  "live_supported": true,
+  "requires_ai": false,
+  "requires_can_tx": false
+}
+```
+
+## 17.5. Stabilne API rozszerzeń
+
+Rozszerzenia nie powinny importować przypadkowych klas GUI ani wewnętrznych implementacji bazy danych.
+
+Powinny korzystać wyłącznie ze stabilnych kontraktów, na przykład:
+
+```text
+ProjectContext
+SessionSource
+FrameQuery
+LogicalMessageQuery
+AnalysisContext
+ComparisonContext
+ArtifactWriter
+FindingWriter
+FilterFieldRegistry
+PatternRegistry
+ExtensionManifest
+CancellationToken
+ProgressReporter
+```
+
+Dzięki temu przebudowa GUI, sposobu przechowywania indeksu lub kontrolerów nie zniszczy wszystkich modułów.
+
+## 17.6. Rejestrowanie funkcji w GUI
+
+Moduł deklaruje, gdzie jest dostępny:
+
+- akcja dla pojedynczej sesji,
+- akcja dla zestawu porównawczego,
+- zakładka Live,
+- panel projektu,
+- menu kontekstowe,
+- kreator filtra,
+- kreator raportu.
+
+Główne GUI generuje odpowiednie akcje na podstawie rejestru, zamiast posiadać listę funkcji wpisaną na stałe.
+
+## 17.7. Izolacja i niezawodność
+
+Błąd rozszerzenia nie może zatrzymać CaptureService ani uszkodzić projektu.
+
+Wymagania:
+
+- jawne granice wyjątków,
+- możliwość wyłączenia modułu,
+- anulowanie długich analiz,
+- limit pamięci i czasu dla zadań,
+- wykonanie analiz poza wątkiem GUI,
+- atomowy zapis artefaktów,
+- brak bezpośredniego zapisu do plików sesji,
+- test zgodności z API CRT.
+
+## 17.8. Wersjonowanie i migracje
+
+Każdy moduł oraz każdy artefakt powinien zapisywać:
+
+- wersję CRT,
+- commit CRT,
+- wersję API rozszerzeń,
+- wersję modułu,
+- wersję algorytmu,
+- wersję wzorców,
+- wersję schematu artefaktu,
+- parametry wykonania.
+
+Starsze artefakty powinny pozostać czytelne albo podlegać jawnej migracji.
 
 ---
 
-# 18. Docelowy Explorer projektu
+# 18. Integracja z AI i ślad dowodowy
+
+Integracja AI jest opcjonalną warstwą wspomagającą badania. CRT nie powinien zależeć od jednego konkretnego modelu ani dostawcy.
+
+## 18.1. AI Provider
+
+```text
+AI Provider
+├── model lokalny
+├── usługa chmurowa
+├── model firmowy
+├── model wyspecjalizowany
+└── tryb wyłączony
+```
+
+Wspólny interfejs może udostępniać:
+
+```text
+analyze_context()
+explain_finding()
+suggest_next_steps()
+generate_report()
+propose_filter()
+propose_pattern()
+propose_comparison()
+propose_analysis()
+```
+
+CRT powinien móc zmienić dostawcę AI bez zmiany modelu projektu i formatu sesji.
+
+## 18.2. AI Context Package
+
+AI nie powinno automatycznie otrzymywać całego projektu ani niekontrolowanego eksportu wszystkich logów.
+
+CRT tworzy jawny pakiet kontekstu:
+
+```text
+Profil ECU
+Wybrane sesje
+Zakresy czasu
+Wybrane surowe ramki
+Wiadomości logiczne
+Statystyki
+Znaczniki
+Znaleziska
+Transfery
+Wyniki porównań
+Aktywne dekodery
+Wersje algorytmów
+Pytanie użytkownika
+```
+
+Pakiet powinien zawierać:
+
+- identyfikatory źródeł,
+- zakresy ramek,
+- informację o pominiętych danych,
+- wersje dekoderów,
+- wersje wzorców,
+- SHA-256 artefaktów,
+- ograniczenia kontekstu,
+- zastosowaną anonimizację.
+
+## 18.3. Prywatność danych
+
+Projekt ECU może zawierać poufne dane:
+
+- VIN,
+- numery seryjne,
+- oprogramowanie ECU,
+- payloady,
+- procedury producenta,
+- dane klienta.
+
+Przed wysłaniem do zewnętrznego AI użytkownik musi widzieć:
+
+- jakie dane zostaną wysłane,
+- do jakiego dostawcy,
+- czy zawierają pliki binarne,
+- czy zawierają VIN lub identyfikatory,
+- jaki jest zakres sesji,
+- czy zastosowano anonimizację.
+
+Tryb lokalnego AI powinien być możliwy bez wysyłania danych poza stanowisko.
+
+## 18.4. Wyniki AI jako hipotezy
+
+AI nie zapisuje faktu. Tworzy `AI Finding`.
+
+```text
+Treść:
+Prawdopodobnie wykonano transfer loadera do RAM.
+
+Pewność AI:
+74%
+
+Źródła:
+- sesja 17,
+- ramki 2301–2417,
+- artefakt TransferData 12,
+- RequestDownload 0x00A20000.
+
+Status:
+Do sprawdzenia
+```
+
+Użytkownik może zmienić status na:
+
+- `Potwierdzone`,
+- `Odrzucone`,
+- `Do sprawdzenia`,
+- `Częściowo potwierdzone`.
+
+## 18.5. Ślad dowodowy
+
+Każda odpowiedź AI zapisana w projekcie powinna zawierać:
+
+- dostawcę,
+- identyfikator modelu,
+- wersję modelu, jeżeli jest dostępna,
+- datę wykonania,
+- skrót pakietu kontekstu,
+- źródłowe sesje,
+- zakresy ramek,
+- źródłowe artefakty,
+- wygenerowaną treść,
+- poziom pewności,
+- status zatwierdzenia,
+- komentarz operatora.
+
+Wniosek musi prowadzić do konkretnych dowodów, a nie wyłącznie do tekstu wygenerowanego przez model.
+
+## 18.6. AI jako kreator filtrów
+
+Użytkownik może opisać filtr językiem naturalnym:
+
+> Pokaż ramki z NRC 0x35, które wystąpiły po SecurityAccess.
+
+Poprawny przepływ:
+
+```text
+Opis użytkownika
+        ↓
+AI proponuje standardowe drzewo filtra CRT
+        ↓
+Deterministyczny kompilator waliduje pola i operatory
+        ↓
+GUI pokazuje warunki użytkownikowi
+        ↓
+Użytkownik zatwierdza
+        ↓
+CRT stosuje filtr
+```
+
+AI nie wykonuje własnego filtrowania obok istniejącego silnika. Tworzy wyłącznie propozycję standardowej definicji.
+
+## 18.7. AI jako kreator wzorców
+
+AI może przygotować szkic wzorca na podstawie wybranych sesji:
+
+- charakterystyczne CAN ID,
+- powtarzalne sekwencje UDS,
+- typowe czasy,
+- DID,
+- PGN,
+- sygnatury payloadów,
+- warunki pozytywne i negatywne.
+
+Szkic musi zostać:
+
+1. zapisany jako wersja robocza,
+2. zwalidowany przez deterministyczne komponenty,
+3. przetestowany na sesjach referencyjnych,
+4. zatwierdzony przez użytkownika.
+
+## 18.8. AI jako asystent analizy
+
+AI może:
+
+- objaśniać wybrane ramki,
+- podsumowywać sesję,
+- porównywać wyniki modułów,
+- tworzyć opis osi zdarzeń,
+- sugerować kolejne eksperymenty,
+- wskazywać brakujące dane,
+- przygotowywać raport techniczny,
+- pomagać nawigować do dowodów.
+
+AI powinno korzystać przede wszystkim z wyników deterministycznych modułów, a nie próbować samodzielnie interpretować milionów surowych ramek bez przygotowanego kontekstu.
+
+## 18.9. AI i funkcje aktywne
+
+AI musi być całkowicie oddzielone od bezpośredniego toru transmisji CAN.
+
+Dopuszczalny przepływ:
+
+```text
+AI proponuje scenariusz
+        ↓
+CRT waliduje składnię i ograniczenia
+        ↓
+Użytkownik przegląda ramki, czasy i warunki
+        ↓
+Użytkownik jawnie zatwierdza
+        ↓
+Moduł aktywny wykonuje scenariusz
+```
+
+Niedopuszczalne:
+
+```text
+AI → bezpośrednie wysyłanie CAN
+```
+
+## 18.10. Powtarzalność analiz AI
+
+Ponieważ wyniki modeli mogą się zmieniać, zapis powinien utrwalać:
+
+- dokładny kontekst,
+- parametry zapytania,
+- identyfikator modelu,
+- wersję szablonu promptu,
+- odpowiedź,
+- datę,
+- wynik walidacji.
+
+Ponowne uruchomienie AI nie powinno po cichu nadpisywać wcześniejszego znaleziska. Powinno tworzyć nową wersję albo nowy przebieg analizy.
+
+## 18.11. Deterministyczne algorytmy mają pierwszeństwo
+
+Jeżeli deterministyczny dekoder ustalił:
+
+- SID,
+- DID,
+- NRC,
+- adres,
+- długość,
+- numer bloku,
+- czas odpowiedzi,
+
+to AI nie może zastępować tej wartości inną wartością bez jawnego wskazania konfliktu.
+
+AI może wyjaśnić znaczenie albo zasugerować hipotezę, ale dane techniczne pochodzące z dekodera pozostają podstawą.
+
+---
+
+# 19. Docelowy Explorer projektu
 
 ```text
 ETC3 — ECU 001
@@ -940,16 +1458,18 @@ ETC3 — ECU 001
 ├── Znaleziska
 │   ├── Możliwy loader RAM
 │   └── Algorytm blokowania
+├── Wzorce
 ├── Scenariusze
 ├── Filtry
 ├── Dekodery
 ├── Reguły Intelligence
+├── Asystent AI
 └── Raporty
 ```
 
 ---
 
-# 19. Proponowana kolejność rozwoju
+# 20. Proponowana kolejność rozwoju
 
 ## Etap 1 — model organizacyjny projektu
 
@@ -965,7 +1485,21 @@ Najpierw należy zaprojektować:
 
 Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego modelu danych.
 
-## Etap 2 — statystyki i analiza czasowa
+## Etap 2 — fundament API rozszerzeń
+
+Przed masowym dodawaniem nowych analiz należy przygotować:
+
+- `Extension Registry`,
+- manifest modułu,
+- stabilne kontrakty danych,
+- rejestr filtrów,
+- rejestr analiz,
+- rejestr wzorców,
+- wersjonowanie artefaktów,
+- izolację błędów modułów,
+- test zgodności rozszerzeń.
+
+## Etap 3 — statystyki i analiza czasowa
 
 - statystyki pojedynczej sesji,
 - obciążenie magistrali,
@@ -975,7 +1509,9 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 - czas odpowiedzi UDS,
 - automatyczne podsumowanie logu.
 
-## Etap 3 — porównywanie sesji
+Pierwsze moduły powinny zostać zbudowane przez nowe API rozszerzeń, aby stały się wzorcem dla kolejnych funkcji.
+
+## Etap 4 — porównywanie sesji
 
 - różnice CAN ID,
 - różnice payloadów,
@@ -984,7 +1520,7 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 - synchronizacja logów,
 - porównanie przed i po naprawie.
 
-## Etap 4 — transfery i payloady
+## Etap 5 — transfery i payloady
 
 - wykrywanie transferów,
 - rekonstrukcja payloadów,
@@ -992,7 +1528,7 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 - kontrola kompletności,
 - trwałe artefakty BIN i raporty.
 
-## Etap 5 — CAN Intelligence Engine
+## Etap 6 — CAN Intelligence Engine
 
 - oś zdarzeń,
 - hipotezy,
@@ -1000,7 +1536,18 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 - znaleziska z dowodami,
 - baza wzorców ECU.
 
-## Etap 6 — automatyczne profilowanie sieci i ECU
+## Etap 7 — kontrolowana integracja AI
+
+- abstrakcja `AI Provider`,
+- pakiet kontekstu,
+- prywatność i anonimizacja,
+- zapis śladu dowodowego,
+- propozycje filtrów,
+- propozycje wzorców,
+- podsumowania i raporty,
+- brak bezpośredniego dostępu do CAN TX.
+
+## Etap 8 — automatyczne profilowanie sieci i ECU
 
 - rozpoznawanie bitrate,
 - adresy i protokoły,
@@ -1008,7 +1555,7 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 - fingerprint ECU,
 - profile porównawcze.
 
-## Etap 7 — laboratorium aktywne
+## Etap 9 — laboratorium aktywne
 
 - generator ruchu,
 - replay,
@@ -1018,7 +1565,7 @@ Bez tego kolejne funkcje staną się niezależnymi ekranami bez wspólnego model
 
 ---
 
-# 20. Decyzja końcowa
+# 21. Decyzja końcowa
 
 Docelowy model CRT:
 
@@ -1035,20 +1582,35 @@ Obszary badań grupują materiał tematycznie.
 
 Analizy tworzą trwałe, wersjonowane artefakty.
 
+Nowe filtry, analizy, dekodery, wzorce, porównania i eksportery
+są rejestrowanymi modułami korzystającymi ze stabilnego API CRT.
+
 CAN Intelligence Engine tworzy hipotezy z dowodami i poziomem pewności.
+
+AI jest opcjonalną warstwą wspomagającą interpretację.
+
+AI nie modyfikuje danych źródłowych, nie zastępuje deterministycznych
+dekoderów i nie steruje bezpośrednio magistralą CAN.
+
+Każdy wynik AI posiada źródła, dowody, wersję modelu
+oraz status zatwierdzenia przez użytkownika.
 
 Funkcje aktywne są fizycznie i logicznie oddzielone od pasywnego pomiaru.
 
 Pełny surowy ruch CAN pozostaje źródłem prawdy.
 ```
 
-Najbliższym krokiem projektowym powinno być przygotowanie modelu danych dla:
+Najbliższym krokiem projektowym powinno być przygotowanie modelu danych oraz stabilnych kontraktów dla:
 
 - profilu ECU,
 - zestawów porównawczych,
 - uruchomień analiz,
 - artefaktów,
 - znalezisk,
-- relacji z sesjami i obszarami badań.
+- relacji z sesjami i obszarami badań,
+- rejestru rozszerzeń,
+- manifestów modułów,
+- pakietów wzorców,
+- przyszłych dostawców AI.
 
 Dopiero na tym fundamencie należy budować pierwsze moduły statystyk i analizy czasowej.
