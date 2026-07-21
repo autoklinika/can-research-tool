@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QTableView, QWidget, QVBoxLayout
 
 from gui.application_container import ApplicationContainer
@@ -54,13 +55,28 @@ def main() -> None:
     assert search.results.count() == 2
     assert table.currentIndex().row() == 1
 
-    search.next_result()
+    search.results.setFocus()
+    QTest.keyClick(search.results, Qt.Key_N)
     app.processEvents()
     assert table.currentIndex().row() == 2
 
-    search.previous_result()
+    QTest.keyClick(search.results, Qt.Key_V)
     app.processEvents()
     assert table.currentIndex().row() == 1
+
+    # Navigation remains active after the user clicks the source table.
+    table.setFocus()
+    QTest.keyClick(table, Qt.Key_N)
+    app.processEvents()
+    assert table.currentIndex().row() == 2
+
+    # Typing in the query field must not trigger result navigation.
+    search.query_edit.setFocus()
+    search.query_edit.clear()
+    QTest.keyClicks(search.query_edit, "NV")
+    app.processEvents()
+    assert search.query_edit.text() == "NV"
+    assert table.currentIndex().row() == 2
 
     search.close()
     window.close()
