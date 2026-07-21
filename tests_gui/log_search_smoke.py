@@ -49,10 +49,10 @@ def main() -> None:
     search.query_edit.setText("18DAF900")
     search.start_search()
     deadline = time.monotonic() + 3.0
-    while search.results.count() != 2 and time.monotonic() < deadline:
+    while search.results.model().rowCount() != 2 and time.monotonic() < deadline:
         app.processEvents()
         time.sleep(0.01)
-    assert search.results.count() == 2
+    assert search.results.model().rowCount() == 2
     assert table.currentIndex().row() == 1
 
     search.results.setFocus()
