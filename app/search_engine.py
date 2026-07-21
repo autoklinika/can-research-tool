@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable, Mapping, Sequence
@@ -150,11 +151,14 @@ class SearchEngine:
         *,
         preview_limit: int = 240,
         result_limit: int | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> list[SearchHit]:
         compiled = query if isinstance(query, CompiledSearchQuery) else self.compile(query)
         hits: list[SearchHit] = []
         selected_fields = compiled.query.fields
-        for document in documents:
+        for index, document in enumerate(documents):
+            if should_cancel is not None and index % 256 == 0 and should_cancel():
+                return []
             fields = list(
                 document.fields.items()
                 if not selected_fields
