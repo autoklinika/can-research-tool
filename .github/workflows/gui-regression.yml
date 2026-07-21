@@ -32,6 +32,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/persistent_search_index_smoke.py
+      - name: Verify direct logical-cache search
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/logical_search_cache_smoke.py
       - name: Verify project overview session details
         env:
           QT_QPA_PLATFORM: offscreen
