@@ -11,6 +11,7 @@ from app.project import CrtProject
 from app.project_search_index import ProjectSearchIndex
 from app.search_engine import SearchDocument
 
+from .logical_search_index import LogicalSqlSearchIndex
 from .persistent_search_index import PersistentSessionSearchIndex
 
 
@@ -123,7 +124,9 @@ class QtTableSearchIndex(QObject):
     def _read_document(self, row: int) -> SearchDocument:
         model = self._model
         fields = {
-            self._headers[column]: str(model.data(model.index(row, column), Qt.DisplayRole) or "")
+            self._headers[column]: str(
+                model.data(model.index(row, column), Qt.DisplayRole) or ""
+            )
             for column in range(model.columnCount())
         }
         return SearchDocument(row=row, fields=fields)
@@ -186,16 +189,19 @@ class QtTableSearchIndex(QObject):
         self._connections.clear()
 
 
-SearchIndex = QtTableSearchIndex | PersistentSessionSearchIndex
+SearchIndex = QtTableSearchIndex | PersistentSessionSearchIndex | LogicalSqlSearchIndex
 
 
 class SearchIndexRegistry(QObject):
-    """Own lazy memory indexes and durable per-session project indexes."""
+    """Own lazy view indexes and durable raw/logical SQLite query sources."""
 
     def __init__(self, root: QWidget | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._root = root
         self._indexes: WeakKeyDictionary[object, QtTableSearchIndex] = WeakKeyDictionary()
+        self._logical_indexes: WeakKeyDictionary[
+            object, LogicalSqlSearchIndex
+        ] = WeakKeyDictionary()
         self._persistent_indexes: dict[
             tuple[str, str], PersistentSessionSearchIndex
         ] = {}
@@ -210,18 +216,23 @@ class SearchIndexRegistry(QObject):
         if table is None or table.model() is None:
             return None
 
+        model = table.model()
+        logical_model = _logical_sql_model(model)
+        if logical_model is not None:
+            index = self._logical_indexes.get(logical_model)
+            if index is None:
+                index = LogicalSqlSearchIndex(logical_model, self)
+                self._logical_indexes[logical_model] = index
+            index.start()
+            return index
+
         if project is not None and session_path is not None:
             session = project.session_by_path(session_path)
-            model = table.model()
             if (
                 session is not None
                 and session.status != "recording"
                 and callable(getattr(model, "frame_at", None))
             ):
-                # Stored-session frame tables are paged and normally expose only
-                # a small slice of a much larger log. Requiring rowCount() to equal
-                # session.frame_count would reject the durable SQLite index and
-                # rebuild an in-memory page index on every application launch.
                 persistent = self.persistent_index_for_session(
                     project,
                     session_path,
@@ -230,7 +241,7 @@ class SearchIndexRegistry(QObject):
                 if persistent is not None:
                     return persistent
 
-        return self.ensure_model(table.model(), activate=True)
+        return self.ensure_model(model, activate=True)
 
     def ensure_model(self, model, *, activate: bool = False) -> QtTableSearchIndex:
         index = self._indexes.get(model)
@@ -275,16 +286,40 @@ class SearchIndexRegistry(QObject):
         for index in list(self._indexes.values()):
             index.close()
         self._indexes.clear()
+        for index in list(self._logical_indexes.values()):
+            index.close()
+        self._logical_indexes.clear()
         for index in list(self._persistent_indexes.values()):
             index.close()
         self._persistent_indexes.clear()
+
+
+def _logical_sql_model(model):
+    visited: set[int] = set()
+    candidate = model
+    while candidate is not None and id(candidate) not in visited:
+        visited.add(id(candidate))
+        cache_path = getattr(candidate, "cache_path", None)
+        if (
+            cache_path is not None
+            and Path(cache_path).is_file()
+            and callable(getattr(candidate, "message_at", None))
+            and hasattr(candidate, "visible_messages")
+        ):
+            return candidate
+        source_model = getattr(candidate, "sourceModel", None)
+        candidate = source_model() if callable(source_model) else None
+    return None
 
 
 def _model_headers(model) -> list[str]:
     headers: list[str] = []
     used: dict[str, int] = {}
     for column in range(model.columnCount()):
-        base = str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"Kolumna {column + 1}")
+        base = str(
+            model.headerData(column, Qt.Horizontal, Qt.DisplayRole)
+            or f"Kolumna {column + 1}"
+        )
         count = used.get(base, 0)
         used[base] = count + 1
         headers.append(base if count == 0 else f"{base} ({count + 1})")
