@@ -14,10 +14,11 @@ from gui.bounded_live_capture import BoundedLiveCaptureWidget
 class _Controller:
     def __init__(self) -> None:
         self.message_snapshot_calls = 0
+        self.active = True
 
     @property
     def is_active(self) -> bool:
-        return False
+        return self.active
 
     def list_adapters(self):
         return [
@@ -33,7 +34,7 @@ class _Controller:
 
     def status(self) -> CaptureStatus:
         return CaptureStatus(
-            state=CaptureState.IDLE,
+            state=CaptureState.RUNNING if self.active else CaptureState.STOPPED,
             elapsed_s=0.0,
             frame_count=0,
             logical_message_count=0,
@@ -69,7 +70,7 @@ class _Controller:
         raise AssertionError("Live GUI must not request logical messages")
 
     def stop(self) -> None:
-        pass
+        self.active = False
 
     def wait(self, _timeout=None) -> bool:
         return True
