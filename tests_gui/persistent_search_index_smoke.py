@@ -42,8 +42,11 @@ def main() -> None:
         registry = SearchIndexRegistry()
         assert not search_database.exists()
 
-        model = FrameTableModel(capacity=len(frames))
-        model.replace_frames(frames)
+        # Stored sessions expose only one page in the Qt model. The durable
+        # project index must still represent and search the complete source log.
+        model = FrameTableModel(capacity=1)
+        model.replace_frames(frames[:1])
+        assert model.rowCount() == 1
         table = QTableView()
         table.setModel(model)
 
