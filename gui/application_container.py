@@ -54,7 +54,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .fixed_marker_menu_shell import FixedMarkerMenuMainWindow as MainWindow
+        from .search_enabled_shell import SearchEnabledMainWindow as MainWindow
 
         return MainWindow(self)
 
