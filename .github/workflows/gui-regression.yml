@@ -36,6 +36,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/deferred_log_save_smoke.py
+      - name: Verify deliberate second Start after unsaved Live log
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_unsaved_second_start_smoke.py
       - name: Verify Live temp cleanup
         env:
           QT_QPA_PLATFORM: offscreen
