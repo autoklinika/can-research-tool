@@ -3,6 +3,10 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -16,7 +20,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.search_engine import SearchDocument, SearchEngine, SearchHit, SearchQuery
+from app.search_engine import SearchDocument, SearchEngine, SearchHit, SearchMode, SearchQuery
+
+
+_MODE_LABELS: tuple[tuple[str, SearchMode], ...] = (
+    ("Zawiera", SearchMode.CONTAINS),
+    ("Równe", SearchMode.EXACT),
+    ("Rozpoczyna się od", SearchMode.PREFIX),
+    ("Kończy się na", SearchMode.SUFFIX),
+    ("Wildcard (*, ?)", SearchMode.WILDCARD),
+    ("Regex", SearchMode.REGEX),
+)
 
 
 class _SearchSignals(QObject):
@@ -46,41 +60,78 @@ class _SearchTask(QRunnable):
 
 
 class LogSearchWindow(QMainWindow):
-    """Independent search window backed by the Qt-independent SearchEngine.
+    """Independent SearchEngine front-end for the currently active table.
 
-    The window never changes source-model visibility. It snapshots display data,
-    evaluates a compiled query in a worker and keeps stable source row references
-    for the current model generation.
+    Search only reads a snapshot of display data. It never changes filtering,
+    capture, source-model visibility or persisted session contents.
     """
 
     def __init__(self, parent: QMainWindow) -> None:
         super().__init__(parent, Qt.Window)
         self.setObjectName("logSearchWindow")
-        self.setWindowTitle("Wyszukiwanie w logach")
-        self.setMinimumSize(720, 460)
-        self.resize(900, 620)
+        self.setWindowTitle("SearchEngine — wyszukiwanie w logach")
+        self.setMinimumSize(780, 520)
+        self.resize(980, 680)
 
         self._generation = 0
         self._target_table: QTableView | None = None
         self._hits: list[SearchHit] = []
         self._tasks: list[_SearchTask] = []
         self._event_filter_installed = False
+        self._field_checkboxes: dict[str, QCheckBox] = {}
 
         root_widget = QWidget(self)
         root = QVBoxLayout(root_widget)
         root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
 
         query_row = QHBoxLayout()
         self.query_edit = QLineEdit(root_widget)
         self.query_edit.setObjectName("logSearchQuery")
         self.query_edit.setPlaceholderText("CAN ID, HEX, ASCII, SID, DID, PGN, tekst…")
+        self.mode_combo = QComboBox(root_widget)
+        self.mode_combo.setObjectName("logSearchMode")
+        for label, mode in _MODE_LABELS:
+            self.mode_combo.addItem(label, mode.value)
+        self.mode_combo.setMinimumWidth(170)
         self.search_button = QPushButton("Szukaj", root_widget)
         self.search_button.setObjectName("logSearchStart")
+        self.search_button.setDefault(True)
         query_row.addWidget(self.query_edit, 1)
+        query_row.addWidget(self.mode_combo)
         query_row.addWidget(self.search_button)
         root.addLayout(query_row)
 
-        self.scope_label = QLabel("Zakres: aktywna tabela", root_widget)
+        options_row = QHBoxLayout()
+        self.case_sensitive_check = QCheckBox("Uwzględniaj wielkość liter", root_widget)
+        self.case_sensitive_check.setObjectName("logSearchCaseSensitive")
+        self.hex_hint_label = QLabel(
+            "HEX inteligentny: 18DAF900 = 18 DA F9 00 = 0x18DAF900",
+            root_widget,
+        )
+        self.hex_hint_label.setObjectName("logSearchHexHint")
+        self.hex_hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        options_row.addWidget(self.case_sensitive_check)
+        options_row.addStretch(1)
+        options_row.addWidget(self.hex_hint_label)
+        root.addLayout(options_row)
+
+        self.fields_group = QGroupBox("Zakres wyszukiwania", root_widget)
+        self.fields_group.setObjectName("logSearchFieldsGroup")
+        fields_root = QVBoxLayout(self.fields_group)
+        self.all_fields_check = QCheckBox("Wszystkie kolumny aktywnej tabeli", self.fields_group)
+        self.all_fields_check.setObjectName("logSearchAllFields")
+        self.all_fields_check.setChecked(True)
+        fields_root.addWidget(self.all_fields_check)
+        self.fields_widget = QWidget(self.fields_group)
+        self.fields_layout = QGridLayout(self.fields_widget)
+        self.fields_layout.setContentsMargins(0, 0, 0, 0)
+        self.fields_layout.setHorizontalSpacing(14)
+        self.fields_layout.setVerticalSpacing(4)
+        fields_root.addWidget(self.fields_widget)
+        root.addWidget(self.fields_group)
+
+        self.scope_label = QLabel("Źródło: aktywna tabela", root_widget)
         self.scope_label.setObjectName("logSearchScope")
         root.addWidget(self.scope_label)
 
@@ -91,14 +142,19 @@ class LogSearchWindow(QMainWindow):
         self.next_button.setObjectName("logSearchNext")
         self.result_label = QLabel("0 wyników", root_widget)
         self.result_label.setObjectName("logSearchResultCount")
+        self.position_label = QLabel("", root_widget)
+        self.position_label.setObjectName("logSearchPosition")
         nav_row.addWidget(self.previous_button)
         nav_row.addWidget(self.next_button)
+        nav_row.addSpacing(8)
         nav_row.addWidget(self.result_label)
+        nav_row.addWidget(self.position_label)
         nav_row.addStretch(1)
         root.addLayout(nav_row)
 
         self.results = QListWidget(root_widget)
         self.results.setObjectName("logSearchResults")
+        self.results.setAlternatingRowColors(True)
         root.addWidget(self.results, 1)
         self.setCentralWidget(root_widget)
 
@@ -107,21 +163,31 @@ class LogSearchWindow(QMainWindow):
         self.next_button.clicked.connect(self.next_result)
         self.previous_button.clicked.connect(self.previous_result)
         self.results.itemActivated.connect(self._activate_item)
-        self.results.currentRowChanged.connect(self._navigate_to_hit)
+        self.results.currentRowChanged.connect(self._result_selection_changed)
+        self.all_fields_check.toggled.connect(self._all_fields_toggled)
 
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
             self._event_filter_installed = True
 
-        geometry = QSettings().value("windows/logSearchGeometry")
+        settings = QSettings()
+        geometry = settings.value("windows/logSearchGeometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
+        saved_mode = str(settings.value("windows/logSearchMode", SearchMode.CONTAINS.value))
+        mode_index = self.mode_combo.findData(saved_mode)
+        if mode_index >= 0:
+            self.mode_combo.setCurrentIndex(mode_index)
+        self.case_sensitive_check.setChecked(
+            settings.value("windows/logSearchCaseSensitive", False, type=bool)
+        )
 
     def set_target_table(self, table: QTableView | None) -> None:
         self._target_table = table
+        self._rebuild_field_choices()
         if table is None:
-            self.scope_label.setText("Zakres: brak aktywnej tabeli")
+            self.scope_label.setText("Źródło: brak aktywnej tabeli")
             return
         model = table.model()
         if model is None:
@@ -130,7 +196,7 @@ class LogSearchWindow(QMainWindow):
         else:
             name = table.objectName() or model.__class__.__name__
             rows = model.rowCount()
-        self.scope_label.setText(f"Zakres: {name} ({rows:,} wierszy)".replace(",", " "))
+        self.scope_label.setText(f"Źródło: {name} — {rows:,} wierszy".replace(",", " "))
 
     def start_search(self) -> None:
         query_text = self.query_edit.text().strip()
@@ -143,16 +209,24 @@ class LogSearchWindow(QMainWindow):
             QMessageBox.information(self, "Wyszukiwanie", "Brak aktywnej tabeli do przeszukania.")
             return
 
+        selected_fields = self._selected_fields()
+        if not self.all_fields_check.isChecked() and not selected_fields:
+            QMessageBox.information(
+                self,
+                "Wyszukiwanie",
+                "Wybierz co najmniej jedną kolumnę albo zaznacz wszystkie kolumny.",
+            )
+            return
+
         self._generation += 1
         generation = self._generation
         self.results.clear()
         self._hits.clear()
+        self.position_label.clear()
         self.result_label.setText("Wyszukiwanie…")
+        self.search_button.setEnabled(False)
 
-        headers = [
-            str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"column_{column}")
-            for column in range(model.columnCount())
-        ]
+        headers = self._model_headers(model)
         documents: list[SearchDocument] = []
         for row in range(model.rowCount()):
             fields = {
@@ -161,7 +235,14 @@ class LogSearchWindow(QMainWindow):
             }
             documents.append(SearchDocument(row=row, fields=fields))
 
-        task = _SearchTask(generation, SearchQuery(query_text), documents)
+        mode = SearchMode(str(self.mode_combo.currentData()))
+        query = SearchQuery(
+            text=query_text,
+            mode=mode,
+            fields=frozenset(selected_fields),
+            case_sensitive=self.case_sensitive_check.isChecked(),
+        )
+        task = _SearchTask(generation, query, documents)
         task.signals.finished.connect(self._search_finished)
         task.signals.failed.connect(self._search_failed)
         self._tasks.append(task)
@@ -170,22 +251,28 @@ class LogSearchWindow(QMainWindow):
     def _search_finished(self, generation: int, hits: object) -> None:
         if generation != self._generation:
             return
+        self.search_button.setEnabled(True)
         self._hits = list(hits)
         self.results.clear()
         for hit in self._hits:
-            item = QListWidgetItem(f"Wiersz {hit.row + 1}: {hit.preview}")
+            fields = ", ".join(hit.matched_fields)
+            item = QListWidgetItem(f"Wiersz {hit.row + 1}  [{fields}]\n{hit.preview}")
             item.setData(Qt.UserRole, hit.row)
             self.results.addItem(item)
         self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
         if self._hits:
             self.results.setCurrentRow(0)
             self.results.setFocus(Qt.OtherFocusReason)
+        else:
+            self.position_label.clear()
         self._tasks = self._tasks[-2:]
 
     def _search_failed(self, generation: int, error: str) -> None:
         if generation != self._generation:
             return
+        self.search_button.setEnabled(True)
         self.result_label.setText("Błąd wyszukiwania")
+        self.position_label.clear()
         QMessageBox.critical(self, "Wyszukiwanie", error)
 
     def next_result(self) -> None:
@@ -213,10 +300,20 @@ class LogSearchWindow(QMainWindow):
             if event.key() == Qt.Key.Key_V:
                 self.previous_result()
                 return True
+            if event.key() == Qt.Key.Key_Escape:
+                self.close()
+                return True
         return super().eventFilter(watched, event)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
         self._navigate_to_hit(self.results.row(item))
+
+    def _result_selection_changed(self, index: int) -> None:
+        if 0 <= index < len(self._hits):
+            self.position_label.setText(f"Pozycja {index + 1} / {len(self._hits)}")
+        else:
+            self.position_label.clear()
+        self._navigate_to_hit(index)
 
     def _navigate_to_hit(self, index: int) -> None:
         table = self._target_table
@@ -233,8 +330,59 @@ class LogSearchWindow(QMainWindow):
         table.selectRow(row)
         table.scrollTo(target, QTableView.PositionAtCenter)
 
+    def _rebuild_field_choices(self) -> None:
+        while self.fields_layout.count():
+            item = self.fields_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._field_checkboxes.clear()
+
+        table = self._target_table
+        model = table.model() if table is not None else None
+        if model is None:
+            self.fields_widget.setEnabled(False)
+            return
+
+        headers = self._model_headers(model)
+        for index, header in enumerate(headers):
+            checkbox = QCheckBox(header, self.fields_widget)
+            checkbox.setObjectName(f"logSearchField{index}")
+            checkbox.setChecked(True)
+            checkbox.setEnabled(not self.all_fields_check.isChecked())
+            self.fields_layout.addWidget(checkbox, index // 4, index % 4)
+            self._field_checkboxes[header] = checkbox
+        self.fields_widget.setEnabled(True)
+
+    def _all_fields_toggled(self, checked: bool) -> None:
+        for checkbox in self._field_checkboxes.values():
+            checkbox.setEnabled(not checked)
+
+    def _selected_fields(self) -> set[str]:
+        if self.all_fields_check.isChecked():
+            return set()
+        return {
+            name
+            for name, checkbox in self._field_checkboxes.items()
+            if checkbox.isChecked()
+        }
+
+    @staticmethod
+    def _model_headers(model) -> list[str]:
+        headers: list[str] = []
+        used: dict[str, int] = {}
+        for column in range(model.columnCount()):
+            base = str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"Kolumna {column + 1}")
+            count = used.get(base, 0)
+            used[base] = count + 1
+            headers.append(base if count == 0 else f"{base} ({count + 1})")
+        return headers
+
     def closeEvent(self, event) -> None:  # noqa: N802
-        QSettings().setValue("windows/logSearchGeometry", self.saveGeometry())
+        settings = QSettings()
+        settings.setValue("windows/logSearchGeometry", self.saveGeometry())
+        settings.setValue("windows/logSearchMode", self.mode_combo.currentData())
+        settings.setValue("windows/logSearchCaseSensitive", self.case_sensitive_check.isChecked())
         super().closeEvent(event)
 
     def __del__(self) -> None:
