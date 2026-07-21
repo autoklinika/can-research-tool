@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 from tempfile import TemporaryDirectory
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from app.capture_service import CaptureState, CaptureStatus
@@ -86,24 +88,31 @@ def main() -> None:
         controller = _Controller()
         widget = BoundedLiveCaptureWidget(project, controller=controller)
         widget.timer.stop()
-        widget.show()
-        app.processEvents()
 
-        assert widget.message_table.isHidden()
+        assert widget.message_table.isHidden(), "logical table must stay hidden in Live"
         assert widget.load_deferred_logical_button.text() == "Załaduj"
         assert not widget.load_deferred_logical_button.isEnabled()
         assert widget.LIVE_MESSAGE_CAPACITY == 1
 
         widget._refresh_view()
         app.processEvents()
-        assert controller.message_snapshot_calls == 0
-        assert "po STOP" in widget.data_tabs.tabText(widget.message_tab_index)
+
+        assert controller.message_snapshot_calls == 0, (
+            "raw-only Live refresh requested logical messages"
+        )
+        assert widget.message_model.rowCount() == 0
         assert "nie są analizowane na żywo" in widget.deferred_logical_status.text()
 
         widget.shutdown()
         widget.close()
         widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+        del widget
+        del controller
+        del project
+        gc.collect()
 
 
 if __name__ == "__main__":
