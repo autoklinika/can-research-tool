@@ -28,6 +28,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/project_overview_session_details_smoke.py
+      - name: Verify deferred Live logical analysis
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/deferred_live_logical_smoke.py
       - name: Verify DBC activation controls
         env:
           QT_QPA_PLATFORM: offscreen
