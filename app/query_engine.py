@@ -15,9 +15,24 @@ from .search_engine import (
 
 @runtime_checkable
 class QueryDocumentSource(Protocol):
-    """Read-only source accepted by the shared CRT query backend."""
+    """Read-only snapshot source accepted by the shared CRT query backend."""
 
-    def snapshot(self) -> tuple[SearchDocument, ...]: ...
+    def snapshot(self): ...
+
+
+@runtime_checkable
+class ExecutableQuerySource(Protocol):
+    """Source able to execute a query without materializing all documents in RAM."""
+
+    def execute_search(
+        self,
+        search_engine: SearchEngine,
+        query: SearchQuery | CompiledSearchQuery,
+        *,
+        preview_limit: int,
+        result_limit: int | None,
+        should_cancel: Callable[[], bool] | None,
+    ) -> tuple[tuple[SearchHit, ...], int]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +44,9 @@ class QueryExecutionResult:
 class QueryEngine:
     """Shared execution facade for Search, filters and future conditions.
 
-    The first implementation delegates text matching to SearchEngine while
-    establishing one stable backend boundary for every CRT query consumer.
+    In-memory tables continue to use SearchEngine directly. Persistent project
+    indexes may execute against SQLite and return only matching records, without
+    reconstructing the complete document set in application memory.
     """
 
     def __init__(self, search_engine: SearchEngine | None = None) -> None:
@@ -41,19 +57,40 @@ class QueryEngine:
 
     def search(
         self,
-        source: QueryDocumentSource | Iterable[SearchDocument],
+        source: QueryDocumentSource | ExecutableQuerySource | Iterable[SearchDocument],
         query: SearchQuery | CompiledSearchQuery,
         *,
         preview_limit: int = 240,
         result_limit: int | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> QueryExecutionResult:
+        if isinstance(source, ExecutableQuerySource):
+            hits, scanned = source.execute_search(
+                self._search_engine,
+                query,
+                preview_limit=preview_limit,
+                result_limit=result_limit,
+                should_cancel=should_cancel,
+            )
+            return QueryExecutionResult(hits=tuple(hits), scanned_documents=int(scanned))
+
         documents = source.snapshot() if isinstance(source, QueryDocumentSource) else tuple(source)
+        if isinstance(documents, ExecutableQuerySource):
+            hits, scanned = documents.execute_search(
+                self._search_engine,
+                query,
+                preview_limit=preview_limit,
+                result_limit=result_limit,
+                should_cancel=should_cancel,
+            )
+            return QueryExecutionResult(hits=tuple(hits), scanned_documents=int(scanned))
+
+        materialized = tuple(documents)
         hits = self._search_engine.search(
-            documents,
+            materialized,
             query,
             preview_limit=preview_limit,
             result_limit=result_limit,
             should_cancel=should_cancel,
         )
-        return QueryExecutionResult(hits=tuple(hits), scanned_documents=len(documents))
+        return QueryExecutionResult(hits=tuple(hits), scanned_documents=len(materialized))
