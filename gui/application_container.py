@@ -19,14 +19,14 @@ from .detailed_logical_session_view import (
     DetailedLogicalSessionViewWidget as SessionViewWidget,
 )
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
-from .final_streaming_filter_integration import (
-    FinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
-)
 from .import_task import ProjectImportTask
 from .project_dialog import NewProjectDialog
 from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
+from .raw_frame_grouping import (
+    GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
+)
 from .session_management_integration import SessionManagementIntegration
 from .study_area_view import StudyAreaViewWidget
 
