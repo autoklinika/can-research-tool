@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.query_engine import QueryEngine
 from app.search_engine import (
     SearchDocument,
     SearchEngine,
@@ -130,3 +131,15 @@ def test_cancelled_scan_returns_no_partial_results() -> None:
 
     assert hits == []
     assert checks == 2
+
+
+def test_query_engine_reports_full_scan_and_all_hits() -> None:
+    documents = tuple(
+        SearchDocument(index, {"payload": "27 07" if index % 2 == 0 else "10 01"})
+        for index in range(20)
+    )
+
+    result = QueryEngine().search(documents, SearchQuery("2707"))
+
+    assert result.scanned_documents == 20
+    assert [hit.row for hit in result.hits] == list(range(0, 20, 2))
