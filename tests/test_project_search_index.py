@@ -54,6 +54,11 @@ def test_persistent_index_survives_project_reopen_and_executes_sql_query(tmp_pat
     assert [hit.row for hit in result.hits] == [1, 2]
     assert result.scanned_documents == 2
 
+    # Simulate a Windows utility touching file metadata between CRT runs without
+    # changing the immutable project-owned session content.
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+
     reopened = CrtProject.open(project.root)
     reopened_record = reopened.session_by_path(path)
     assert reopened_record is not None
@@ -94,6 +99,8 @@ def test_persistent_index_resumes_from_last_committed_batch(tmp_path) -> None:
     assert state.status == "pending"
     assert state.indexed_rows == 1_000
 
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
     repository.rebuild_session(project, record, batch_size=1_000)
     final_state = repository.state(fingerprint.source_id)
     assert final_state is not None
@@ -102,7 +109,7 @@ def test_persistent_index_resumes_from_last_committed_batch(tmp_path) -> None:
     assert repository.is_current(repository.fingerprint(project, record, path))
 
 
-def test_fingerprint_change_invalidates_index_and_session_removal_cleans_it(tmp_path) -> None:
+def test_content_change_invalidates_index_and_session_removal_cleans_it(tmp_path) -> None:
     project = CrtProject.create(tmp_path / "project", name="Index cleanup")
     path, record = _create_session(
         project,
@@ -113,6 +120,18 @@ def test_fingerprint_change_invalidates_index_and_session_removal_cleans_it(tmp_
     fingerprint = repository.rebuild_session(project, record)
     assert repository.is_current(fingerprint)
 
+    # Metadata-only changes are accepted after SHA-256 verification.
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+    touched = repository.fingerprint(project, record, path)
+    assert repository.is_current(touched)
+
+    # A same-size content mutation must still invalidate the index.
+    original = path.read_bytes()
+    mutated = original.replace(b'"data":"01"', b'"data":"02"', 1)
+    assert mutated != original
+    assert len(mutated) == len(original)
+    path.write_bytes(mutated)
     stat = path.stat()
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
     changed = repository.fingerprint(project, record, path)
