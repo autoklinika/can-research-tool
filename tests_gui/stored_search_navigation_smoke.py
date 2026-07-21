@@ -111,6 +111,9 @@ def main() -> None:
 
         search = LogSearchWindow(parent)
         search.set_target_index(view.frame_table, index)
+        search.results.selectionModel().currentChanged.disconnect(
+            search._result_selection_changed
+        )
         navigator = StoredSearchNavigator(view, cancel_widget=search, parent=parent)
         messages: list[str] = []
         view.output_message.connect(messages.append)
