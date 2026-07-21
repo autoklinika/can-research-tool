@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QTableView
 
 from .fixed_marker_menu_shell import FixedMarkerMenuMainWindow
@@ -12,6 +12,7 @@ from .project_preparation_progress import (
     ProjectPreparationStatusWidget,
 )
 from .search_index_registry import SearchIndex, SearchIndexRegistry
+from .stored_search_navigation import StoredSearchNavigator
 
 
 class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
@@ -21,6 +22,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         self._log_search_window: LogSearchWindow | None = None
         self._search_index_registry: SearchIndexRegistry | None = None
         self._tracked_search_indexes: dict[int, tuple[str, str]] = {}
+        self._stored_search_navigator: StoredSearchNavigator | None = None
         super().__init__(services)
 
         self.project_preparation = ProjectPreparationProgress(self)
@@ -47,6 +49,9 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         if window is None:
             window = LogSearchWindow(self)
             self._log_search_window = window
+            window.results.selectionModel().currentChanged.connect(
+                self._stored_search_result_changed
+            )
 
         table, session_path = self._active_search_context()
         registry = self._search_index_registry
@@ -62,6 +67,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         if index is not None:
             self._track_search_index(index)
         window.set_target_index(table, index)
+        self._configure_stored_search_navigator(window, table, index)
 
         if window.isMinimized():
             window.showNormal()
@@ -71,6 +77,58 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         window.activateWindow()
         window.query_edit.selectAll()
         window.query_edit.setFocus(Qt.ShortcutFocusReason)
+
+    def _configure_stored_search_navigator(
+        self,
+        window: LogSearchWindow,
+        table: QTableView | None,
+        index: SearchIndex | None,
+    ) -> None:
+        self._replace_stored_search_navigator(None)
+        current = self.tabs.currentWidget()
+        if (
+            current is None
+            or table is None
+            or index is None
+            or getattr(index, "source_id", None) is None
+            or getattr(current, "frame_table", None) is not table
+            or not hasattr(current, "_stored_session_controller")
+            or not hasattr(current, "_stored_session_integration")
+        ):
+            return
+        self._stored_search_navigator = StoredSearchNavigator(
+            current,
+            cancel_widget=window,
+            parent=self,
+        )
+
+    def _stored_search_result_changed(
+        self,
+        current: QModelIndex,
+        _previous: QModelIndex,
+    ) -> None:
+        navigator = self._stored_search_navigator
+        window = self._log_search_window
+        if navigator is None or window is None:
+            return
+        if not current.isValid():
+            navigator.cancel()
+            return
+        position = current.row()
+        if not 0 <= position < len(window._hits):
+            navigator.cancel()
+            return
+        navigator.navigate_to_source_row(window._hits[position].row)
+
+    def _replace_stored_search_navigator(
+        self,
+        navigator: StoredSearchNavigator | None,
+    ) -> None:
+        previous = self._stored_search_navigator
+        self._stored_search_navigator = navigator
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
 
     def _track_search_index(self, index: SearchIndex, *, label: str | None = None) -> None:
         token = id(index)
@@ -236,6 +294,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         )
         if not project_changed:
             return
+        self._replace_stored_search_navigator(None)
         if self._search_index_registry is not None:
             self._search_index_registry.close()
         self._tracked_search_indexes.clear()
@@ -246,6 +305,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         current = self.tabs.widget(index)
         target = self._log_search_window._target_table if self._log_search_window else None
         if target is not None and current is not None and current.isAncestorOf(target):
+            self._replace_stored_search_navigator(None)
             self._log_search_window.set_target_index(None, None)
         super()._close_tab(index)
 
@@ -253,6 +313,7 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         super().closeEvent(event)
         if not event.isAccepted():
             return
+        self._replace_stored_search_navigator(None)
         if self._search_index_registry is not None:
             self._search_index_registry.close()
         if hasattr(self, "project_preparation"):
