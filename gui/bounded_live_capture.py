@@ -28,7 +28,19 @@ class BoundedLiveCaptureWidget(LiveCaptureWidget):
     def __init__(self, *args, **kwargs) -> None:
         self._analysis_session_path: Path | None = None
         super().__init__(*args, **kwargs)
+        self.marker_setup_button.setMinimumSize(230, 58)
+        self.marker_setup_button.setStyleSheet(
+            "QPushButton { text-align: left; padding: 7px 12px; font-weight: 600; }"
+        )
+        self._update_marker_tile()
         self._install_deferred_logical_controls()
+
+    def _update_marker_tile(self) -> None:
+        presets = self.project.list_marker_presets()
+        active = sum(preset.enabled for preset in presets)
+        self.marker_setup_button.setText(
+            f"Znaczniki\n{active} aktywne / {len(presets)}"
+        )
 
     def _install_deferred_logical_controls(self) -> None:
         page = self.data_tabs.widget(self.message_tab_index)
