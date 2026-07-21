@@ -17,6 +17,7 @@ from .capture_service import (
     CaptureService,
     CaptureStatus,
 )
+from .deferred_capture_service import DeferredLogicalCaptureService
 from .live_buffer import LiveFrameSnapshot
 from .live_message_buffer import LiveMessageSnapshot
 from .markers import CaptureMarker, MarkerPreset
@@ -61,12 +62,12 @@ ChannelProvider = Callable[[], list[KvaserChannelInfo]]
 
 
 class LiveCaptureController:
-    """Application boundary for Live Capture lifecycle and snapshots."""
+    """Application boundary for raw-only Live Capture lifecycle and snapshots."""
 
     def __init__(
         self,
         *,
-        service_factory: CaptureServiceFactory = CaptureService,
+        service_factory: CaptureServiceFactory = DeferredLogicalCaptureService,
         channel_provider: ChannelProvider = list_channels,
     ) -> None:
         self._channel_provider = channel_provider
@@ -112,6 +113,8 @@ class LiveCaptureController:
         return self._service.live_snapshot_since(after_sequence)
 
     def messages_since(self, after_sequence: int | None) -> LiveMessageSnapshot:
+        """Compatibility API; production Live no longer consumes this snapshot."""
+
         return self._service.live_messages_snapshot_since(after_sequence)
 
     def add_marker(
