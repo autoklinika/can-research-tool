@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Event
+
 from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QApplication,
@@ -44,6 +46,110 @@ _LOGIC_LABELS: tuple[tuple[str, SearchLogic], ...] = (
     ("AND", SearchLogic.ALL),
 )
 
+_RESULT_RENDER_LIMIT = 5_000
+_RESULT_SCAN_LIMIT = _RESULT_RENDER_LIMIT + 1
+
+
+class _SearchDocumentCache:
+    """Incremental GUI-thread cache of display values from one Qt item model."""
+
+    def __init__(self) -> None:
+        self._model = None
+        self._headers: list[str] = []
+        self._documents: list[SearchDocument] = []
+        self._connections: list[tuple[object, object]] = []
+
+    @property
+    def headers(self) -> list[str]:
+        return list(self._headers)
+
+    def set_model(self, model) -> None:
+        if model is self._model:
+            return
+        self._disconnect()
+        self._model = model
+        self._headers = []
+        self._documents = []
+        if model is None:
+            return
+        self._rebuild()
+        self._connect(model.rowsInserted, self._rows_inserted)
+        self._connect(model.rowsRemoved, self._rows_removed)
+        self._connect(model.dataChanged, self._data_changed)
+        self._connect(model.modelReset, self._rebuild)
+        self._connect(model.layoutChanged, self._rebuild)
+        self._connect(model.headerDataChanged, self._headers_changed)
+        self._connect(model.columnsInserted, self._columns_changed)
+        self._connect(model.columnsRemoved, self._columns_changed)
+        self._connect(model.destroyed, self._model_destroyed)
+
+    def snapshot(self) -> tuple[SearchDocument, ...]:
+        return tuple(self._documents)
+
+    def _connect(self, signal, slot) -> None:
+        signal.connect(slot)
+        self._connections.append((signal, slot))
+
+    def _disconnect(self) -> None:
+        for signal, slot in self._connections:
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        self._connections.clear()
+
+    def _model_destroyed(self, *_args) -> None:
+        self._connections.clear()
+        self._model = None
+        self._headers = []
+        self._documents = []
+
+    def _rebuild(self, *_args) -> None:
+        model = self._model
+        if model is None:
+            self._headers = []
+            self._documents = []
+            return
+        self._headers = _model_headers(model)
+        self._documents = [self._read_document(row) for row in range(model.rowCount())]
+
+    def _rebuild_from(self, first_row: int) -> None:
+        model = self._model
+        if model is None:
+            return
+        first_row = max(0, min(first_row, model.rowCount()))
+        del self._documents[first_row:]
+        self._documents.extend(self._read_document(row) for row in range(first_row, model.rowCount()))
+
+    def _read_document(self, row: int) -> SearchDocument:
+        model = self._model
+        fields = {
+            self._headers[column]: str(model.data(model.index(row, column), Qt.DisplayRole) or "")
+            for column in range(model.columnCount())
+        }
+        return SearchDocument(row=row, fields=fields)
+
+    def _rows_inserted(self, _parent, first: int, _last: int) -> None:
+        self._rebuild_from(first)
+
+    def _rows_removed(self, _parent, first: int, _last: int) -> None:
+        self._rebuild_from(first)
+
+    def _data_changed(self, top_left, bottom_right, *_roles) -> None:
+        model = self._model
+        if model is None or not self._documents:
+            return
+        first = max(0, top_left.row())
+        last = min(bottom_right.row(), model.rowCount() - 1)
+        for row in range(first, last + 1):
+            self._documents[row] = self._read_document(row)
+
+    def _headers_changed(self, *_args) -> None:
+        self._rebuild()
+
+    def _columns_changed(self, *_args) -> None:
+        self._rebuild()
+
 
 class _SearchSignals(QObject):
     finished = Signal(int, object)
@@ -55,20 +161,31 @@ class _SearchTask(QRunnable):
         self,
         generation: int,
         query: SearchQuery,
-        documents: list[SearchDocument],
+        documents: tuple[SearchDocument, ...],
     ) -> None:
         super().__init__()
         self.generation = generation
         self.query = query
         self.documents = documents
+        self.cancel_event = Event()
         self.signals = _SearchSignals()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
 
     def run(self) -> None:
         try:
-            hits = SearchEngine().search(self.documents, self.query)
-            self.signals.finished.emit(self.generation, hits)
+            hits = SearchEngine().search(
+                self.documents,
+                self.query,
+                result_limit=_RESULT_SCAN_LIMIT,
+                should_cancel=self.cancel_event.is_set,
+            )
+            if not self.cancel_event.is_set():
+                self.signals.finished.emit(self.generation, hits)
         except Exception as exc:  # pragma: no cover
-            self.signals.failed.emit(self.generation, str(exc))
+            if not self.cancel_event.is_set():
+                self.signals.failed.emit(self.generation, str(exc))
 
 
 class LogSearchWindow(QMainWindow):
@@ -87,6 +204,7 @@ class LogSearchWindow(QMainWindow):
         self._tasks: list[_SearchTask] = []
         self._event_filter_installed = False
         self._field_checkboxes: dict[str, QCheckBox] = {}
+        self._cache = _SearchDocumentCache()
 
         root_widget = QWidget(self)
         root = QVBoxLayout(root_widget)
@@ -190,6 +308,8 @@ class LogSearchWindow(QMainWindow):
 
     def set_target_table(self, table: QTableView | None) -> None:
         self._target_table = table
+        self._cancel_tasks()
+        self._cache.set_model(table.model() if table is not None else None)
         self._rebuild_field_choices()
 
     def start_search(self) -> None:
@@ -212,22 +332,13 @@ class LogSearchWindow(QMainWindow):
             )
             return
 
+        self._cancel_tasks()
         self._generation += 1
         generation = self._generation
         self.results.clear()
         self._hits.clear()
         self.position_label.clear()
         self.result_label.setText("Wyszukiwanie…")
-        self.search_button.setEnabled(False)
-
-        headers = self._model_headers(model)
-        documents: list[SearchDocument] = []
-        for row in range(model.rowCount()):
-            fields = {
-                headers[column]: str(model.data(model.index(row, column), Qt.DisplayRole) or "")
-                for column in range(model.columnCount())
-            }
-            documents.append(SearchDocument(row=row, fields=fields))
 
         query = SearchQuery(
             text=query_text,
@@ -235,38 +346,52 @@ class LogSearchWindow(QMainWindow):
             fields=frozenset(selected_fields),
             logic=SearchLogic(str(self.logic_combo.currentData())),
         )
-        task = _SearchTask(generation, query, documents)
+        task = _SearchTask(generation, query, self._cache.snapshot())
         task.signals.finished.connect(self._search_finished)
         task.signals.failed.connect(self._search_failed)
         self._tasks.append(task)
         QThreadPool.globalInstance().start(task)
 
+    def _cancel_tasks(self) -> None:
+        for task in self._tasks:
+            task.cancel()
+        self._tasks.clear()
+
     def _search_finished(self, generation: int, hits: object) -> None:
         if generation != self._generation:
             return
-        self.search_button.setEnabled(True)
-        self._hits = list(hits)
+        all_hits = list(hits)
+        truncated = len(all_hits) > _RESULT_RENDER_LIMIT
+        self._hits = all_hits[:_RESULT_RENDER_LIMIT]
         self.results.clear()
-        for hit in self._hits:
-            fields = ", ".join(hit.matched_fields)
-            terms = ", ".join(hit.matched_terms)
-            item = QListWidgetItem(f"{hit.row + 1}  [{fields}]  {terms}\n{hit.preview}")
-            item.setData(Qt.UserRole, hit.row)
-            self.results.addItem(item)
-        self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
+        self.results.setUpdatesEnabled(False)
+        try:
+            for hit in self._hits:
+                fields = ", ".join(hit.matched_fields)
+                terms = ", ".join(hit.matched_terms)
+                item = QListWidgetItem(f"{hit.row + 1}  [{fields}]  {terms}\n{hit.preview}")
+                item.setData(Qt.UserRole, hit.row)
+                self.results.addItem(item)
+        finally:
+            self.results.setUpdatesEnabled(True)
+
+        if truncated:
+            self.result_label.setText(f"{_RESULT_RENDER_LIMIT:,}+ wyników".replace(",", " "))
+        else:
+            self.result_label.setText(f"{len(self._hits):,} wyników".replace(",", " "))
         if self._hits:
             self.results.setCurrentRow(0)
             self.results.setFocus(Qt.OtherFocusReason)
         else:
             self.position_label.clear()
-        self._tasks = self._tasks[-2:]
+        self._tasks.clear()
 
     def _search_failed(self, generation: int, error: str) -> None:
         if generation != self._generation:
             return
-        self.search_button.setEnabled(True)
         self.result_label.setText("Błąd wyszukiwania")
         self.position_label.clear()
+        self._tasks.clear()
         QMessageBox.critical(self, "Wyszukiwanie", error)
 
     def next_result(self) -> None:
@@ -330,13 +455,11 @@ class LogSearchWindow(QMainWindow):
                 widget.deleteLater()
         self._field_checkboxes.clear()
 
-        table = self._target_table
-        model = table.model() if table is not None else None
-        if model is None:
+        headers = self._cache.headers
+        if not headers:
             self.fields_widget.setEnabled(False)
             return
 
-        headers = self._model_headers(model)
         for index, header in enumerate(headers):
             checkbox = QCheckBox(header, self.fields_widget)
             checkbox.setObjectName(f"logSearchField{index}")
@@ -361,18 +484,8 @@ class LogSearchWindow(QMainWindow):
             if checkbox.isChecked()
         }
 
-    @staticmethod
-    def _model_headers(model) -> list[str]:
-        headers: list[str] = []
-        used: dict[str, int] = {}
-        for column in range(model.columnCount()):
-            base = str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"Kolumna {column + 1}")
-            count = used.get(base, 0)
-            used[base] = count + 1
-            headers.append(base if count == 0 else f"{base} ({count + 1})")
-        return headers
-
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._cancel_tasks()
         settings = QSettings()
         settings.setValue("windows/logSearchGeometry", self.saveGeometry())
         settings.setValue("windows/logSearchMode", self.mode_combo.currentData())
@@ -383,3 +496,14 @@ class LogSearchWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None and self._event_filter_installed:
             app.removeEventFilter(self)
+
+
+def _model_headers(model) -> list[str]:
+    headers: list[str] = []
+    used: dict[str, int] = {}
+    for column in range(model.columnCount()):
+        base = str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole) or f"Kolumna {column + 1}")
+        count = used.get(base, 0)
+        used[base] = count + 1
+        headers.append(base if count == 0 else f"{base} ({count + 1})")
+    return headers
