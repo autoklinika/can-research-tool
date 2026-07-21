@@ -20,12 +20,15 @@ jobs:
           sudo apt-get install -y -qq libegl1
       - name: Install GUI and test tooling
         run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Python sources
+        run: python -m compileall -q app gui tests tests_gui
       - name: Verify search and SQLite core
         run: >-
           python -m pytest
           tests/test_search_engine.py
           tests/test_project_search_index.py
           tests/test_sqlite_architecture.py
+          tests/test_stored_search_navigation.py
           -q
       - name: Verify engineering IDE shell
         env:
@@ -39,6 +42,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/persistent_search_index_smoke.py
+      - name: Verify stored search cross-page navigation
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/stored_search_navigation_smoke.py
       - name: Verify direct logical-cache search
         env:
           QT_QPA_PLATFORM: offscreen
