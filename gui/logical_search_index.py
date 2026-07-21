@@ -47,7 +47,11 @@ class LogicalSqlQuerySource:
         visible_ids: tuple[int, ...] | None = None,
     ) -> None:
         self.cache_path = Path(cache_path).resolve()
-        self.visible_ids = None if visible_ids is None else tuple(int(value) for value in visible_ids)
+        self.visible_ids = (
+            None
+            if visible_ids is None
+            else tuple(int(value) for value in visible_ids)
+        )
 
     def snapshot(self) -> "LogicalSqlQuerySource":
         return self
@@ -61,18 +65,28 @@ class LogicalSqlQuerySource:
         result_limit: int | None,
         should_cancel: Callable[[], bool] | None,
     ) -> tuple[tuple[SearchHit, ...], int]:
-        compiled = query if isinstance(query, CompiledSearchQuery) else search_engine.compile(query)
+        compiled = (
+            query
+            if isinstance(query, CompiledSearchQuery)
+            else search_engine.compile(query)
+        )
         hits: list[SearchHit] = []
         scanned = 0
         connection: sqlite3.Connection | None = None
         try:
             connection = open_logical_cache_readonly(self.cache_path)
             for display_row, row in self._iter_rows(connection):
-                if should_cancel is not None and scanned % 256 == 0 and should_cancel():
+                if (
+                    should_cancel is not None
+                    and scanned % 256 == 0
+                    and should_cancel()
+                ):
                     return (), scanned
                 document = _document_from_row(display_row, row)
                 scanned += 1
-                matched, matched_fields, matched_terms, fields = compiled.match_document(document)
+                matched, matched_fields, matched_terms, fields = (
+                    compiled.match_document(document)
+                )
                 if not matched:
                     continue
                 hits.append(
@@ -90,7 +104,10 @@ class LogicalSqlQuerySource:
                 connection.close()
         return tuple(hits), scanned
 
-    def _iter_rows(self, connection: sqlite3.Connection) -> Iterator[tuple[int, sqlite3.Row]]:
+    def _iter_rows(
+        self,
+        connection: sqlite3.Connection,
+    ) -> Iterator[tuple[int, sqlite3.Row]]:
         identifiers = self.visible_ids
         if identifiers is None:
             for row in connection.execute("SELECT * FROM messages ORDER BY id"):
@@ -151,10 +168,12 @@ class LogicalSqlSearchIndex(QObject):
         self._active = True
 
     def snapshot(self):
-        factory = getattr(self._model, "search_snapshot", None)
-        if not callable(factory):
+        model = self._model
+        cache_path = getattr(model, "cache_path", None)
+        if cache_path is None:
             return ()
-        return factory()
+        visible_ids = getattr(model, "_visible_ids", None)
+        return LogicalSqlQuerySource(cache_path, visible_ids)
 
     def close(self) -> None:
         self._active = False
