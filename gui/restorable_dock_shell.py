@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from .engineering_shell import EngineeringShellMainWindow
+from .settings_view import SettingsViewWidget
 
 
 class _LogicalMessageTooltipSuppressor(QObject):
@@ -135,6 +136,12 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
             "Pokaż lub ukryj pasek Narzędzia główne"
         )
 
+        try:
+            self.settings_action.triggered.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.settings_action.triggered.connect(self._open_settings)
+
     def _build_menu(self) -> None:
         super()._build_menu()
         view_menu = None
@@ -216,6 +223,14 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
         if not inspector_was_visible:
             self._hide_inspector_by_default()
 
+    def _open_settings(self) -> None:
+        key = "settings"
+        if self._activate_tab(key):
+            return
+        widget = SettingsViewWidget(self)
+        widget.output_message.connect(self._append_output)
+        self._add_tab(key, widget, "Ustawienia")
+
     def _apply_default_layout(self) -> None:
         super()._apply_default_layout()
         self._remove_activity_bar()
@@ -265,9 +280,6 @@ class RestorableDockEngineeringShellMainWindow(EngineeringShellMainWindow):
 
         action = getattr(self, "toggle_output_action", None)
         if action is not None:
-            # The old signal can stay connected because a hidden, disabled action can
-            # never be invoked by the user. Avoiding disconnect() also avoids a noisy
-            # PySide warning when this idempotent method runs more than once.
             action.setShortcut("")
             action.setChecked(False)
             action.setEnabled(False)
