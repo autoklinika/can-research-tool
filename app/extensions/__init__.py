@@ -1,3 +1,12 @@
+from .builtin import (
+    SESSION_STATISTICS_ALGORITHM_VERSION,
+    SESSION_STATISTICS_ARTIFACT_SCHEMA_VERSION,
+    SESSION_STATISTICS_PROVIDER_ID,
+    SESSION_STATISTICS_PROVIDER_VERSION,
+    SessionStatisticsProvider,
+    builtin_analysis_providers,
+    register_builtin_extensions,
+)
 from .contracts import (
     AnalysisContext,
     CancellationToken,
@@ -41,5 +50,12 @@ __all__ = [
     "ProgressReporter",
     "ProgressUpdate",
     "ProjectContext",
+    "SESSION_STATISTICS_ALGORITHM_VERSION",
+    "SESSION_STATISTICS_ARTIFACT_SCHEMA_VERSION",
+    "SESSION_STATISTICS_PROVIDER_ID",
+    "SESSION_STATISTICS_PROVIDER_VERSION",
     "SessionSource",
+    "SessionStatisticsProvider",
+    "builtin_analysis_providers",
+    "register_builtin_extensions",
 ]
