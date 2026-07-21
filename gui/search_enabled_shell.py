@@ -9,7 +9,7 @@ from .search_index_registry import SearchIndexRegistry
 
 
 class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
-    """Engineering shell with prebuilt indexes for every visible CRT table."""
+    """Engineering shell with lazy per-model indexes for searched CRT tables."""
 
     def __init__(self, services) -> None:
         self._log_search_window: LogSearchWindow | None = None
