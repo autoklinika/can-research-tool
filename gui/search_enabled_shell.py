@@ -157,13 +157,21 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
     def _set_project(self, project) -> None:
         previous_root = Path(self.project.root).resolve() if self.project is not None else None
         next_root = Path(project.root).resolve()
-        if previous_root is not None and previous_root != next_root:
-            if self._search_index_registry is not None:
-                self._search_index_registry.close()
-            self._tracked_search_indexes.clear()
-            if hasattr(self, "project_preparation"):
-                self.project_preparation.clear()
         super()._set_project(project)
+
+        current_root = Path(self.project.root).resolve() if self.project is not None else None
+        project_changed = (
+            previous_root is not None
+            and previous_root != next_root
+            and current_root == next_root
+        )
+        if not project_changed:
+            return
+        if self._search_index_registry is not None:
+            self._search_index_registry.close()
+        self._tracked_search_indexes.clear()
+        if hasattr(self, "project_preparation"):
+            self.project_preparation.clear()
 
     def _close_tab(self, index: int) -> None:
         current = self.tabs.widget(index)
@@ -173,8 +181,10 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         super()._close_tab(index)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        super().closeEvent(event)
+        if not event.isAccepted():
+            return
         if self._search_index_registry is not None:
             self._search_index_registry.close()
         if hasattr(self, "project_preparation"):
             self.project_preparation.clear()
-        super().closeEvent(event)
