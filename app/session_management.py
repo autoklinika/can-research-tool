@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .project import CrtProject, SessionRecord
+from .project_search_index import ProjectSearchIndex
 from .session_stream import read_session_header
 
 
@@ -50,8 +51,6 @@ def session_artifact_paths(project: CrtProject, session: SessionRecord) -> tuple
             if isinstance(original_file, str) and original_file.strip():
                 candidates.append(project.absolute_path(original_file))
         except (OSError, ValueError, KeyError, TypeError):
-            # The indexed session and its standard sidecars can still be removed
-            # even when an old or damaged header cannot expose the imported copy.
             pass
 
     unique: list[Path] = []
@@ -71,12 +70,7 @@ def remove_session(
     *,
     delete_files: bool,
 ) -> SessionRemovalResult:
-    """Remove a session from the project index and optionally its project files.
-
-    ``delete_files`` affects only paths owned by the CRT project. The original
-    file selected by the user during import lives outside the project and is not
-    part of ``session_artifact_paths``.
-    """
+    """Remove a session, its project files and its rebuildable search records."""
 
     session = _session_by_id(project, session_id)
     if session is None:
@@ -109,6 +103,13 @@ def remove_session(
         raise
     finally:
         connection.close()
+
+    try:
+        ProjectSearchIndex(project).remove_session(session.id)
+    except (OSError, sqlite3.Error):
+        # Search data is a disposable cache. Failure to clean it must not turn a
+        # successful source-session deletion into a user-visible failure.
+        pass
 
     return SessionRemovalResult(
         session=session,
