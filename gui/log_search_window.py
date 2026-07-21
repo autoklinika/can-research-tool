@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from threading import Event
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -48,6 +48,7 @@ _LOGIC_LABELS: tuple[tuple[str, SearchLogic], ...] = (
 
 _RESULT_RENDER_LIMIT = 5_000
 _RESULT_SCAN_LIMIT = _RESULT_RENDER_LIMIT + 1
+_CACHE_CHUNK_ROWS = 500
 
 
 class _SearchDocumentCache:
@@ -58,10 +59,22 @@ class _SearchDocumentCache:
         self._headers: list[str] = []
         self._documents: list[SearchDocument] = []
         self._connections: list[tuple[object, object]] = []
+        self._next_row = 0
+        self._dirty = False
 
     @property
     def headers(self) -> list[str]:
         return list(self._headers)
+
+    @property
+    def is_ready(self) -> bool:
+        model = self._model
+        return model is not None and not self._dirty and self._next_row >= model.rowCount()
+
+    @property
+    def progress(self) -> tuple[int, int]:
+        model = self._model
+        return self._next_row, model.rowCount() if model is not None else 0
 
     def set_model(self, model) -> None:
         if model is self._model:
@@ -70,18 +83,37 @@ class _SearchDocumentCache:
         self._model = model
         self._headers = []
         self._documents = []
+        self._next_row = 0
+        self._dirty = False
         if model is None:
             return
-        self._rebuild()
+
+        self._headers = _model_headers(model)
         self._connect(model.rowsInserted, self._rows_inserted)
-        self._connect(model.rowsRemoved, self._rows_removed)
+        self._connect(model.rowsRemoved, self._structure_changed)
         self._connect(model.dataChanged, self._data_changed)
-        self._connect(model.modelReset, self._rebuild)
-        self._connect(model.layoutChanged, self._rebuild)
+        self._connect(model.modelReset, self._structure_changed)
+        self._connect(model.layoutChanged, self._structure_changed)
         self._connect(model.headerDataChanged, self._headers_changed)
-        self._connect(model.columnsInserted, self._columns_changed)
-        self._connect(model.columnsRemoved, self._columns_changed)
+        self._connect(model.columnsInserted, self._headers_changed)
+        self._connect(model.columnsRemoved, self._headers_changed)
         self._connect(model.destroyed, self._model_destroyed)
+
+    def build_chunk(self, maximum_rows: int) -> bool:
+        model = self._model
+        if model is None:
+            return True
+        if self._dirty:
+            self._headers = _model_headers(model)
+            self._documents = []
+            self._next_row = 0
+            self._dirty = False
+
+        stop = min(model.rowCount(), self._next_row + maximum_rows)
+        for row in range(self._next_row, stop):
+            self._documents.append(self._read_document(row))
+        self._next_row = stop
+        return self.is_ready
 
     def snapshot(self) -> tuple[SearchDocument, ...]:
         return tuple(self._documents)
@@ -103,23 +135,8 @@ class _SearchDocumentCache:
         self._model = None
         self._headers = []
         self._documents = []
-
-    def _rebuild(self, *_args) -> None:
-        model = self._model
-        if model is None:
-            self._headers = []
-            self._documents = []
-            return
-        self._headers = _model_headers(model)
-        self._documents = [self._read_document(row) for row in range(model.rowCount())]
-
-    def _rebuild_from(self, first_row: int) -> None:
-        model = self._model
-        if model is None:
-            return
-        first_row = max(0, min(first_row, model.rowCount()))
-        del self._documents[first_row:]
-        self._documents.extend(self._read_document(row) for row in range(first_row, model.rowCount()))
+        self._next_row = 0
+        self._dirty = False
 
     def _read_document(self, row: int) -> SearchDocument:
         model = self._model
@@ -129,26 +146,31 @@ class _SearchDocumentCache:
         }
         return SearchDocument(row=row, fields=fields)
 
-    def _rows_inserted(self, _parent, first: int, _last: int) -> None:
-        self._rebuild_from(first)
+    def _rows_inserted(self, _parent, first: int, last: int) -> None:
+        model = self._model
+        if model is None:
+            return
+        if self.is_ready and first == len(self._documents):
+            for row in range(first, last + 1):
+                self._documents.append(self._read_document(row))
+            self._next_row = len(self._documents)
+            return
+        self._dirty = True
 
-    def _rows_removed(self, _parent, first: int, _last: int) -> None:
-        self._rebuild_from(first)
+    def _structure_changed(self, *_args) -> None:
+        self._dirty = True
+
+    def _headers_changed(self, *_args) -> None:
+        self._dirty = True
 
     def _data_changed(self, top_left, bottom_right, *_roles) -> None:
         model = self._model
-        if model is None or not self._documents:
+        if model is None:
             return
         first = max(0, top_left.row())
-        last = min(bottom_right.row(), model.rowCount() - 1)
+        last = min(bottom_right.row(), len(self._documents) - 1)
         for row in range(first, last + 1):
             self._documents[row] = self._read_document(row)
-
-    def _headers_changed(self, *_args) -> None:
-        self._rebuild()
-
-    def _columns_changed(self, *_args) -> None:
-        self._rebuild()
 
 
 class _SearchSignals(QObject):
@@ -205,6 +227,11 @@ class LogSearchWindow(QMainWindow):
         self._event_filter_installed = False
         self._field_checkboxes: dict[str, QCheckBox] = {}
         self._cache = _SearchDocumentCache()
+        self._pending_search = False
+
+        self._cache_timer = QTimer(self)
+        self._cache_timer.setInterval(0)
+        self._cache_timer.timeout.connect(self._build_cache_chunk)
 
         root_widget = QWidget(self)
         root = QVBoxLayout(root_widget)
@@ -309,8 +336,25 @@ class LogSearchWindow(QMainWindow):
     def set_target_table(self, table: QTableView | None) -> None:
         self._target_table = table
         self._cancel_tasks()
+        self._pending_search = False
+        self._cache_timer.stop()
         self._cache.set_model(table.model() if table is not None else None)
         self._rebuild_field_choices()
+        if table is not None and table.model() is not None:
+            self._cache_timer.start()
+
+    def _build_cache_chunk(self) -> None:
+        ready = self._cache.build_chunk(_CACHE_CHUNK_ROWS)
+        current, total = self._cache.progress
+        if not ready:
+            if self._pending_search:
+                self.result_label.setText(f"Przygotowywanie… {current:,}/{total:,}".replace(",", " "))
+            return
+
+        self._cache_timer.stop()
+        if self._pending_search:
+            self._pending_search = False
+            self.start_search()
 
     def start_search(self) -> None:
         query_text = self.query_edit.text().strip()
@@ -330,6 +374,13 @@ class LogSearchWindow(QMainWindow):
                 "Wyszukiwanie",
                 "Wybierz co najmniej jedną kolumnę albo zaznacz wszystkie kolumny.",
             )
+            return
+
+        if not self._cache.is_ready:
+            self._pending_search = True
+            self.result_label.setText("Przygotowywanie…")
+            if not self._cache_timer.isActive():
+                self._cache_timer.start()
             return
 
         self._cancel_tasks()
@@ -485,6 +536,8 @@ class LogSearchWindow(QMainWindow):
         }
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._pending_search = False
+        self._cache_timer.stop()
         self._cancel_tasks()
         settings = QSettings()
         settings.setValue("windows/logSearchGeometry", self.saveGeometry())
