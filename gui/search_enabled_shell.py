@@ -110,15 +110,21 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         window: LogSearchWindow,
         enabled: bool,
     ) -> None:
-        signal = window.results.selectionModel().currentChanged
+        selection_signal = window.results.selectionModel().currentChanged
+        activation_signal = window.results.activated
         if enabled and self._stored_search_builtin_navigation_suspended:
-            signal.connect(window._result_selection_changed)
+            selection_signal.connect(window._result_selection_changed)
+            activation_signal.connect(window._activate_index)
             self._stored_search_builtin_navigation_suspended = False
         elif not enabled and not self._stored_search_builtin_navigation_suspended:
-            try:
-                signal.disconnect(window._result_selection_changed)
-            except (RuntimeError, TypeError):
-                pass
+            for signal, slot in (
+                (selection_signal, window._result_selection_changed),
+                (activation_signal, window._activate_index),
+            ):
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
             self._stored_search_builtin_navigation_suspended = True
 
     def _stored_search_result_changed(
@@ -130,13 +136,12 @@ class SearchEnabledMainWindow(FixedMarkerMenuMainWindow):
         window = self._log_search_window
         if navigator is None or window is None:
             return
-        if not current.isValid():
-            navigator.cancel()
-            return
         position = current.row()
-        if not 0 <= position < len(window._hits):
+        if not current.isValid() or not 0 <= position < len(window._hits):
+            window.position_label.clear()
             navigator.cancel()
             return
+        window.position_label.setText(f"{position + 1} / {len(window._hits)}")
         navigator.navigate_to_source_row(window._hits[position].row)
 
     def _replace_stored_search_navigator(
