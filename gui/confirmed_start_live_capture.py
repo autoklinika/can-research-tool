@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMessageBox
+import re
+from datetime import datetime
+from pathlib import Path
+
+from PySide6.QtWidgets import QDialog, QInputDialog, QLabel, QMessageBox
+
+from app.capture_service import CapturePaths
 
 from .bounded_live_capture import BoundedLiveCaptureWidget as _BoundedLiveCaptureWidget
 from .live_capture import LiveCaptureWidget
@@ -20,6 +26,18 @@ class ConfirmedStartLiveSaveIntegration(LiveSaveIntegration):
 
         self._prepare_actual_capture_start()
         super().start_capture()
+
+    def save_pending_log(self, name: str | None = None) -> bool:
+        if not self.has_unsaved_log:
+            return False
+
+        requested_name = name.strip() if name is not None else self._request_log_name()
+        if not requested_name:
+            self._restore_pending_ui()
+            return False
+
+        self._pending_name = requested_name
+        return super().save_pending_log()
 
     def confirm_pending_log(self, *, reason: str) -> bool:
         if reason != "new_capture" or not self.has_unsaved_log:
@@ -59,6 +77,45 @@ class ConfirmedStartLiveSaveIntegration(LiveSaveIntegration):
             return False
         self._restore_pending_ui()
         return False
+
+    def _request_log_name(self) -> str | None:
+        suggested = datetime.now().strftime("capture_%Y%m%d_%H%M%S")
+        while True:
+            dialog = QInputDialog(self.widget)
+            dialog.setWindowTitle("Zapisz log")
+            dialog.setLabelText("Nazwa logu:")
+            dialog.setInputMode(QInputDialog.InputMode.TextInput)
+            dialog.setTextValue(suggested)
+            dialog.selectAll()
+
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+
+            name = dialog.textValue().strip()
+            if name:
+                return name
+
+            QMessageBox.warning(
+                self.widget,
+                "Brak nazwy logu",
+                "Podaj nazwę logu albo anuluj zapis.",
+            )
+
+    def _destination_paths(self, source: CapturePaths) -> CapturePaths:
+        directory = self.widget.project.live_sessions_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        original = _safe_log_filename(self._pending_name)
+        base = original
+        suffix = 2
+        while self._destination_base_exists(directory, base):
+            base = f"{original}_{suffix:02d}"
+            suffix += 1
+        return CapturePaths(
+            session=directory / f"{base}.crt.jsonl",
+            raw_frames_csv=directory / f"{base}.frames.csv",
+            logical_messages_csv=directory / f"{base}.messages.csv",
+            markers=directory / f"{base}.markers.jsonl",
+        )
 
     def _prepare_clean_live_workspace(self) -> None:
         widget = self.widget
@@ -113,6 +170,9 @@ class ConfirmedStartLiveSaveIntegration(LiveSaveIntegration):
         widget = self.widget
         widget._deferred_start_ready = False
         widget._analysis_session_path = None
+        widget.session_name.setText(
+            datetime.now().strftime("live_temp_%Y%m%d_%H%M%S_%f")
+        )
         load_button = getattr(widget, "load_deferred_logical_button", None)
         if load_button is not None:
             load_button.setEnabled(False)
@@ -135,6 +195,28 @@ class BoundedLiveCaptureWidget(_BoundedLiveCaptureWidget):
             ConfirmedStartLiveSaveIntegration,
         )
         super().__init__(*args, **kwargs)
+        self._remove_session_name_controls()
+
+    def _remove_session_name_controls(self) -> None:
+        name_field = self.session_name
+        row_layout = _find_containing_layout(self.layout(), name_field)
+
+        for label in self.findChildren(QLabel):
+            if label.text().strip() != "Nazwa sesji:":
+                continue
+            label.hide()
+            if row_layout is not None:
+                row_layout.removeWidget(label)
+            label.deleteLater()
+            break
+
+        name_field.hide()
+        name_field.setEnabled(False)
+        if row_layout is not None:
+            row_layout.removeWidget(name_field)
+            if not bool(self.property("crtLiveNameSpacerAdded")):
+                row_layout.insertStretch(0, 1)
+                self.setProperty("crtLiveNameSpacerAdded", True)
 
     def _start_capture(self) -> None:
         # Bypass the eager clearing performed by the previous bounded implementation.
@@ -146,3 +228,22 @@ class BoundedLiveCaptureWidget(_BoundedLiveCaptureWidget):
             self._set_capture_controls(False)
             return
         super()._refresh_view()
+
+
+def _find_containing_layout(layout, target):
+    if layout is None:
+        return None
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        if item.widget() is target:
+            return layout
+        nested = item.layout()
+        found = _find_containing_layout(nested, target)
+        if found is not None:
+            return found
+    return None
+
+
+def _safe_log_filename(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    return sanitized or "capture"
