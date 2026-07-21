@@ -36,14 +36,18 @@ def main() -> None:
             duration_s=0.0,
         )
 
+        search_database = project.root / ".crt" / "indexes" / "search-v1.sqlite"
+        registry = SearchIndexRegistry()
+        assert not search_database.exists()
+
         model = FrameTableModel(capacity=len(frames))
         model.replace_frames(frames)
         table = QTableView()
         table.setModel(model)
 
-        registry = SearchIndexRegistry()
         index = registry.index_for_table(table, project=project, session_path=path)
         assert isinstance(index, PersistentSessionSearchIndex)
+        assert search_database.is_file()
         deadline = time.monotonic() + 5.0
         while not index.is_ready and time.monotonic() < deadline:
             app.processEvents()
