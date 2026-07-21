@@ -114,14 +114,18 @@ def main() -> None:
         search.results.selectionModel().currentChanged.disconnect(
             search._result_selection_changed
         )
+        search.results.activated.disconnect(search._activate_index)
         navigator = StoredSearchNavigator(view, cancel_widget=search, parent=parent)
         messages: list[str] = []
         view.output_message.connect(messages.append)
 
         def navigate(current, _previous) -> None:
-            if current.isValid() and 0 <= current.row() < len(search._hits):
-                navigator.navigate_to_source_row(search._hits[current.row()].row)
+            position = current.row()
+            if current.isValid() and 0 <= position < len(search._hits):
+                search.position_label.setText(f"{position + 1} / {len(search._hits)}")
+                navigator.navigate_to_source_row(search._hits[position].row)
             else:
+                search.position_label.clear()
                 navigator.cancel()
 
         search.results.selectionModel().currentChanged.connect(navigate)
@@ -140,9 +144,16 @@ def main() -> None:
             ),
             "unfiltered hit did not navigate to the last stored page",
         )
+        assert search.position_label.text() == "1 / 1"
         assert view.frame_model.rowCount() == 1
         assert view.frame_model.rowCount() <= controller.page_size
         assert view.frame_table.currentIndex().row() == 0
+
+        current_result = search.results.currentIndex()
+        search.results.activated.emit(current_result)
+        app.processEvents()
+        assert controller.state.page_start == 4
+        assert _selected_sequence(view) == 4
 
         view.stored_apply_filters.setChecked(True)
         _wait(
