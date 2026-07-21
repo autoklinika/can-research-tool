@@ -14,7 +14,7 @@ from app.session_stream import SessionPagedReader
 from infrastructure.desktop import reveal_path
 
 from .async_dbc_manager import AsyncDbcManagerWidget
-from .bounded_live_capture import BoundedLiveCaptureWidget
+from .confirmed_start_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
 from .detailed_logical_session_view import (
     DetailedLogicalSessionViewWidget as SessionViewWidget,
