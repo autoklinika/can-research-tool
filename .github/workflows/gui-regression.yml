@@ -123,6 +123,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_buffer_performance_smoke.py
+      - name: Verify raw frame list and grouped ID views
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/raw_frame_grouping_smoke.py
       - name: Verify fast pastel table cell hover
         env:
           QT_QPA_PLATFORM: offscreen
