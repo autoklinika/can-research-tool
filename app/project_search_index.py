@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import sqlite3
+import hashlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 
+from . import sqlite_connection as sqlite3
 from .project import CrtProject, SessionRecord
 from .search_engine import (
     CompiledSearchQuery,
@@ -118,6 +119,13 @@ class ProjectSearchIndex:
         )
 
     def is_current(self, fingerprint: SessionSearchFingerprint) -> bool:
+        """Return whether a complete durable index matches the session content.
+
+        A timestamp-only change does not invalidate the cache. When ``mtime``
+        differs, the source file is verified against the project-owned SHA-256
+        before the stored metadata is refreshed.
+        """
+
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -127,19 +135,23 @@ class ProjectSearchIndex:
                 """,
                 (fingerprint.source_id,),
             ).fetchone()
-        if row is None:
-            return False
-        return (
-            str(row[0]) == fingerprint.session_id
-            and str(row[1]) == fingerprint.relative_path
-            and int(row[2]) == fingerprint.schema_version
-            and str(row[3] or "") == fingerprint.sha256
-            and int(row[4]) == fingerprint.file_size
-            and int(row[5]) == fingerprint.mtime_ns
-            and int(row[6]) == fingerprint.frame_count
-            and int(row[7]) == fingerprint.frame_count
-            and str(row[8]) == "ready"
-        )
+            if row is None or not _stored_source_matches(row, fingerprint):
+                return False
+            if int(row[7]) != fingerprint.frame_count or str(row[8]) != "ready":
+                return False
+            if not self._content_matches_after_timestamp_change(row, fingerprint):
+                return False
+            if int(row[5]) != fingerprint.mtime_ns:
+                connection.execute(
+                    """
+                    UPDATE sources
+                    SET mtime_ns = ?, updated_at_utc = ?
+                    WHERE source_id = ?
+                    """,
+                    (fingerprint.mtime_ns, _utc_now(), fingerprint.source_id),
+                )
+                connection.commit()
+            return True
 
     def rebuild_session(
         self,
@@ -240,15 +252,9 @@ class ProjectSearchIndex:
             ).fetchone()
             resume = 0
             if row is not None:
-                same = (
-                    str(row[0]) == fingerprint.session_id
-                    and str(row[1]) == fingerprint.relative_path
-                    and int(row[2]) == fingerprint.schema_version
-                    and str(row[3] or "") == fingerprint.sha256
-                    and int(row[4]) == fingerprint.file_size
-                    and int(row[5]) == fingerprint.mtime_ns
-                    and int(row[6]) == fingerprint.frame_count
-                )
+                same = _stored_source_matches(row, fingerprint)
+                if same:
+                    same = self._content_matches_after_timestamp_change(row, fingerprint)
                 if same:
                     resume = max(0, min(int(row[7]), fingerprint.frame_count))
                     count = int(
@@ -301,6 +307,23 @@ class ProjectSearchIndex:
             )
             connection.commit()
         return resume
+
+    def _content_matches_after_timestamp_change(
+        self,
+        row: tuple[object, ...],
+        fingerprint: SessionSearchFingerprint,
+    ) -> bool:
+        if int(row[5]) == fingerprint.mtime_ns:
+            return True
+        expected_sha = str(row[3] or "")
+        if not expected_sha or expected_sha != fingerprint.sha256:
+            return False
+        source_path = (self.project_root / fingerprint.relative_path).resolve()
+        try:
+            source_path.relative_to(self.project_root)
+        except ValueError:
+            return False
+        return source_path.is_file() and _sha256(source_path) == expected_sha
 
     def _append_batch(
         self,
@@ -513,6 +536,20 @@ class FailedQuerySource:
         raise RuntimeError(self.error)
 
 
+def _stored_source_matches(
+    row: tuple[object, ...],
+    fingerprint: SessionSearchFingerprint,
+) -> bool:
+    return (
+        str(row[0]) == fingerprint.session_id
+        and str(row[1]) == fingerprint.relative_path
+        and int(row[2]) == fingerprint.schema_version
+        and str(row[3] or "") == fingerprint.sha256
+        and int(row[4]) == fingerprint.file_size
+        and int(row[6]) == fingerprint.frame_count
+    )
+
+
 def _candidate_where(compiled: CompiledSearchQuery) -> tuple[str, tuple[str, ...]]:
     query = compiled.query
     if query.case_sensitive or query.mode in (SearchMode.REGEX, SearchMode.WILDCARD):
@@ -605,6 +642,14 @@ def _document_row(source_id: str, source_row: int, frame) -> tuple[object, ...]:
         flags_text,
         flags_text.casefold(),
     )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _utc_now() -> str:
