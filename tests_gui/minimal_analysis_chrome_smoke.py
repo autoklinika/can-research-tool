@@ -107,18 +107,25 @@ def main() -> int:
         SessionAnalysisService.list_artifacts = fail_list_artifacts
         try:
             widget._analysis_completed(object())
-            assert widget.analysis_progress.isHidden()
+            assert not widget.analysis_progress.isHidden()
+            assert widget.analysis_progress.format() == "Błąd odczytu"
             assert not widget.analysis_status.isHidden()
             assert widget.analysis_status.text().startswith("Nie można odczytać")
         finally:
             SessionAnalysisService.list_artifacts = original_list_artifacts
+
+        widget._refresh_artifacts()
+        assert widget.analysis_progress.isHidden()
+        assert widget.analysis_status.isHidden()
+        assert widget.artifact_selector.count() == 2
 
         _dispose_widget(app, widget)
         del widget
 
         unavailable_widget = ApplicationContainer().create_session_view(session_path)
         unavailable_widget.tabs.setCurrentIndex(unavailable_widget.analysis_tab_index)
-        assert unavailable_widget.analysis_progress.isHidden()
+        assert not unavailable_widget.analysis_progress.isHidden()
+        assert unavailable_widget.analysis_progress.format() == "Niedostępne"
         assert not unavailable_widget.analysis_status.isHidden()
         assert "niedostępne" in unavailable_widget.analysis_status.text().lower()
         _dispose_widget(app, unavailable_widget)
@@ -132,13 +139,21 @@ def main() -> int:
                 project=project,
             )
             error_widget.tabs.setCurrentIndex(error_widget.analysis_tab_index)
-            assert error_widget.analysis_progress.isHidden()
+            assert not error_widget.analysis_progress.isHidden()
+            assert error_widget.analysis_progress.format() == "Błąd odczytu"
             assert not error_widget.analysis_status.isHidden()
             assert error_widget.analysis_status.text().startswith("Nie można odczytać")
         finally:
             SessionAnalysisService.list_artifacts = original_list_artifacts
-            if error_widget is not None:
-                _dispose_widget(app, error_widget)
+
+        assert error_widget is not None
+        try:
+            error_widget._refresh_artifacts()
+            assert error_widget.analysis_progress.isHidden()
+            assert error_widget.analysis_status.isHidden()
+            assert error_widget.artifact_selector.count() == 2
+        finally:
+            _dispose_widget(app, error_widget)
 
         del error_widget
         del project
