@@ -125,7 +125,7 @@ QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::su
 QSplitter::handle { background: #c8cdd2; }
 QToolTip { background: #fffff0; color: #20252a; border: 1px solid #8f989f; padding: 4px; }
 QLabel#secondaryText { color: #65717b; }
-QLabel#projectExplorerName, QLabel#projectOverviewTitle { color: #15191d; font-weight: 700; }
+QLabel#projectOverviewTitle { color: #15191d; font-weight: 700; }
 """
 
 
