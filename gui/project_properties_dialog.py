@@ -29,6 +29,7 @@ class ProjectPropertiesDialog(NewProjectDialog):
         self.location_edit.setToolTip(
             "Folder projektu jest stały. Zmiana lokalizacji odbywa się w katalogu Projekty CRT."
         )
+        self.location_browse_button.hide()
 
         self.name_edit.setText(project.manifest.name)
         self.description_edit.setPlainText(project.manifest.description)
