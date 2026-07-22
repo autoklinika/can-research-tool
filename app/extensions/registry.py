@@ -30,6 +30,14 @@ class AnalysisProvider(Protocol):
         ...
 
 
+@runtime_checkable
+class ComparisonProvider(Protocol):
+    manifest: ExtensionManifest
+
+    def run(self, context: AnalysisContext) -> object:
+        ...
+
+
 class ExtensionRegistry:
     """Explicit registry for trusted in-process CRT extensions.
 
@@ -67,6 +75,12 @@ class ExtensionRegistry:
             raise ExtensionRegistrationError(
                 f"analysis provider {manifest.id} does not implement run(context)"
             )
+        if manifest.type == ExtensionType.COMPARISON and not isinstance(
+            provider, ComparisonProvider
+        ):
+            raise ExtensionRegistrationError(
+                f"comparison provider {manifest.id} does not implement run(context)"
+            )
         self._providers[manifest.id] = provider
         return manifest
 
@@ -93,6 +107,15 @@ class ExtensionRegistry:
             raise TypeError(f"extension is not an analysis provider: {extension_id}")
         if not isinstance(provider, AnalysisProvider):
             raise TypeError(f"analysis provider contract is invalid: {extension_id}")
+        return provider
+
+    def get_comparison(self, extension_id: str) -> ComparisonProvider:
+        provider = self.get(extension_id)
+        manifest = getattr(provider, "manifest")
+        if manifest.type != ExtensionType.COMPARISON:
+            raise TypeError(f"extension is not a comparison provider: {extension_id}")
+        if not isinstance(provider, ComparisonProvider):
+            raise TypeError(f"comparison provider contract is invalid: {extension_id}")
         return provider
 
     def manifests(
