@@ -89,15 +89,42 @@ def main() -> int:
         assert widget.artifact_summary_line.isHidden()
         assert _sha256(session_path) == source_hash
 
-        _dispose_widget(app, widget)
-        del widget
+        widget._analysis_failed("simulated analysis failure")
+        assert not widget.analysis_progress.isHidden()
+        assert not widget.analysis_status.isHidden()
+        assert "simulated analysis failure" in widget.analysis_status.text()
+
+        widget._analysis_cancelled()
+        assert not widget.analysis_progress.isHidden()
+        assert not widget.analysis_status.isHidden()
+        assert "anulowana" in widget.analysis_status.text().lower()
 
         original_list_artifacts = SessionAnalysisService.list_artifacts
-        error_widget = None
 
         def fail_list_artifacts(_service, _session_id):
             raise OSError("simulated artifact catalog read failure")
 
+        SessionAnalysisService.list_artifacts = fail_list_artifacts
+        try:
+            widget._analysis_completed(object())
+            assert widget.analysis_progress.isHidden()
+            assert not widget.analysis_status.isHidden()
+            assert widget.analysis_status.text().startswith("Nie można odczytać")
+        finally:
+            SessionAnalysisService.list_artifacts = original_list_artifacts
+
+        _dispose_widget(app, widget)
+        del widget
+
+        unavailable_widget = ApplicationContainer().create_session_view(session_path)
+        unavailable_widget.tabs.setCurrentIndex(unavailable_widget.analysis_tab_index)
+        assert unavailable_widget.analysis_progress.isHidden()
+        assert not unavailable_widget.analysis_status.isHidden()
+        assert "niedostępne" in unavailable_widget.analysis_status.text().lower()
+        _dispose_widget(app, unavailable_widget)
+        del unavailable_widget
+
+        error_widget = None
         SessionAnalysisService.list_artifacts = fail_list_artifacts
         try:
             error_widget = ApplicationContainer().create_session_view(
