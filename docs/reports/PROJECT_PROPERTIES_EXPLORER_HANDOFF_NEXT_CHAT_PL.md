@@ -18,9 +18,7 @@ Końcowy funkcjonalny HEAD przed raportem:
 
 `f39fa5bea5a61da01c88e4c68b480d0cc30bd62e`
 
-Końcowy HEAD gałęzi z tym raportem:
-
-`344990685c08def4b41a52693c325f27d2f9775d`
+Bieżący HEAD zawierający ten raport należy odczytać bezpośrednio z gałęzi `agent/project-properties-stage1` lub PR #35.
 
 PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34), którego końcowy HEAD po poprawkach review to:
 
@@ -102,14 +100,14 @@ Dla końcowego HEAD PR #34 `b74b20225e7d79a695a81931ced17262329cfd8d` potwierdzo
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-Dla końcowego HEAD PR #35 `344990685c08def4b41a52693c325f27d2f9775d` potwierdzono:
+Dla checkpointu PR #35 `344990685c08def4b41a52693c325f27d2f9775d`, obejmującego cały kod funkcjonalny i finalny zakres testów, potwierdzono:
 
 - `Tests` — PASS,
 - `GUI Regressions` — PASS,
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-`Windows Self-Hosted CI` nie blokuje tych etapów, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
+Późniejsze commity dotyczą wyłącznie korekty treści tego raportu. `Windows Self-Hosted CI` nie blokuje tych etapów, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
 
 Copilot został wykorzystany jako dodatkowy recenzent i wskazał kilka rzeczywistych przypadków brzegowych, które poprawiono. Ostatnia próba automatycznego review została zatrzymana przez limit przydziału Copilota; końcowe zmiany są zabezpieczone dedykowanymi smoke testami i pełnym GitHub-hosted CI.
 
