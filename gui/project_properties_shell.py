@@ -90,6 +90,11 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         try:
             self.project_catalog.refresh_availability()
             dialog = ProjectCatalogDialog(self.project_catalog, self)
+            dialog.full_screen_controller = enable_full_screen(
+                dialog,
+                action_object_name="projectCatalogFullScreenAction",
+                maximize_button=True,
+            )
         except Exception as exc:
             QMessageBox.critical(
                 self,
@@ -111,6 +116,17 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
                 "Nie można otworzyć projektu",
                 str(exc),
             )
+
+    def _open_log_search(self) -> None:
+        super()._open_log_search()
+        window = self._log_search_window
+        if window is None or bool(window.property("crtFullScreenEnabled")):
+            return
+        window.full_screen_controller = enable_full_screen(
+            window,
+            action_object_name="logSearchFullScreenAction",
+        )
+        window.full_screen_action = window.full_screen_controller.action
 
     def _create_project_from_dialog(self, dialog) -> None:
         try:
