@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from threading import Event, Lock
+from types import MappingProxyType
+from typing import Any
 
 from app.domain import AnalysisInput
 from app.models import CanFrame
@@ -123,6 +125,42 @@ class SessionSource:
     frames: FrameQuery
 
 
+@dataclass(frozen=True, slots=True)
+class ComparisonContext:
+    """Immutable comparison-set snapshot supplied to a comparison provider."""
+
+    id: str
+    name: str
+    session_ids: tuple[str, ...]
+    base_session_id: str | None
+    synchronization_mode: str
+    parameters: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("comparison context id cannot be empty")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("comparison context name cannot be empty")
+        if len(self.session_ids) < 2:
+            raise ValueError("comparison context requires at least two sessions")
+        if len(set(self.session_ids)) != len(self.session_ids):
+            raise ValueError("comparison context session_ids must be unique")
+        if any(
+            not isinstance(session_id, str) or not session_id.strip()
+            for session_id in self.session_ids
+        ):
+            raise ValueError("comparison context session_id cannot be empty")
+        if self.base_session_id is not None and self.base_session_id not in self.session_ids:
+            raise ValueError("comparison context base_session_id must belong to session_ids")
+        if (
+            not isinstance(self.synchronization_mode, str)
+            or not self.synchronization_mode.strip()
+        ):
+            raise ValueError("comparison context synchronization_mode cannot be empty")
+        object.__setattr__(self, "session_ids", tuple(self.session_ids))
+        object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
+
+
 class ProjectContext:
     """Stable read-only project view exposed to extensions."""
 
@@ -184,6 +222,7 @@ class AnalysisContext:
     progress: ProgressReporter
     artifact_writer: object
     finding_writer: object
+    comparison: ComparisonContext | None = None
 
     def __post_init__(self) -> None:
         if not self.analysis_run_id.strip():
