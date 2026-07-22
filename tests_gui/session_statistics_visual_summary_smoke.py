@@ -75,11 +75,14 @@ def main() -> int:
         widget.run_analysis_button.click()
         _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
 
+        assert widget.artifact_table is None
+        assert widget.artifact_selector.count() == 1
         assert widget.statistics_visual_page is not None
         assert widget.statistics_visual_page.objectName() == "sessionStatisticsVisualSummaryPage"
         assert widget.artifact_detail_tabs.tabText(0) == "Podsumowanie"
         assert widget.artifact_detail_tabs.tabText(1) == "Statystyki CAN ID"
-        assert "PODSUMOWANIE SESJI" in widget.artifact_details.toPlainText()
+        assert "Statystyki sesji" in widget.artifact_summary_line.text()
+        assert not widget.artifact_details.isVisible()
 
         cards = widget.statistics_kpi_cards
         assert set(cards) == {"frames", "ids", "duration", "frequency", "anomalies"}
@@ -103,6 +106,10 @@ def main() -> int:
         delegate = widget.statistics_table.itemDelegateForColumn(5)
         assert isinstance(delegate, ShareBarDelegate)
         assert delegate is widget.statistics_share_delegate
+        widget.artifact_info_toggle.click()
+        app.processEvents()
+        assert widget.artifact_details.isVisible()
+        assert "INFORMACJE O ARTEFAKCIE" in widget.artifact_details.toPlainText()
         assert _sha256(session_path) == source_hash
 
         _dispose_widget(app, widget)
@@ -110,11 +117,13 @@ def main() -> int:
         collect()
 
         reopened = container.create_session_view(session_path, project=project)
-        assert reopened.artifact_table.rowCount() == 1
+        assert reopened.artifact_table is None
+        assert reopened.artifact_selector.count() == 1
         assert reopened.statistics_top_table.rowCount() == 3
         assert reopened.statistics_kpi_cards["frames"].value_label.text() == "6"
         assert reopened.statistics_kpi_cards["ids"].value_label.text() == "3"
-        assert "PODSUMOWANIE SESJI" in reopened.artifact_details.toPlainText()
+        assert "Statystyki sesji" in reopened.artifact_summary_line.text()
+        assert not reopened.artifact_details.isVisible()
         assert _sha256(session_path) == source_hash
         _dispose_widget(app, reopened)
         del reopened
