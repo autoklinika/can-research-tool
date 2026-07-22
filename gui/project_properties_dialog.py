@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from app.project import CrtProject
+from app.project_catalog import load_project_profile
+
+from .project_dialog import NewProjectDialog
 
 
-_DEFAULT_BITRATES = (125_000, 250_000, 500_000, 1_000_000)
-
-
-class ProjectPropertiesDialog(QDialog):
-    """Edit mutable CRT project metadata without moving the project directory."""
+class ProjectPropertiesDialog(NewProjectDialog):
+    """Edit the manifest and complete portable profile of an existing CRT project."""
 
     def __init__(
         self,
@@ -31,92 +20,61 @@ class ProjectPropertiesDialog(QDialog):
         self.project = project
         self.setObjectName("projectPropertiesDialog")
         self.setWindowTitle("Właściwości projektu CRT")
-        self.resize(580, 360)
+        self.resize(760, 650)
 
-        root = QVBoxLayout(self)
-        form = QFormLayout()
+        profile = load_project_profile(project.root)
 
-        self.path_edit = QLineEdit(str(project.root), self)
-        self.path_edit.setObjectName("projectPropertiesPath")
-        self.path_edit.setReadOnly(True)
-        form.addRow("Folder projektu:", self.path_edit)
+        self.location_edit.setText(str(project.root))
+        self.location_edit.setReadOnly(True)
+        self.location_edit.setToolTip(
+            "Folder projektu jest stały. Zmiana lokalizacji odbywa się w katalogu Projekty CRT."
+        )
 
-        self.name_edit = QLineEdit(project.manifest.name, self)
-        self.name_edit.setObjectName("projectPropertiesName")
-        form.addRow("Nazwa projektu:", self.name_edit)
-
-        self.description_edit = QTextEdit(self)
-        self.description_edit.setObjectName("projectPropertiesDescription")
+        self.name_edit.setText(project.manifest.name)
         self.description_edit.setPlainText(project.manifest.description)
-        self.description_edit.setPlaceholderText("ECU, stanowisko, cel badań…")
-        self.description_edit.setMaximumHeight(110)
-        form.addRow("Opis:", self.description_edit)
+        self._select_combo_data(self.bitrate_combo, int(project.manifest.default_bitrate))
+        self._select_combo_data(self.mode_combo, str(project.manifest.default_receive_mode))
 
-        self.bitrate_combo = QComboBox(self)
-        self.bitrate_combo.setObjectName("projectPropertiesBitrate")
-        current_bitrate = int(project.manifest.default_bitrate)
-        bitrates = list(_DEFAULT_BITRATES)
-        if current_bitrate not in bitrates:
-            bitrates.append(current_bitrate)
-            bitrates.sort()
-        for bitrate in bitrates:
-            label = f"{bitrate:,}".replace(",", " ")
-            self.bitrate_combo.addItem(label, bitrate)
-        self._select_combo_data(self.bitrate_combo, current_bitrate)
-        form.addRow("Domyślny bitrate:", self.bitrate_combo)
+        self.vehicle_brand_edit.setText(profile.vehicle_brand)
+        self.vehicle_model_edit.setText(profile.vehicle_model)
+        self.production_year_spin.setValue(profile.production_year or 0)
+        self._select_combo_data(self.vehicle_type_combo, profile.vehicle_type)
+        self.vin_edit.setText(profile.vin)
+        self.registration_edit.setText(profile.registration_number)
+        self.customer_edit.setText(profile.customer_name)
+        self.vehicle_notes_edit.setPlainText(profile.vehicle_notes)
 
-        self.mode_combo = QComboBox(self)
-        self.mode_combo.setObjectName("projectPropertiesReceiveMode")
-        self.mode_combo.addItem("BENCH — ACK aktywny", "bench")
-        self.mode_combo.addItem("LISTEN ONLY — bez ACK", "listen-only")
-        current_mode = str(project.manifest.default_receive_mode)
-        if self.mode_combo.findData(current_mode) < 0:
-            self.mode_combo.addItem(current_mode, current_mode)
-        self._select_combo_data(self.mode_combo, current_mode)
-        form.addRow("Domyślny tryb:", self.mode_combo)
-
-        root.addLayout(form)
-
-        scope_note = QLabel(
-            "Folder, identyfikator projektu, sesje i baza .crt/project.sqlite "
-            "nie są przenoszone ani przebudowywane.",
-            self,
-        )
-        scope_note.setObjectName("projectPropertiesScopeNote")
-        scope_note.setWordWrap(True)
-        root.addWidget(scope_note)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel,
-            parent=self,
-        )
-        buttons.setObjectName("projectPropertiesButtons")
-        buttons.accepted.connect(self._validate)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
-
-    def project_name(self) -> str:
-        return self.name_edit.text().strip()
-
-    def description(self) -> str:
-        return self.description_edit.toPlainText().strip()
-
-    def bitrate(self) -> int:
-        return int(self.bitrate_combo.currentData())
-
-    def receive_mode(self) -> str:
-        return str(self.mode_combo.currentData())
+        self.ecu_manufacturer_edit.setText(profile.ecu_manufacturer)
+        self.ecu_type_edit.setText(profile.ecu_type)
+        self.ecu_function_edit.setText(profile.ecu_function)
+        self.part_number_edit.setText(profile.part_number)
+        self.secondary_part_number_edit.setText(profile.secondary_part_number)
+        self.hardware_number_edit.setText(profile.hardware_number)
+        self.hardware_version_edit.setText(profile.hardware_version)
+        self.software_number_edit.setText(profile.software_number)
+        self.software_version_edit.setText(profile.software_version)
+        self.calibration_edit.setText(profile.calibration_number)
+        self.bootloader_edit.setText(profile.bootloader_version)
+        self.ecu_serial_edit.setText(profile.ecu_serial_number)
+        self.processor_edit.setText(profile.processor_type)
+        self._select_combo_data(self.ecu_status_combo, profile.ecu_status)
+        self.fault_description_edit.setPlainText(profile.fault_description)
+        self.tags_edit.setText(", ".join(profile.tags))
 
     def _validate(self) -> None:
         if not self.project_name():
             QMessageBox.warning(self, "CRT", "Podaj nazwę projektu.")
             self.name_edit.setFocus()
             return
+        try:
+            self.profile()
+        except ValueError as exc:
+            QMessageBox.warning(self, "CRT", str(exc))
+            return
         self.accept()
 
     @staticmethod
-    def _select_combo_data(combo: QComboBox, value: object) -> None:
+    def _select_combo_data(combo, value: object) -> None:
         index = combo.findData(value)
         if index >= 0:
             combo.setCurrentIndex(index)
