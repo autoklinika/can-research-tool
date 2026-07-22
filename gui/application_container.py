@@ -17,6 +17,9 @@ from .confirmed_start_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
 from .import_task import ProjectImportTask
+from .minimal_analysis_chrome import (
+    MinimalAnalysisChromeSessionViewWidget as SessionViewWidget,
+)
 from .project_dialog import NewProjectDialog
 from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
@@ -24,7 +27,6 @@ from .project_overview import ProjectOverviewWidget
 from .raw_frame_grouping import (
     GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
-from .session_artifact_selector import CompactArtifactSessionViewWidget as SessionViewWidget
 from .session_management_integration import SessionManagementIntegration
 from .study_area_view import StudyAreaViewWidget
 
