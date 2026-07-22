@@ -83,7 +83,14 @@ class ProjectCatalogDialog(QDialog):
         self.table = QTableWidget(0, 6, self)
         self.table.setObjectName("projectCatalogTable")
         self.table.setHorizontalHeaderLabels(
-            ["Projekt", "Pojazd / maszyna", "Sterownik ECU", "Ostatnio otwarty", "Status", "Lokalizacja"]
+            [
+                "Projekt",
+                "Pojazd / maszyna",
+                "Sterownik ECU",
+                "Ostatnio otwarty",
+                "Status",
+                "Lokalizacja",
+            ]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -148,7 +155,8 @@ class ProjectCatalogDialog(QDialog):
         if selected is not None:
             selected_id = selected.project_id
 
-        time_filter = self.time_tabs.currentData()
+        current_tab = self.time_tabs.currentIndex()
+        time_filter = self.time_tabs.tabData(current_tab) if current_tab >= 0 else "all"
         if time_filter not in {value for _label, value in _TIME_FILTERS}:
             time_filter = "all"
         self._projects = self.catalog.list_projects(
@@ -179,7 +187,11 @@ class ProjectCatalogDialog(QDialog):
             part for part in (profile.vehicle_brand, profile.vehicle_model) if part
         )
         if profile.production_year is not None:
-            vehicle = f"{vehicle} ({profile.production_year})" if vehicle else str(profile.production_year)
+            vehicle = (
+                f"{vehicle} ({profile.production_year})"
+                if vehicle
+                else str(profile.production_year)
+            )
         if not vehicle:
             vehicle = profile.vin or "—"
 
@@ -187,7 +199,9 @@ class ProjectCatalogDialog(QDialog):
             part for part in (profile.ecu_manufacturer, profile.ecu_type) if part
         )
         ecu_details = " / ".join(
-            part for part in (profile.hardware_number, profile.software_number) if part
+            part
+            for part in (profile.hardware_number, profile.software_number)
+            if part
         )
         if ecu_details:
             ecu = f"{ecu} — {ecu_details}" if ecu else ecu_details
@@ -216,7 +230,10 @@ class ProjectCatalogDialog(QDialog):
         available = sum(1 for project in self._projects if project.available)
         missing = len(self._projects) - available
         if missing:
-            return f"Projektów: {len(self._projects)} | dostępnych: {available} | brakujących: {missing}"
+            return (
+                f"Projektów: {len(self._projects)} | dostępnych: {available} | "
+                f"brakujących: {missing}"
+            )
         return f"Projektów: {len(self._projects)}"
 
     def _refresh_catalog(self) -> None:
@@ -235,7 +252,8 @@ class ProjectCatalogDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Projekt niedostępny",
-                "Nie można otworzyć projektu, ponieważ jego folder lub manifest nie jest dostępny.",
+                "Nie można otworzyć projektu, ponieważ jego folder lub manifest "
+                "nie jest dostępny.",
             )
             return
         self.accept()
