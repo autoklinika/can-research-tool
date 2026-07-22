@@ -67,6 +67,11 @@ def main() -> None:
         assert "500 kbit/s" in window.project_context_label.text()
         assert "LISTEN-ONLY" in window.project_context_label.text()
 
+        explorer_root = window.explorer.model.item(0, 0)
+        assert explorer_root is not None
+        assert explorer_root.text() == "Edited project"
+        assert explorer_root.toolTip() == str(original_root)
+
         overview = window.navigator.widget("project-overview")
         assert overview is not None
         overview_title = overview.findChild(QLabel, "projectOverviewTitle")
@@ -85,6 +90,7 @@ def main() -> None:
         app.sendPostedEvents()
         app.processEvents()
 
+        explorer_root = None
         overview_title = None
         overview = None
         action = None
