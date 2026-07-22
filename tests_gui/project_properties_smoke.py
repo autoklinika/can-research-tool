@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QThreadPool
+from PySide6.QtCore import QSettings, QThreadPool
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QLabel
 
@@ -82,7 +82,7 @@ def main() -> None:
         window.close()
         window.deleteLater()
         assert QThreadPool.globalInstance().waitForDone(5_000)
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.sendPostedEvents()
         app.processEvents()
 
         overview_title = None
