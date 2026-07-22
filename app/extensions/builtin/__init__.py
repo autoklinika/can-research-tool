@@ -9,6 +9,13 @@ from .comparison_statistics import (
     COMPARISON_STATISTICS_PROVIDER_VERSION,
     ComparisonStatisticsProvider,
 )
+from .payload_difference import (
+    PAYLOAD_DIFFERENCE_ALGORITHM_VERSION,
+    PAYLOAD_DIFFERENCE_ARTIFACT_SCHEMA_VERSION,
+    PAYLOAD_DIFFERENCE_PROVIDER_ID,
+    PAYLOAD_DIFFERENCE_PROVIDER_VERSION,
+    PayloadDifferenceProvider,
+)
 from .session_statistics import (
     SESSION_STATISTICS_ALGORITHM_VERSION,
     SESSION_STATISTICS_ARTIFACT_SCHEMA_VERSION,
@@ -24,10 +31,16 @@ def builtin_analysis_providers() -> tuple[SessionStatisticsProvider, ...]:
     return (SessionStatisticsProvider(),)
 
 
-def builtin_comparison_providers() -> tuple[ComparisonStatisticsProvider, ...]:
+def builtin_comparison_providers() -> tuple[
+    ComparisonStatisticsProvider | PayloadDifferenceProvider,
+    ...,
+]:
     """Return trusted comparison providers without global discovery."""
 
-    return (ComparisonStatisticsProvider(),)
+    return (
+        ComparisonStatisticsProvider(),
+        PayloadDifferenceProvider(),
+    )
 
 
 def register_builtin_extensions(
@@ -52,6 +65,11 @@ __all__ = [
     "COMPARISON_STATISTICS_PROVIDER_ID",
     "COMPARISON_STATISTICS_PROVIDER_VERSION",
     "ComparisonStatisticsProvider",
+    "PAYLOAD_DIFFERENCE_ALGORITHM_VERSION",
+    "PAYLOAD_DIFFERENCE_ARTIFACT_SCHEMA_VERSION",
+    "PAYLOAD_DIFFERENCE_PROVIDER_ID",
+    "PAYLOAD_DIFFERENCE_PROVIDER_VERSION",
+    "PayloadDifferenceProvider",
     "SESSION_STATISTICS_ALGORITHM_VERSION",
     "SESSION_STATISTICS_ARTIFACT_SCHEMA_VERSION",
     "SESSION_STATISTICS_PROVIDER_ID",
