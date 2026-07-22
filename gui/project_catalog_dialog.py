@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 from app.project import CrtProject
 from app.project_catalog import CatalogProject, ProjectCatalog, ProjectTimeFilter
 
+from .project_properties_dialog import ProjectPropertiesDialog
+
 
 _TIME_FILTERS: tuple[tuple[str, ProjectTimeFilter], ...] = (
     ("Wszystkie", "all"),
@@ -38,6 +40,7 @@ class ProjectCatalogDialog(QDialog):
     """Managed CRT project picker backed by the application project catalog."""
 
     project_removed = Signal(str)
+    project_updated = Signal(str)
 
     def __init__(self, catalog: ProjectCatalog, parent=None) -> None:
         super().__init__(parent)
@@ -114,6 +117,12 @@ class ProjectCatalogDialog(QDialog):
         self.summary_label.setObjectName("projectCatalogSummaryLabel")
         footer.addWidget(self.summary_label, 1)
 
+        self.properties_button = QPushButton("Właściwości…", self)
+        self.properties_button.setObjectName("projectCatalogPropertiesButton")
+        self.properties_button.setEnabled(False)
+        self.properties_button.clicked.connect(self._edit_selected_project)
+        footer.addWidget(self.properties_button)
+
         self.refresh_button = QPushButton("Odśwież", self)
         self.refresh_button.setObjectName("projectCatalogRefreshButton")
         footer.addWidget(self.refresh_button)
@@ -132,7 +141,7 @@ class ProjectCatalogDialog(QDialog):
         self.search_edit.textChanged.connect(self.refresh)
         self.time_tabs.currentChanged.connect(self.refresh)
         self.refresh_button.clicked.connect(self._refresh_catalog)
-        self.table.itemSelectionChanged.connect(self._sync_open_button)
+        self.table.itemSelectionChanged.connect(self._sync_selection_actions)
         self.table.itemDoubleClicked.connect(lambda _item: self._accept_available())
         self.table.customContextMenuRequested.connect(self._open_context_menu)
         self.buttons.accepted.connect(self._accept_available)
@@ -181,7 +190,7 @@ class ProjectCatalogDialog(QDialog):
             self.table.selectRow(0)
         else:
             self.table.clearSelection()
-        self._sync_open_button()
+        self._sync_selection_actions()
 
     def _populate_row(self, row: int, project: CatalogProject) -> None:
         profile = project.profile
@@ -242,9 +251,11 @@ class ProjectCatalogDialog(QDialog):
         self.catalog.refresh_availability()
         self.refresh()
 
-    def _sync_open_button(self) -> None:
+    def _sync_selection_actions(self) -> None:
         project = self.selected_project()
-        self.open_button.setEnabled(bool(project is not None and project.available))
+        available = bool(project is not None and project.available)
+        self.open_button.setEnabled(available)
+        self.properties_button.setEnabled(available)
 
     def _accept_available(self) -> None:
         project = self.selected_project()
@@ -260,6 +271,46 @@ class ProjectCatalogDialog(QDialog):
             return
         self.accept()
 
+    def _edit_selected_project(self) -> None:
+        selected = self.selected_project()
+        if selected is None or not selected.available:
+            return
+        try:
+            project = CrtProject.open(selected.root_path)
+            dialog = ProjectPropertiesDialog(project, self)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Nie można otworzyć właściwości projektu",
+                str(exc),
+            )
+            self._refresh_catalog()
+            return
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        previous_manifest = project.manifest
+        try:
+            project.update_manifest(
+                name=dialog.project_name(),
+                description=dialog.description(),
+                default_bitrate=dialog.bitrate(),
+                default_receive_mode=dialog.receive_mode(),
+            )
+            self.catalog.register_project(project.root, profile=dialog.profile())
+        except Exception as exc:
+            project.manifest = previous_manifest
+            QMessageBox.critical(
+                self,
+                "Nie można zapisać właściwości projektu",
+                str(exc),
+            )
+            return
+
+        self.project_updated.emit(project.manifest.id)
+        self.refresh()
+
     def _open_context_menu(self, position) -> None:
         row = self.table.rowAt(position.y())
         if row < 0:
@@ -274,6 +325,11 @@ class ProjectCatalogDialog(QDialog):
         open_action.setEnabled(project.available)
         open_action.triggered.connect(self._accept_available)
         menu.addAction(open_action)
+
+        properties_action = QAction("Właściwości…", menu)
+        properties_action.setEnabled(project.available)
+        properties_action.triggered.connect(self._edit_selected_project)
+        menu.addAction(properties_action)
 
         relocate_action = QAction("Wskaż nową lokalizację…", menu)
         relocate_action.triggered.connect(self._relocate_selected_project)
