@@ -43,7 +43,6 @@ class ProjectPropertiesDialog(QDialog):
 
         self.name_edit = QLineEdit(project.manifest.name, self)
         self.name_edit.setObjectName("projectPropertiesName")
-        self.name_edit.setMaxLength(200)
         form.addRow("Nazwa projektu:", self.name_edit)
 
         self.description_edit = QTextEdit(self)
