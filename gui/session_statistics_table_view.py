@@ -218,11 +218,18 @@ class SessionStatisticsTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def _sort_in_place(self) -> None:
-        reverse = self._sort_order == Qt.SortOrder.DescendingOrder
-        self._rows.sort(
-            key=lambda row: _sortable(self._sort_value(row, self._sort_column)),
-            reverse=reverse,
+        available: list[SessionMessageStatistics] = []
+        missing: list[SessionMessageStatistics] = []
+        for row in self._rows:
+            if self._sort_value(row, self._sort_column) is None:
+                missing.append(row)
+            else:
+                available.append(row)
+        available.sort(
+            key=lambda row: self._sort_value(row, self._sort_column),
+            reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
         )
+        self._rows = available + missing
 
     def _display_value(self, row: SessionMessageStatistics, column: int) -> str:
         share = (row.frame_count * 100.0 / self._total_frames) if self._total_frames else 0.0
@@ -298,8 +305,9 @@ class SessionStatisticsTableSessionViewWidget(AnalysisEnabledSessionViewWidget):
         if detail_index < 0:
             raise RuntimeError("artifact detail editor is not owned by the splitter")
 
-        tabs = QTabWidget(splitter)
+        tabs = QTabWidget()
         tabs.setObjectName("sessionArtifactDetailTabs")
+        tabs.setDocumentMode(True)
         summary = splitter.replaceWidget(detail_index, tabs)
         if summary is None:
             raise RuntimeError("artifact summary widget could not be replaced")
@@ -317,7 +325,7 @@ class SessionStatisticsTableSessionViewWidget(AnalysisEnabledSessionViewWidget):
         filter_edit.setObjectName("sessionStatisticsIdFilter")
         filter_edit.setPlaceholderText("np. 18DAF900, 100, DATA, EXT")
         filter_edit.setClearButtonEnabled(True)
-        filter_edit.setMinimumWidth(240)
+        filter_edit.setMinimumWidth(220)
         filters.addWidget(filter_edit)
 
         filters.addWidget(QLabel("Kanał:"))
@@ -342,6 +350,7 @@ class SessionStatisticsTableSessionViewWidget(AnalysisEnabledSessionViewWidget):
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setAlternatingRowColors(False)
+        table.setShowGrid(True)
         table.setWordWrap(False)
         table.verticalHeader().hide()
         table.verticalHeader().setDefaultSectionSize(24)
@@ -473,10 +482,6 @@ def _optional_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _sortable(value: object) -> tuple[int, object]:
-    return (1, 0) if value is None else (0, value)
 
 
 def _integer_text(value: int) -> str:
