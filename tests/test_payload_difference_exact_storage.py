@@ -107,15 +107,16 @@ def test_temporary_variant_database_is_removed_after_cancellation(
     )
     cancellation = CancellationToken()
 
-    def cancel_on_start(_update) -> None:
-        cancellation.cancel()
+    def cancel_after_first_spill(update) -> None:
+        if update.current >= 1100:
+            cancellation.cancel()
 
     with pytest.raises(ExtensionCancelled):
         ComparisonAnalysisService(project).run(
             PAYLOAD_DIFFERENCE_PROVIDER_ID,
             comparison.id,
             cancellation=cancellation,
-            progress_callback=cancel_on_start,
+            progress_callback=cancel_after_first_spill,
         )
 
     assert list(temporary_root.iterdir()) == []
