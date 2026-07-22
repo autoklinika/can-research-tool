@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
+from app.session_analysis_service import SessionAnalysisService
 from app.session_stream import SessionStreamWriter
 from gui.application_container import ApplicationContainer
 
@@ -90,6 +91,29 @@ def main() -> int:
 
         _dispose_widget(app, widget)
         del widget
+
+        original_list_artifacts = SessionAnalysisService.list_artifacts
+        error_widget = None
+
+        def fail_list_artifacts(_service, _session_id):
+            raise OSError("simulated artifact catalog read failure")
+
+        SessionAnalysisService.list_artifacts = fail_list_artifacts
+        try:
+            error_widget = ApplicationContainer().create_session_view(
+                session_path,
+                project=project,
+            )
+            error_widget.tabs.setCurrentIndex(error_widget.analysis_tab_index)
+            assert error_widget.analysis_progress.isHidden()
+            assert not error_widget.analysis_status.isHidden()
+            assert error_widget.analysis_status.text().startswith("Nie można odczytać")
+        finally:
+            SessionAnalysisService.list_artifacts = original_list_artifacts
+            if error_widget is not None:
+                _dispose_widget(app, error_widget)
+
+        del error_widget
         del project
         collect()
     return 0
