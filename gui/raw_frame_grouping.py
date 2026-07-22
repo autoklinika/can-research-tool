@@ -12,6 +12,7 @@ from app.models import CanFrame
 
 from .final_streaming_filter_integration import FinalStreamingLiveFilterIntegration
 from .grouped_frame_model import GroupedFrameTableModel
+from .live_filter_integration import _find_layout_containing
 
 
 class GroupedFinalStreamingLiveFilterIntegration(
@@ -53,10 +54,7 @@ class GroupedFinalStreamingLiveFilterIntegration(
         return super().selected_frame()
 
     def _install_view_controls(self) -> None:
-        raw_page = self.widget.data_tabs.widget(self.widget.raw_tab_index)
-        raw_layout = raw_page.layout()
-
-        controls = QWidget(raw_page)
+        controls = QWidget(self.widget)
         controls.setObjectName("rawFrameViewControls")
         row = QHBoxLayout(controls)
         row.setContentsMargins(0, 0, 0, 0)
@@ -84,8 +82,15 @@ class GroupedFinalStreamingLiveFilterIntegration(
 
         row.addWidget(list_button)
         row.addWidget(grouped_button)
-        row.addStretch(1)
-        raw_layout.insertWidget(0, controls)
+
+        view_controls = _find_layout_containing(
+            self.widget.layout(),
+            self.widget.pause_view,
+        )
+        if view_controls is None:
+            raise RuntimeError("Live view controls layout was not found")
+        pause_index = view_controls.indexOf(self.widget.pause_view)
+        view_controls.insertWidget(pause_index, controls)
 
         self.widget.raw_frame_view_controls = controls
         self.widget.raw_frame_view_group = button_group
