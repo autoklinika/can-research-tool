@@ -9,10 +9,12 @@ from app.comparison_sets import ComparisonSetStore
 from app.extensions import (
     COMPARISON_STATISTICS_ALGORITHM_VERSION,
     COMPARISON_STATISTICS_PROVIDER_ID,
+    MESSAGE_SEQUENCE_PROVIDER_ID,
     PAYLOAD_DIFFERENCE_PROVIDER_ID,
     ComparisonStatisticsProvider,
     ExtensionExecutionError,
     ExtensionRegistry,
+    MessageSequenceComparisonProvider,
     PayloadDifferenceProvider,
     register_builtin_comparison_extensions,
 )
@@ -29,19 +31,33 @@ def test_comparison_registry_exposes_statistics_provider() -> None:
     assert manifests == (
         ComparisonStatisticsProvider.manifest,
         PayloadDifferenceProvider.manifest,
+        MessageSequenceComparisonProvider.manifest,
     )
     assert manifests[0].id == COMPARISON_STATISTICS_PROVIDER_ID
     assert manifests[0].inputs == ("comparison_set",)
     assert manifests[0].outputs == ("comparison_statistics",)
     assert manifests[0].type.value == "comparison"
-    assert registry.get_comparison(COMPARISON_STATISTICS_PROVIDER_ID).manifest == manifests[0]
-    assert registry.get_comparison(PAYLOAD_DIFFERENCE_PROVIDER_ID).manifest == manifests[1]
+    assert (
+        registry.get_comparison(COMPARISON_STATISTICS_PROVIDER_ID).manifest
+        == manifests[0]
+    )
+    assert (
+        registry.get_comparison(PAYLOAD_DIFFERENCE_PROVIDER_ID).manifest
+        == manifests[1]
+    )
+    assert (
+        registry.get_comparison(MESSAGE_SEQUENCE_PROVIDER_ID).manifest
+        == manifests[2]
+    )
 
 
 def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
     tmp_path,
 ) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Comparison statistics")
+    project = CrtProject.create(
+        tmp_path / "project",
+        name="Comparison statistics",
+    )
     before = _create_session(project, "before", _before_frames())
     after = _create_session(project, "after", _after_frames())
     source_hashes = {
@@ -61,7 +77,10 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
         comparison.id,
         progress_callback=updates.append,
     )
-    second = service.run(COMPARISON_STATISTICS_PROVIDER_ID, comparison.id)
+    second = service.run(
+        COMPARISON_STATISTICS_PROVIDER_ID,
+        comparison.id,
+    )
 
     first_artifact = first.artifacts[0]
     second_artifact = second.artifacts[0]
@@ -80,7 +99,10 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
         "crt_api": "1",
     }
     assert first_payload["comparison_set"]["id"] == comparison.id
-    assert first_payload["comparison_set"]["effective_baseline_session_id"] == before.id
+    assert (
+        first_payload["comparison_set"]["effective_baseline_session_id"]
+        == before.id
+    )
     assert first_payload["summary"]["session_count"] == 2
     assert first_payload["summary"]["union_message_key_count"] == 3
 
@@ -100,14 +122,18 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
 
     changes = first_payload["notable_changes"]
     assert any(
-        item["arbitration_id"] == 0x300 and item["reasons"] == ["new"]
+        item["arbitration_id"] == 0x300
+        and item["reasons"] == ["new"]
         for item in changes
     )
     assert any(
-        item["arbitration_id"] == 0x200 and item["reasons"] == ["missing"]
+        item["arbitration_id"] == 0x200
+        and item["reasons"] == ["missing"]
         for item in changes
     )
-    id_100 = next(item for item in changes if item["arbitration_id"] == 0x100)
+    id_100 = next(
+        item for item in changes if item["arbitration_id"] == 0x100
+    )
     assert "frequency_increase" in id_100["reasons"]
     assert id_100["baseline"]["mean_positive_frequency_hz"] == 10.0
     assert id_100["current"]["mean_positive_frequency_hz"] == 20.0
@@ -119,15 +145,21 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
     )
     assert first_artifact.sources[0].source_reference["role"] == "base"
     assert first_artifact.sources[1].source_reference["role"] == "compared"
-    listed_artifact_ids = {item.id for item in service.list_artifacts(comparison.id)}
-    assert listed_artifact_ids == {first_artifact.id, second_artifact.id}
+    listed_artifact_ids = {
+        item.id for item in service.list_artifacts(comparison.id)
+    }
+    assert listed_artifact_ids == {
+        first_artifact.id,
+        second_artifact.id,
+    }
     assert ComparisonSetStore(project).is_locked(comparison.id)
     assert service.store.schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
 
     for session in (before, after):
-        assert _sha256(project.absolute_path(session.relative_path)) == source_hashes[
-            session.id
-        ]
+        assert (
+            _sha256(project.absolute_path(session.relative_path))
+            == source_hashes[session.id]
+        )
 
     assert updates[0].current == 0
     assert updates[-1].current == updates[-1].total == 13
@@ -137,39 +169,67 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
         run_states = connection.execute(
             "SELECT status, error FROM analysis_runs ORDER BY created_at_utc"
         ).fetchall()
-        finding_count = connection.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+        finding_count = connection.execute(
+            "SELECT COUNT(*) FROM findings"
+        ).fetchone()[0]
     assert run_states == [("completed", ""), ("completed", "")]
     assert finding_count == 0
 
 
-def test_comparison_uses_first_session_as_effective_baseline(tmp_path) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Implicit baseline")
-    first = _create_session(project, "first", [_frame(0, 0, 0x100)])
-    second = _create_session(project, "second", [_frame(0, 0, 0x200)])
+def test_comparison_uses_first_session_as_effective_baseline(
+    tmp_path,
+) -> None:
+    project = CrtProject.create(
+        tmp_path / "project",
+        name="Implicit baseline",
+    )
+    first = _create_session(
+        project,
+        "first",
+        [_frame(0, 0, 0x100)],
+    )
+    second = _create_session(
+        project,
+        "second",
+        [_frame(0, 0, 0x200)],
+    )
     comparison = ComparisonSetStore(project).create(
         name="Implicit baseline",
         session_ids=(first.id, second.id),
     )
 
-    result = ComparisonAnalysisService(project).run(
+    service = ComparisonAnalysisService(project)
+    result = service.run(
         COMPARISON_STATISTICS_PROVIDER_ID,
         comparison.id,
     )
-    payload = ComparisonAnalysisService(project).artifacts.read_json(
-        result.artifacts[0]
-    )
+    payload = service.artifacts.read_json(result.artifacts[0])
 
     assert payload["comparison_set"]["base_session_id"] is None
-    assert payload["comparison_set"]["effective_baseline_session_id"] == first.id
+    assert (
+        payload["comparison_set"]["effective_baseline_session_id"]
+        == first.id
+    )
     assert payload["sessions"][0]["role"] == "base"
 
 
 def test_comparison_rejects_invalid_threshold_without_touching_sources(
     tmp_path,
 ) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Invalid parameter")
-    first = _create_session(project, "first", [_frame(0, 0, 0x100)])
-    second = _create_session(project, "second", [_frame(0, 0, 0x100)])
+    project = CrtProject.create(
+        tmp_path / "project",
+        name="Invalid parameter",
+    )
+    first = _create_session(
+        project,
+        "first",
+        [_frame(0, 0, 0x100)],
+    )
+    second = _create_session(
+        project,
+        "second",
+        [_frame(0, 0, 0x100)],
+    )
     comparison = ComparisonSetStore(project).create(
         name="Invalid threshold",
         session_ids=(first.id, second.id),
@@ -192,20 +252,43 @@ def test_comparison_rejects_invalid_threshold_without_touching_sources(
 
     with project._connect() as connection:
         state = connection.execute(
-            "SELECT status, error FROM analysis_runs ORDER BY created_at_utc DESC LIMIT 1"
+            """
+            SELECT status, error
+            FROM analysis_runs
+            ORDER BY created_at_utc DESC
+            LIMIT 1
+            """
         ).fetchone()
-        artifact_count = connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
+        artifact_count = connection.execute(
+            "SELECT COUNT(*) FROM artifacts"
+        ).fetchone()[0]
     assert state[0] == "failed"
     assert "frequency_change_threshold_percent" in state[1]
     assert artifact_count == 0
     for session in (first, second):
-        assert _sha256(project.absolute_path(session.relative_path)) == hashes[session.id]
+        assert (
+            _sha256(project.absolute_path(session.relative_path))
+            == hashes[session.id]
+        )
 
 
-def test_comparison_rejects_unimplemented_synchronization_mode(tmp_path) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Unsupported synchronization")
-    first = _create_session(project, "first", [_frame(0, 0, 0x100)])
-    second = _create_session(project, "second", [_frame(0, 0, 0x100)])
+def test_comparison_rejects_unimplemented_synchronization_mode(
+    tmp_path,
+) -> None:
+    project = CrtProject.create(
+        tmp_path / "project",
+        name="Unsupported synchronization",
+    )
+    first = _create_session(
+        project,
+        "first",
+        [_frame(0, 0, 0x100)],
+    )
+    second = _create_session(
+        project,
+        "second",
+        [_frame(0, 0, 0x100)],
+    )
     comparison = ComparisonSetStore(project).create(
         name="Marker synchronized",
         session_ids=(first.id, second.id),
@@ -213,7 +296,10 @@ def test_comparison_rejects_unimplemented_synchronization_mode(tmp_path) -> None
         synchronization_mode="marker",
     )
 
-    with pytest.raises(ExtensionExecutionError, match="synchronization_mode none"):
+    with pytest.raises(
+        ExtensionExecutionError,
+        match="synchronization_mode none",
+    ):
         ComparisonAnalysisService(project).run(
             COMPARISON_STATISTICS_PROVIDER_ID,
             comparison.id,
@@ -221,9 +307,16 @@ def test_comparison_rejects_unimplemented_synchronization_mode(tmp_path) -> None
 
     with project._connect() as connection:
         state = connection.execute(
-            "SELECT status, error FROM analysis_runs ORDER BY created_at_utc DESC LIMIT 1"
+            """
+            SELECT status, error
+            FROM analysis_runs
+            ORDER BY created_at_utc DESC
+            LIMIT 1
+            """
         ).fetchone()
-        artifact_count = connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
+        artifact_count = connection.execute(
+            "SELECT COUNT(*) FROM artifacts"
+        ).fetchone()[0]
     assert state[0] == "failed"
     assert "synchronization_mode none" in state[1]
     assert artifact_count == 0
@@ -251,7 +344,11 @@ def _after_frames() -> list[CanFrame]:
     ]
 
 
-def _frame(sequence: int, timestamp_ns: int, arbitration_id: int) -> CanFrame:
+def _frame(
+    sequence: int,
+    timestamp_ns: int,
+    arbitration_id: int,
+) -> CanFrame:
     return CanFrame(
         sequence=sequence,
         timestamp_ns=timestamp_ns,
@@ -262,18 +359,35 @@ def _frame(sequence: int, timestamp_ns: int, arbitration_id: int) -> CanFrame:
     )
 
 
-def _create_session(project: CrtProject, name: str, frames: list[CanFrame]):
+def _create_session(
+    project: CrtProject,
+    name: str,
+    frames: list[CanFrame],
+):
     path = project.live_sessions_dir / f"{name}.crt.jsonl"
-    capture = CaptureSession(name=name, source="test", bitrate=250_000, channel=0)
+    capture = CaptureSession(
+        name=name,
+        source="test",
+        bitrate=250_000,
+        channel=0,
+    )
     writer = SessionStreamWriter(capture, path)
     writer.open()
     for frame in frames:
         writer.append(frame)
     writer.close({"clean_close": True})
-    record = project.register_session(path, name=name, source="test", status="ready")
+    record = project.register_session(
+        path,
+        name=name,
+        source="test",
+        status="ready",
+    )
     duration_s = 0.0
     if frames:
-        duration_s = max(frame.timestamp_ns for frame in frames) / 1_000_000_000.0
+        duration_s = (
+            max(frame.timestamp_ns for frame in frames)
+            / 1_000_000_000.0
+        )
     project.finalize_session(
         path,
         frame_count=len(frames),
