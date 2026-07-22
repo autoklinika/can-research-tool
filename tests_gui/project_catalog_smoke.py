@@ -90,20 +90,24 @@ def main() -> None:
         assert picker.windowTitle() == "Projekty CRT"
         assert picker.table.rowCount() == 1
         assert picker.open_button.isEnabled()
+        assert picker.properties_button.isEnabled()
         assert picker.selected_project_path() == str(project.root)
 
         picker.search_edit.setText("bosch rev-c")
         app.processEvents()
         assert picker.table.rowCount() == 1
+        assert picker.properties_button.isEnabled()
         picker.search_edit.setText("scania s8")
         app.processEvents()
         assert picker.table.rowCount() == 0
         assert not picker.open_button.isEnabled()
+        assert not picker.properties_button.isEnabled()
 
         picker.search_edit.clear()
         picker.time_tabs.setCurrentIndex(4)
         app.processEvents()
         assert picker.table.rowCount() == 1
+        assert picker.properties_button.isEnabled()
 
         project.manifest_path.rename(project.manifest_path.with_suffix(".missing"))
         picker._refresh_catalog()
@@ -112,6 +116,7 @@ def main() -> None:
         assert picker.selected_project() is not None
         assert not picker.selected_project().available
         assert not picker.open_button.isEnabled()
+        assert not picker.properties_button.isEnabled()
         project.manifest_path.with_suffix(".missing").rename(project.manifest_path)
 
         properties.close()
