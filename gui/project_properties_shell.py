@@ -8,12 +8,13 @@ from PySide6.QtWidgets import QDialog, QMessageBox
 from app.project import CrtProject
 from app.project_catalog import ProjectCatalog
 
+from .project_catalog_dialog import ProjectCatalogDialog
 from .project_properties_dialog import ProjectPropertiesDialog
 from .search_enabled_shell import SearchEnabledMainWindow
 
 
 class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
-    """Final CRT shell with safe editing of mutable project metadata."""
+    """Final CRT shell with managed project catalog and editable metadata."""
 
     def __init__(self, services) -> None:
         self.project_catalog = ProjectCatalog()
@@ -21,6 +22,16 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
 
     def _build_actions(self) -> None:
         super()._build_actions()
+        try:
+            self.open_project_action.triggered.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.open_project_action.setText("Otwórz projekt CRT…")
+        self.open_project_action.setToolTip(
+            "Wybierz projekt z centralnego katalogu CAN Research Tool"
+        )
+        self.open_project_action.triggered.connect(self._open_project_catalog)
+
         self.project_properties_action = QAction("Właściwości projektu…", self)
         self.project_properties_action.setObjectName("projectPropertiesAction")
         self.project_properties_action.setToolTip(
@@ -65,6 +76,32 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         tools_menu.addAction(self.session_markers_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.settings_action)
+
+    def _open_project_catalog(self) -> None:
+        try:
+            self.project_catalog.refresh_availability()
+            dialog = ProjectCatalogDialog(self.project_catalog, self)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Nie można otworzyć katalogu projektów",
+                str(exc),
+            )
+            return
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        path = dialog.selected_project_path()
+        if not path:
+            return
+        try:
+            self._open_project_path(Path(path))
+        except Exception as exc:
+            self.project_catalog.refresh_availability()
+            QMessageBox.critical(
+                self,
+                "Nie można otworzyć projektu",
+                str(exc),
+            )
 
     def _create_project_from_dialog(self, dialog) -> None:
         try:
