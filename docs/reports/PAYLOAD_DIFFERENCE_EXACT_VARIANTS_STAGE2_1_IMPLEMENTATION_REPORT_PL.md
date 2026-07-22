@@ -55,6 +55,22 @@ Dodano sekcję `variant_storage` z informacją o trybie, progu pamięciowym i li
 
 Provider nie emituje już `variant_comparison_truncated` w algorytmie 2. Różnice `new_payload_variant` i `missing_payload_variant` są wyliczane dla pełnego zbioru wariantów.
 
+## Przywrócenie edycji i usuwania zestawów porównawczych
+
+Ręczna walidacja ujawniła, że po pierwszym uruchomieniu analizy GUI wyłączało przyciski `Edytuj…` i `Usuń zestaw`. Nie była to przypadkowa regresja Stage 2.1, lecz pierwotna blokada wprowadzona w Comparison Sets Stage 1 dla zachowania powtarzalności wyników.
+
+Blokadę zastąpiono wersjonowaniem i bezpiecznym usuwaniem:
+
+- zestaw bez analiz jest nadal edytowany w miejscu,
+- zestaw bez analiz jest nadal fizycznie usuwany,
+- edycja zestawu z analizami tworzy nowy aktywny zestaw z nowym ID,
+- stara definicja pozostaje niezmiennym źródłem historycznych analiz,
+- stara definicja jest ukrywana z aktywnego widoku przez znacznik w istniejącym `parameters_json`,
+- usunięcie zestawu z analizami ukrywa definicję, lecz zachowuje analizę, artefakty i powiązania z sesjami,
+- nie dodano migracji ani nowej kolumny w `.crt/project.sqlite`.
+
+Stan w tabeli zmieniono z mylącego `Zablokowany` na `Z analizami`. Przyciski pozostają aktywne, a opis wyjaśnia semantykę tworzenia nowej wersji i zachowania historii.
+
 ## Walidacja dodana do repozytorium
 
 - test deterministyczności i identycznego SHA-256,
@@ -64,7 +80,9 @@ Provider nie emituje już `variant_comparison_truncated` w algorytmie 2. Różni
 - test kompletnej macierzy wariantów,
 - test usunięcia tymczasowej bazy po anulowaniu,
 - zachowanie testu błędnego parametru,
-- istniejący smoke GUI pozostaje obowiązujący,
+- test edycji analizowanego zestawu przez utworzenie nowej wersji,
+- test bezpiecznego usunięcia analizowanego zestawu bez usuwania historii,
+- smoke GUI obejmujący aktywne przyciski po analizie, wersjonowaną edycję i usunięcie,
 - nowy test został dodany do workflow GUI Regressions; pełny Windows CI uruchamia cały pytest.
 
 Izolowany test magazynu SQLite wykonany poza repozytorium potwierdził poprawne zliczanie, timestampy, przejście do SQLite i usunięcie katalogu tymczasowego.
@@ -79,7 +97,7 @@ Bez zmian pozostają:
 - format sesji,
 - kolejność i kompletność zapisu surowych ramek,
 - trwałe indeksy wyszukiwania,
-- `.crt/project.sqlite`,
+- schemat `.crt/project.sqlite`,
 - Project Properties i Project Catalog,
 - provider statystyk Stage 1,
 - ID oraz schemat artefaktu Stage 2.
