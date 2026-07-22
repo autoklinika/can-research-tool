@@ -121,6 +121,10 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
         selector.setVisible(multiple_results)
 
     def _sync_idle_activity_state(self) -> None:
+        if self._analysis_task is not None:
+            self._set_activity_visible(progress=True, status=True)
+            return
+
         if self._artifact_catalog_error:
             self._set_unavailable_progress("Błąd odczytu")
             self._set_activity_visible(progress=True, status=True)
