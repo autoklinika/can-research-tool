@@ -31,6 +31,7 @@ jobs:
           tests/test_comparison_sets.py
           tests/test_comparison_statistics_provider.py
           tests/test_payload_difference_provider.py
+          tests/test_payload_difference_exact_storage.py
           tests/test_sqlite_architecture.py
           tests/test_session_filters.py
           tests/test_stored_search_navigation.py
