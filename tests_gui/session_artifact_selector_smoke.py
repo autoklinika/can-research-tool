@@ -74,7 +74,7 @@ def main() -> int:
         assert widget.artifact_selector.count() == 2
         assert "Statystyki sesji" in widget.artifact_selector.currentText()
         assert "wersja 1.0.0" in widget.artifact_summary_line.text()
-        assert not widget.artifact_details.isVisible()
+        assert widget.artifact_details.isHidden()
 
         current_index = widget.artifact_selector.currentIndex()
         other_index = 1 if current_index == 0 else 0
@@ -84,7 +84,7 @@ def main() -> int:
         assert str(widget.artifact_selector.currentData()) == other_artifact_id
         widget.artifact_info_toggle.click()
         app.processEvents()
-        assert widget.artifact_details.isVisible()
+        assert not widget.artifact_details.isHidden()
         technical = widget.artifact_details.toPlainText()
         assert f"ID: {other_artifact_id}" in technical
         assert "Provider: crt.analysis.session_statistics" in technical
@@ -94,7 +94,7 @@ def main() -> int:
 
         widget.artifact_info_toggle.click()
         app.processEvents()
-        assert not widget.artifact_details.isVisible()
+        assert widget.artifact_details.isHidden()
         _dispose_widget(app, widget)
         del widget
         del project
