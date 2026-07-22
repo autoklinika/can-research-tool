@@ -93,10 +93,22 @@ class ComparisonSetDialog(QDialog):
         self.sessions_tree.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.sessions_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.sessions_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.sessions_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.sessions_tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.sessions_tree.header().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        self.sessions_tree.header().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self.sessions_tree.header().setSectionResizeMode(
+            2,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        self.sessions_tree.header().setSectionResizeMode(
+            3,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
         root.addWidget(self.sessions_tree, 1)
 
         self.selection_status = QLabel(self)
@@ -270,17 +282,32 @@ class ComparisonSetsView(QWidget):
         self.table = QTableWidget(0, 6, self)
         self.table.setObjectName("comparisonSetsTable")
         self.table.setHorizontalHeaderLabels(
-            ["Nazwa", "Sesja bazowa", "Sesje", "Synchronizacja", "Stan", "Aktualizacja"]
+            [
+                "Nazwa",
+                "Sesja bazowa",
+                "Sesje",
+                "Synchronizacja",
+                "Stan",
+                "Aktualizacja",
+            ]
         )
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.Stretch,
+        )
         for column in range(1, 6):
             self.table.horizontalHeader().setSectionResizeMode(
-                column, QHeaderView.ResizeMode.ResizeToContents
+                column,
+                QHeaderView.ResizeMode.ResizeToContents,
             )
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.cellDoubleClicked.connect(lambda *_args: self._edit_set())
@@ -313,7 +340,7 @@ class ComparisonSetsView(QWidget):
                     comparison_set.synchronization_mode,
                     comparison_set.synchronization_mode,
                 ),
-                "Zablokowany" if run_count else "Edytowalny",
+                "Z analizami" if run_count else "Edytowalny",
                 _display_datetime(comparison_set.updated_at_utc),
             )
             for column, value in enumerate(values):
@@ -323,7 +350,8 @@ class ComparisonSetsView(QWidget):
                     item.setToolTip(comparison_set.id)
                 if column == 4 and run_count:
                     item.setToolTip(
-                        f"Zestaw jest używany przez {run_count} uruchomienie/uruchomienia analiz."
+                        "Edycja utworzy nową wersję zestawu, a usunięcie zachowa "
+                        f"{run_count} uruchomienie/uruchomienia analiz."
                     )
                 self.table.setItem(row, column, item)
 
@@ -347,7 +375,10 @@ class ComparisonSetsView(QWidget):
     def select_comparison_set(self, comparison_set_id: str) -> bool:
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
-            if item is not None and item.data(_COMPARISON_ID_ROLE) == comparison_set_id:
+            if (
+                item is not None
+                and item.data(_COMPARISON_ID_ROLE) == comparison_set_id
+            ):
                 self.table.selectRow(row)
                 self.table.scrollToItem(item)
                 return True
@@ -382,22 +413,22 @@ class ComparisonSetsView(QWidget):
             return
 
         run_count = self.store.analysis_run_count(comparison_set.id)
-        mutable = run_count == 0
-        self.edit_button.setEnabled(mutable)
-        self.delete_button.setEnabled(mutable)
+        self.edit_button.setEnabled(True)
+        self.delete_button.setEnabled(True)
         session_by_id = {session.id: session for session in self._sessions}
         session_names = [
             session_by_id[session_id].name
             for session_id in comparison_set.session_ids
             if session_id in session_by_id
         ]
-        locked_text = (
-            f" Zestaw jest zablokowany, ponieważ używa go {run_count} analiza/analizy."
+        history_text = (
+            f" Zestaw ma {run_count} zapisane uruchomienie/uruchomienia analiz. "
+            "Edycja utworzy nową wersję, a usunięcie zachowa wyniki historyczne."
             if run_count
             else ""
         )
         self.details_label.setText(
-            "Sesje: " + ", ".join(session_names) + "." + locked_text
+            "Sesje: " + ", ".join(session_names) + "." + history_text
         )
 
     def _create_set(self) -> None:
@@ -423,20 +454,15 @@ class ComparisonSetsView(QWidget):
             return
         self.refresh(comparison_set.id)
         self.changed.emit()
-        self.output_message.emit(f"Utworzono zestaw porównawczy: {comparison_set.name}")
+        self.output_message.emit(
+            f"Utworzono zestaw porównawczy: {comparison_set.name}"
+        )
 
     def _edit_set(self) -> None:
         comparison_set = self.selected_comparison_set()
         if comparison_set is None:
             return
-        if self.store.is_locked(comparison_set.id):
-            QMessageBox.information(
-                self,
-                "Zestaw porównawczy",
-                "Zestaw użyty przez analizę jest niezmienny. Utwórz nowy zestaw, "
-                "aby zachować powtarzalność wyników.",
-            )
-            return
+        has_history = self.store.is_locked(comparison_set.id)
         dialog = ComparisonSetDialog(
             self._sessions,
             comparison_set=comparison_set,
@@ -445,49 +471,67 @@ class ComparisonSetsView(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            updated = self.store.update(
-                comparison_set.id,
-                name=dialog.comparison_name(),
-                session_ids=dialog.session_ids(),
-                base_session_id=dialog.base_session_id(),
-                synchronization_mode=dialog.synchronization_mode(),
-            )
+            if has_history:
+                updated = self.store.fork(
+                    comparison_set.id,
+                    name=dialog.comparison_name(),
+                    session_ids=dialog.session_ids(),
+                    base_session_id=dialog.base_session_id(),
+                    synchronization_mode=dialog.synchronization_mode(),
+                )
+            else:
+                updated = self.store.update(
+                    comparison_set.id,
+                    name=dialog.comparison_name(),
+                    session_ids=dialog.session_ids(),
+                    base_session_id=dialog.base_session_id(),
+                    synchronization_mode=dialog.synchronization_mode(),
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Nie można zapisać zestawu", str(exc))
             return
         self.refresh(updated.id)
         self.changed.emit()
-        self.output_message.emit(f"Zaktualizowano zestaw porównawczy: {updated.name}")
+        if has_history:
+            self.output_message.emit(
+                "Utworzono nową wersję zestawu porównawczego: "
+                f"{updated.name}. Poprzednią wersję zachowano z analizami."
+            )
+        else:
+            self.output_message.emit(
+                f"Zaktualizowano zestaw porównawczy: {updated.name}"
+            )
 
     def _delete_set(self) -> None:
         comparison_set = self.selected_comparison_set()
         if comparison_set is None:
             return
-        if self.store.is_locked(comparison_set.id):
-            QMessageBox.information(
-                self,
-                "Zestaw porównawczy",
-                "Nie można usunąć zestawu użytego przez analizę.",
-            )
-            return
+        has_history = self.store.is_locked(comparison_set.id)
+        consequence = (
+            "Wyniki analiz i ich artefakty pozostaną w projekcie jako historia."
+            if has_history
+            else "Zapisane sesje i ich surowe ramki nie zostaną usunięte."
+        )
         answer = QMessageBox.question(
             self,
             "Usuń zestaw porównawczy",
-            f"Usunąć zestaw „{comparison_set.name}”?\n\n"
-            "Zapisane sesje i ich surowe ramki nie zostaną usunięte.",
+            f"Usunąć zestaw „{comparison_set.name}”?\n\n{consequence}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            self.store.delete(comparison_set.id)
+            history_preserved = self.store.delete(comparison_set.id)
         except Exception as exc:
             QMessageBox.critical(self, "Nie można usunąć zestawu", str(exc))
             return
         self.refresh()
         self.changed.emit()
-        self.output_message.emit(f"Usunięto zestaw porównawczy: {comparison_set.name}")
+        message = f"Usunięto zestaw porównawczy: {comparison_set.name}"
+        if history_preserved:
+            message += ". Wyniki analiz zachowano w historii projektu."
+        self.output_message.emit(message)
 
 
 def _ordered_sessions(
