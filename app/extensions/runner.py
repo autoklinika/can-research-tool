@@ -14,7 +14,7 @@ class ExtensionExecutionError(RuntimeError):
 
 
 class ExtensionRunner:
-    """Exception boundary and lifecycle controller for analysis providers."""
+    """Exception boundary and lifecycle controller for passive providers."""
 
     def __init__(
         self,
@@ -27,7 +27,14 @@ class ExtensionRunner:
 
     def execute_analysis(self, extension_id: str, context: AnalysisContext) -> object:
         provider = self._registry.get_analysis(extension_id)
-        manifest = provider.manifest
+        return self._execute(provider, context)
+
+    def execute_comparison(self, extension_id: str, context: AnalysisContext) -> object:
+        provider = self._registry.get_comparison(extension_id)
+        return self._execute(provider, context)
+
+    def _execute(self, provider: object, context: AnalysisContext) -> object:
+        manifest = getattr(provider, "manifest")
 
         if context.cancellation.is_cancelled:
             self._store.set_analysis_status(
