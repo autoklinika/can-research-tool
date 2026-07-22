@@ -4,12 +4,13 @@ import gc
 import hashlib
 import os
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QStandardItem
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.domain import AnalysisInput
 from app.models import CanFrame, CaptureSession
@@ -68,7 +69,10 @@ def main() -> None:
         assert view.table.rowCount() == 1
         assert view.selected_comparison_set_id() == created.id
 
-        explorer_item = _find_node(window.explorer.model.invisibleRootItem(), "comparison_set")
+        explorer_item = _find_node(
+            window.explorer.model.invisibleRootItem(),
+            "comparison_set",
+        )
         assert explorer_item is not None
         assert explorer_item.data(Qt.ItemDataRole.UserRole + 2) == created.id
 
@@ -87,7 +91,7 @@ def main() -> None:
         assert len(updated.session_ids) == 3
 
         domain_store = ProjectDomainStore(project)
-        domain_store.create_analysis_run(
+        first_run = domain_store.create_analysis_run(
             provider_id="crt.test.comparison",
             provider_version="1.0.0",
             algorithm_version="1",
@@ -95,13 +99,68 @@ def main() -> None:
         )
         view.refresh(updated.id)
         app.processEvents()
-        assert not view.edit_button.isEnabled()
-        assert not view.delete_button.isEnabled()
-        assert "zablokowany" in view.details_label.text().casefold()
+        assert view.edit_button.isEnabled()
+        assert view.delete_button.isEnabled()
+        assert "nową wersję" in view.details_label.text().casefold()
+
+        QTimer.singleShot(0, _complete_revision_dialog)
+        view.edit_button.click()
+        app.processEvents()
+
+        active_sets = view.store.list()
+        assert len(active_sets) == 1
+        revised = active_sets[0]
+        assert revised.id != updated.id
+        assert revised.name == "Repair validation v2"
+        assert view.selected_comparison_set_id() == revised.id
+        historical = view.store.get(updated.id)
+        assert view.store.is_deleted(historical)
+        assert view.store.analysis_run_count(updated.id) == 1
+
+        second_run = domain_store.create_analysis_run(
+            provider_id="crt.test.comparison",
+            provider_version="1.0.0",
+            algorithm_version="1",
+            inputs=(AnalysisInput(kind="comparison_set", source_id=revised.id),),
+        )
+        view.refresh(revised.id)
+        app.processEvents()
+        assert view.edit_button.isEnabled()
+        assert view.delete_button.isEnabled()
+
+        with patch.object(
+            QMessageBox,
+            "question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            view.delete_button.click()
+        app.processEvents()
+
+        assert view.store.list() == []
+        assert view.table.rowCount() == 0
+        archived = view.store.list(include_deleted=True)
+        assert {item.id for item in archived} == {updated.id, revised.id}
+        assert all(view.store.is_deleted(item) for item in archived)
+        assert view.store.analysis_run_count(updated.id) == 1
+        assert view.store.analysis_run_count(revised.id) == 1
         assert domain_store.schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
 
+        with project._connect() as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM analysis_runs WHERE id IN (?, ?)",
+                (first_run.id, second_run.id),
+            ).fetchone()[0] == 2
+
+        assert _find_node(
+            window.explorer.model.invisibleRootItem(),
+            "comparison_set",
+        ) is None
+
         for session in (first, second, third):
-            assert _sha256(project.absolute_path(session.relative_path)) == source_hashes[session.id]
+            assert (
+                _sha256(project.absolute_path(session.relative_path))
+                == source_hashes[session.id]
+            )
 
         window._close_project_tabs()
         window.close()
@@ -125,8 +184,14 @@ def _complete_new_dialog() -> None:
     dialog = QApplication.activeModalWidget()
     assert isinstance(dialog, ComparisonSetDialog)
     dialog.name_edit.setText("Before versus after")
-    dialog.sessions_tree.topLevelItem(0).setCheckState(0, Qt.CheckState.Checked)
-    dialog.sessions_tree.topLevelItem(1).setCheckState(0, Qt.CheckState.Checked)
+    dialog.sessions_tree.topLevelItem(0).setCheckState(
+        0,
+        Qt.CheckState.Checked,
+    )
+    dialog.sessions_tree.topLevelItem(1).setCheckState(
+        0,
+        Qt.CheckState.Checked,
+    )
     dialog._session_selection_changed()
     dialog.base_combo.setCurrentIndex(1)
     dialog._accept_if_valid()
@@ -143,6 +208,13 @@ def _complete_edit_dialog() -> None:
         )
     dialog._session_selection_changed()
     dialog.base_combo.setCurrentIndex(1)
+    dialog._accept_if_valid()
+
+
+def _complete_revision_dialog() -> None:
+    dialog = QApplication.activeModalWidget()
+    assert isinstance(dialog, ComparisonSetDialog)
+    dialog.name_edit.setText("Repair validation v2")
     dialog._accept_if_valid()
 
 
