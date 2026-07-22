@@ -91,6 +91,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/session_statistics_table_smoke.py
+      - name: Verify lightweight statistics visual summary
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_statistics_visual_summary_smoke.py
       - name: Verify protocol-aware logical details
         env:
           QT_QPA_PLATFORM: offscreen
