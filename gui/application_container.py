@@ -13,6 +13,7 @@ from app.project import CrtProject
 from infrastructure.desktop import reveal_path
 
 from .async_dbc_manager import AsyncDbcManagerWidget
+from .comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
 from .comparison_sets_view import ComparisonSetsView
 from .confirmed_start_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
@@ -137,7 +138,7 @@ class ApplicationContainer:
         return StudyAreaViewWidget(project, area_id)
 
     def create_comparison_sets_view(self, project: CrtProject) -> ComparisonSetsView:
-        return ComparisonSetsView(project)
+        return AnalysisEnabledComparisonSetsView(project)
 
     def create_import_task(
         self,
