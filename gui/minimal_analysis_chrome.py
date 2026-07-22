@@ -71,6 +71,10 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
         selector.setVisible(multiple_results)
 
     def _sync_idle_activity_state(self) -> None:
+        if self.analysis_status.text().startswith("Nie można odczytać"):
+            self._set_activity_visible(progress=False, status=True)
+            return
+
         available = (
             self._analysis_service is not None
             and self._session_record is not None
