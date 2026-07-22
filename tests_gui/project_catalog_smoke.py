@@ -62,10 +62,28 @@ def main() -> None:
         assert profile.part_number == "0281039999"
         assert profile.tags == ("Euro 6", "EGR")
 
+        properties = window.services.create_project_properties_dialog(window, project)
+        assert properties.location_edit.isReadOnly()
+        assert properties.vehicle_brand_edit.text() == "MAN"
+        assert properties.ecu_type_edit.text() == "MD1CE101"
+        properties.vehicle_model_edit.setText("TGS")
+        properties.hardware_version_edit.setText("HW-REV-C")
+        properties.fault_description_edit.setPlainText("EGR actuator bench validation")
+        properties.tags_edit.setText("Euro 6, EGR, validated")
+        window._apply_project_properties_from_dialog(properties)
+        app.processEvents()
+
+        updated_profile = load_project_profile(project.root)
+        assert updated_profile.vehicle_model == "TGS"
+        assert updated_profile.hardware_version == "HW-REV-C"
+        assert updated_profile.fault_description == "EGR actuator bench validation"
+        assert updated_profile.tags == ("Euro 6", "EGR", "validated")
+
         catalog = ProjectCatalog(f"{temporary}/app-data/projects.sqlite")
-        matches = catalog.list_projects(query="man md1 2021 egr")
+        matches = catalog.list_projects(query="man md1 2021 validated")
         assert len(matches) == 1
         assert matches[0].project_id == project.manifest.id
+        assert matches[0].profile.vehicle_model == "TGS"
         assert matches[0].last_opened_at_utc
 
         picker = ProjectCatalogDialog(catalog, window)
@@ -74,7 +92,7 @@ def main() -> None:
         assert picker.open_button.isEnabled()
         assert picker.selected_project_path() == str(project.root)
 
-        picker.search_edit.setText("bosch h21")
+        picker.search_edit.setText("bosch rev-c")
         app.processEvents()
         assert picker.table.rowCount() == 1
         picker.search_edit.setText("scania s8")
@@ -96,6 +114,7 @@ def main() -> None:
         assert not picker.open_button.isEnabled()
         project.manifest_path.with_suffix(".missing").rename(project.manifest_path)
 
+        properties.close()
         picker.close()
         dialog.close()
         window._close_project_tabs()
@@ -107,8 +126,10 @@ def main() -> None:
 
         matches = None
         catalog = None
+        updated_profile = None
         profile = None
         project = None
+        properties = None
         picker = None
         dialog = None
         window = None
