@@ -9,6 +9,13 @@ from .comparison_statistics import (
     COMPARISON_STATISTICS_PROVIDER_VERSION,
     ComparisonStatisticsProvider,
 )
+from .message_sequence import (
+    MESSAGE_SEQUENCE_ALGORITHM_VERSION,
+    MESSAGE_SEQUENCE_ARTIFACT_SCHEMA_VERSION,
+    MESSAGE_SEQUENCE_PROVIDER_ID,
+    MESSAGE_SEQUENCE_PROVIDER_VERSION,
+    MessageSequenceComparisonProvider,
+)
 from .payload_difference_exact import (
     PAYLOAD_DIFFERENCE_ALGORITHM_VERSION,
     PAYLOAD_DIFFERENCE_ARTIFACT_SCHEMA_VERSION,
@@ -32,14 +39,17 @@ def builtin_analysis_providers() -> tuple[SessionStatisticsProvider, ...]:
 
 
 def builtin_comparison_providers() -> tuple[
-    ComparisonStatisticsProvider | PayloadDifferenceProvider,
+    ComparisonStatisticsProvider
+    | PayloadDifferenceProvider
+    | MessageSequenceComparisonProvider,
     ...,
 ]:
-    """Return trusted comparison providers without global discovery."""
+    """Return CRT-owned passive comparison providers."""
 
     return (
         ComparisonStatisticsProvider(),
         PayloadDifferenceProvider(),
+        MessageSequenceComparisonProvider(),
     )
 
 
@@ -48,7 +58,10 @@ def register_builtin_extensions(
 ) -> tuple[ExtensionManifest, ...]:
     """Register the established single-session built-ins."""
 
-    return tuple(registry.register(provider) for provider in builtin_analysis_providers())
+    return tuple(
+        registry.register(provider)
+        for provider in builtin_analysis_providers()
+    )
 
 
 def register_builtin_comparison_extensions(
@@ -56,7 +69,10 @@ def register_builtin_comparison_extensions(
 ) -> tuple[ExtensionManifest, ...]:
     """Register CRT-owned passive comparison providers."""
 
-    return tuple(registry.register(provider) for provider in builtin_comparison_providers())
+    return tuple(
+        registry.register(provider)
+        for provider in builtin_comparison_providers()
+    )
 
 
 __all__ = [
@@ -65,6 +81,11 @@ __all__ = [
     "COMPARISON_STATISTICS_PROVIDER_ID",
     "COMPARISON_STATISTICS_PROVIDER_VERSION",
     "ComparisonStatisticsProvider",
+    "MESSAGE_SEQUENCE_ALGORITHM_VERSION",
+    "MESSAGE_SEQUENCE_ARTIFACT_SCHEMA_VERSION",
+    "MESSAGE_SEQUENCE_PROVIDER_ID",
+    "MESSAGE_SEQUENCE_PROVIDER_VERSION",
+    "MessageSequenceComparisonProvider",
     "PAYLOAD_DIFFERENCE_ALGORITHM_VERSION",
     "PAYLOAD_DIFFERENCE_ARTIFACT_SCHEMA_VERSION",
     "PAYLOAD_DIFFERENCE_PROVIDER_ID",
