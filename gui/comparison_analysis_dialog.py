@@ -26,7 +26,7 @@ from app.domain import Artifact
 from app.extensions import CancellationToken, ExtensionCancelled, ProgressUpdate
 from app.project import CrtProject
 
-_REASON_LABELS = {
+_STATISTICS_REASON_LABELS = {
     "new": "Nowe ID",
     "missing": "Brakujące ID",
     "frequency_increase": "Częstotliwość ↑",
@@ -34,6 +34,69 @@ _REASON_LABELS = {
     "share_increase": "Udział ↑",
     "share_decrease": "Udział ↓",
 }
+_PAYLOAD_CHANGE_LABELS = {
+    "new_message_key": "Nowy klucz wiadomości",
+    "missing_message_key": "Brakujący klucz wiadomości",
+    "dlc_set_changed": "Zmiana zestawu DLC",
+    "variant_comparison_truncated": "Limit wariantów",
+    "constant_byte_changed": "Zmiana stałego bajtu",
+    "byte_became_variable": "Bajt stał się zmienny",
+    "byte_became_constant": "Bajt stał się stały",
+    "byte_value_set_changed": "Zmiana zbioru wartości",
+    "byte_position_removed": "Pozycja bajtu zniknęła",
+    "byte_position_added": "Nowa pozycja bajtu",
+    "missing_payload_variant": "Brakujący wariant payloadu",
+    "new_payload_variant": "Nowy wariant payloadu",
+    "byte_presence_changed": "Zmiana obecności bajtu",
+}
+_STATISTICS_SESSION_HEADERS = (
+    "Sesja",
+    "Rola",
+    "Ramki",
+    "Klucze ID",
+    "Nowe",
+    "Brakujące",
+    "Hz ↑",
+    "Hz ↓",
+    "Udział ↑",
+    "Udział ↓",
+)
+_STATISTICS_CHANGE_HEADERS = (
+    "Sesja",
+    "Kanał",
+    "CAN ID",
+    "Format",
+    "Typ",
+    "Zmiana",
+    "Hz bazowe",
+    "Hz bieżące",
+    "Δ Hz [%]",
+    "Udział bazowy [%]",
+    "Udział bieżący [%]",
+)
+_PAYLOAD_SESSION_HEADERS = (
+    "Sesja",
+    "Rola",
+    "Ramki danych",
+    "Klucze payload",
+    "Nowe",
+    "Brakujące",
+    "Warianty",
+    "Ramki poza limitem",
+    "Bajty stałe",
+    "Bajty zmienne",
+)
+_PAYLOAD_CHANGE_HEADERS = (
+    "Sesja",
+    "Kanał",
+    "CAN ID",
+    "Format",
+    "Zmiana",
+    "Bajt",
+    "Payload",
+    "Baza",
+    "Bieżąca",
+)
 
 
 class _TaskSignals(QObject):
@@ -44,7 +107,12 @@ class _TaskSignals(QObject):
 
 
 class ComparisonAnalysisTask(QRunnable):
-    def __init__(self, service: ComparisonAnalysisService, provider_id: str, set_id: str) -> None:
+    def __init__(
+        self,
+        service: ComparisonAnalysisService,
+        provider_id: str,
+        set_id: str,
+    ) -> None:
         super().__init__()
         self.service = service
         self.provider_id = provider_id
@@ -111,7 +179,7 @@ class ComparisonAnalysisDialog(QDialog):
         controls.addWidget(QLabel("Analiza:", self))
         self.provider_combo = QComboBox(self)
         self.provider_combo.setObjectName("comparisonAnalysisProvider")
-        self.provider_combo.setMinimumWidth(280)
+        self.provider_combo.setMinimumWidth(320)
         for manifest in self.service.available_comparison_analyses():
             self.provider_combo.addItem(manifest.name, manifest.id)
         controls.addWidget(self.provider_combo)
@@ -137,14 +205,18 @@ class ComparisonAnalysisDialog(QDialog):
         root.addWidget(self.progress)
         self.status_label = QLabel(self)
         self.status_label.setObjectName("comparisonAnalysisStatus")
-        self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         root.addWidget(self.status_label)
 
         artifacts = QHBoxLayout()
         artifacts.addWidget(QLabel("Wynik analizy:", self))
         self.artifact_combo = QComboBox(self)
         self.artifact_combo.setObjectName("comparisonArtifactSelector")
-        self.artifact_combo.currentIndexChanged.connect(self._show_selected_artifact)
+        self.artifact_combo.currentIndexChanged.connect(
+            self._show_selected_artifact
+        )
         artifacts.addWidget(self.artifact_combo, 1)
         root.addLayout(artifacts)
         self.artifact_info = QLabel(self)
@@ -159,26 +231,22 @@ class ComparisonAnalysisDialog(QDialog):
         self.sessions_table = _table(
             splitter,
             "comparisonSessionSummaryTable",
-            (
-                "Sesja", "Rola", "Ramki", "Klucze ID", "Nowe", "Brakujące",
-                "Hz ↑", "Hz ↓", "Udział ↑", "Udział ↓",
-            ),
+            _STATISTICS_SESSION_HEADERS,
         )
         self.changes_table = _table(
             splitter,
             "comparisonNotableChangesTable",
-            (
-                "Sesja", "Kanał", "CAN ID", "Format", "Typ", "Zmiana",
-                "Hz bazowe", "Hz bieżące", "Δ Hz [%]",
-                "Udział bazowy [%]", "Udział bieżący [%]",
-            ),
+            _STATISTICS_CHANGE_HEADERS,
         )
         splitter.addWidget(self.sessions_table)
         splitter.addWidget(self.changes_table)
         splitter.setSizes((240, 420))
         root.addWidget(splitter, 1)
 
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=self)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Close,
+            parent=self,
+        )
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
 
@@ -200,7 +268,11 @@ class ComparisonAnalysisDialog(QDialog):
         provider_id = str(self.provider_combo.currentData() or "")
         if not provider_id:
             return
-        task = ComparisonAnalysisTask(self.service, provider_id, self.comparison_set_id)
+        task = ComparisonAnalysisTask(
+            self.service,
+            provider_id,
+            self.comparison_set_id,
+        )
         task.signals.progress.connect(self._analysis_progress)
         task.signals.completed.connect(self._analysis_done)
         task.signals.failed.connect(self._analysis_failed)
@@ -218,7 +290,12 @@ class ComparisonAnalysisDialog(QDialog):
             self.status_label.setText("Anulowanie analizy…")
 
     @Slot(int, int, str)
-    def _analysis_progress(self, current: int, total: int, message: str) -> None:
+    def _analysis_progress(
+        self,
+        current: int,
+        total: int,
+        message: str,
+    ) -> None:
         if total > 0:
             self.progress.setRange(0, total)
             self.progress.setValue(current)
@@ -229,17 +306,24 @@ class ComparisonAnalysisDialog(QDialog):
 
     @Slot(object)
     def _analysis_done(self, value: object) -> None:
-        result = value if isinstance(value, ComparisonAnalysisExecutionResult) else None
+        result = (
+            value
+            if isinstance(value, ComparisonAnalysisExecutionResult)
+            else None
+        )
         preferred = result.artifacts[0].id if result and result.artifacts else ""
         self._set_running(False)
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
         self.progress.setFormat("Gotowe — 100%")
-        self.status_label.setText("Porównanie zakończone. Artefakt zapisano w projekcie.")
+        self.status_label.setText(
+            "Porównanie zakończone. Artefakt zapisano w projekcie."
+        )
         self._load_artifacts(preferred)
         if result is not None:
             self.output_message.emit(
-                f"Analiza {result.provider_id} zakończona: {len(result.artifacts)} artefakt(ów)"
+                f"Analiza {result.provider_id} zakończona: "
+                f"{len(result.artifacts)} artefakt(ów)"
             )
             self.analysis_completed.emit(result.comparison_set_id)
 
@@ -250,7 +334,9 @@ class ComparisonAnalysisDialog(QDialog):
         self.progress.setValue(0)
         self.progress.setFormat("Błąd")
         self.status_label.setText(f"Analiza nie powiodła się: {error}")
-        self.output_message.emit(f"Błąd analizy zestawu {self.comparison_set.name}: {error}")
+        self.output_message.emit(
+            f"Błąd analizy zestawu {self.comparison_set.name}: {error}"
+        )
 
     @Slot()
     def _analysis_cancelled(self) -> None:
@@ -258,7 +344,9 @@ class ComparisonAnalysisDialog(QDialog):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setFormat("Anulowano")
-        self.status_label.setText("Analiza została anulowana bez zmiany sesji źródłowych.")
+        self.status_label.setText(
+            "Analiza została anulowana bez zmiany sesji źródłowych."
+        )
 
     def _set_running(self, running: bool) -> None:
         if not running:
@@ -271,25 +359,34 @@ class ComparisonAnalysisDialog(QDialog):
         self.buttons.setEnabled(not running)
 
     def _load_artifacts(self, preferred_artifact_id: str = "") -> None:
-        current = preferred_artifact_id or str(self.artifact_combo.currentData() or "")
+        current = preferred_artifact_id or str(
+            self.artifact_combo.currentData() or ""
+        )
         try:
-            self._artifacts = self.service.list_artifacts(self.comparison_set_id)
+            self._artifacts = self.service.list_artifacts(
+                self.comparison_set_id
+            )
         except Exception as exc:
             self._artifacts = ()
-            self.status_label.setText(f"Nie można odczytać katalogu artefaktów: {exc}")
+            self.status_label.setText(
+                f"Nie można odczytać katalogu artefaktów: {exc}"
+            )
         self.artifact_combo.blockSignals(True)
         self.artifact_combo.clear()
         selected = -1
         for index, artifact in enumerate(self._artifacts):
             self.artifact_combo.addItem(
-                f"{artifact.artifact_type} — {_timestamp(artifact.created_at_utc)} — "
+                f"{artifact.artifact_type} — "
+                f"{_timestamp(artifact.created_at_utc)} — "
                 f"{artifact.provider_id} {artifact.provider_version}",
                 artifact.id,
             )
             if artifact.id == current:
                 selected = index
         if self._artifacts:
-            self.artifact_combo.setCurrentIndex(selected if selected >= 0 else 0)
+            self.artifact_combo.setCurrentIndex(
+                selected if selected >= 0 else 0
+            )
         self.artifact_combo.blockSignals(False)
         self.artifact_combo.setEnabled(bool(self._artifacts))
         self._show_selected_artifact()
@@ -298,59 +395,80 @@ class ComparisonAnalysisDialog(QDialog):
     @Slot(int)
     def _show_selected_artifact(self, _index: int = -1) -> None:
         artifact_id = str(self.artifact_combo.currentData() or "")
-        artifact = next((item for item in self._artifacts if item.id == artifact_id), None)
+        artifact = next(
+            (item for item in self._artifacts if item.id == artifact_id),
+            None,
+        )
         if artifact is None:
-            self.artifact_info.setText("Brak zapisanych wyników dla tego zestawu.")
-            self.summary_label.setText("Uruchom pierwszy provider porównawczy.")
+            self.artifact_info.setText(
+                "Brak zapisanych wyników dla tego zestawu."
+            )
+            self.summary_label.setText(
+                "Uruchom pierwszy provider porównawczy."
+            )
             self.sessions_table.setRowCount(0)
             self.changes_table.setRowCount(0)
             return
         self.artifact_info.setText(
-            f"Provider: {artifact.provider_id} {artifact.provider_version} | "
-            f"Algorytm: {artifact.algorithm_version} | Schemat: {artifact.schema_version} | "
+            f"Provider: {artifact.provider_id} "
+            f"{artifact.provider_version} | "
+            f"Algorytm: {artifact.algorithm_version} | "
+            f"Schemat: {artifact.schema_version} | "
             f"SHA-256: {artifact.sha256 or '—'}"
         )
         try:
             payload = self.service.artifacts.read_json(artifact)
         except Exception as exc:
-            self.summary_label.setText(f"Nie można odczytać artefaktu: {exc}")
+            self.summary_label.setText(
+                f"Nie można odczytać artefaktu: {exc}"
+            )
             return
-        if payload.get("schema") != "crt.comparison_statistics":
-            self.summary_label.setText("Szczegółowy podgląd nie jest dostępny.")
-            return
-        self._render(payload)
+        schema = payload.get("schema")
+        if schema == "crt.comparison_statistics":
+            self._render_statistics(payload)
+        elif schema == "crt.comparison_payload_difference":
+            self._render_payload_difference(payload)
+        else:
+            self.summary_label.setText(
+                "Szczegółowy podgląd nie jest dostępny."
+            )
+            self.sessions_table.setRowCount(0)
+            self.changes_table.setRowCount(0)
 
-    def _render(self, payload: object) -> None:
+    def _render_statistics(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
-        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        _configure_table(
+            self.sessions_table,
+            _STATISTICS_SESSION_HEADERS,
+        )
+        _configure_table(
+            self.changes_table,
+            _STATISTICS_CHANGE_HEADERS,
+        )
+        summary = (
+            payload.get("summary")
+            if isinstance(payload.get("summary"), dict)
+            else {}
+        )
         comparison = (
             payload.get("comparison_set")
             if isinstance(payload.get("comparison_set"), dict)
             else {}
         )
-        session_payload = payload.get("sessions")
-        change_payload = payload.get("notable_changes")
-        sessions = (
-            [item for item in session_payload if isinstance(item, dict)]
-            if isinstance(session_payload, list)
-            else []
-        )
-        changes = (
-            [item for item in change_payload if isinstance(item, dict)]
-            if isinstance(change_payload, list)
-            else []
-        )
+        sessions = _dict_list(payload.get("sessions"))
+        changes = _dict_list(payload.get("notable_changes"))
         base_id = str(summary.get("baseline_session_id") or "")
-        base_name = next(
-            (str(item.get("name")) for item in sessions if item.get("id") == base_id),
-            base_id,
-        )
+        base_name = _session_name(sessions, base_id)
         self.summary_label.setText(
-            f"Baza: {base_name or '—'}. Sesje: {summary.get('session_count', '—')}. "
-            f"Klucze wiadomości: {summary.get('union_message_key_count', '—')}. "
-            f"Istotne zmiany: {summary.get('notable_change_count', '—')}. "
-            f"Synchronizacja: {comparison.get('synchronization_mode', '—')}."
+            f"Baza: {base_name or '—'}. "
+            f"Sesje: {summary.get('session_count', '—')}. "
+            f"Klucze wiadomości: "
+            f"{summary.get('union_message_key_count', '—')}. "
+            f"Istotne zmiany: "
+            f"{summary.get('notable_change_count', '—')}. "
+            f"Synchronizacja: "
+            f"{comparison.get('synchronization_mode', '—')}."
         )
         self.sessions_table.setRowCount(len(sessions))
         for row, item in enumerate(sessions):
@@ -359,7 +477,7 @@ class ComparisonAnalysisDialog(QDialog):
                 row,
                 (
                     item.get("name", "—"),
-                    "Bazowa" if item.get("role") == "base" else "Porównywana",
+                    _role(item),
                     item.get("observed_frame_count", "—"),
                     item.get("unique_message_key_count", "—"),
                     item.get("new_message_key_count", "—"),
@@ -372,26 +490,131 @@ class ComparisonAnalysisDialog(QDialog):
             )
         self.changes_table.setRowCount(len(changes))
         for row, item in enumerate(changes):
-            baseline = item.get("baseline") if isinstance(item.get("baseline"), dict) else {}
-            current = item.get("current") if isinstance(item.get("current"), dict) else {}
-            reasons = item.get("reasons") if isinstance(item.get("reasons"), list) else []
+            baseline = (
+                item.get("baseline")
+                if isinstance(item.get("baseline"), dict)
+                else {}
+            )
+            current = (
+                item.get("current")
+                if isinstance(item.get("current"), dict)
+                else {}
+            )
+            reasons = (
+                item.get("reasons")
+                if isinstance(item.get("reasons"), list)
+                else []
+            )
             _set_row(
                 self.changes_table,
                 row,
                 (
-                    item.get("session_name", "—"), item.get("channel", "—"),
+                    item.get("session_name", "—"),
+                    item.get("channel", "—"),
                     item.get("arbitration_id_hex", "—"),
                     "EXT" if item.get("is_extended_id") else "STD",
                     item.get("frame_kind", "—"),
                     ", ".join(
-                        _REASON_LABELS.get(str(reason), str(reason))
+                        _STATISTICS_REASON_LABELS.get(
+                            str(reason),
+                            str(reason),
+                        )
                         for reason in reasons
                     ),
-                    _number(baseline.get("mean_positive_frequency_hz")),
-                    _number(current.get("mean_positive_frequency_hz")),
+                    _number(
+                        baseline.get("mean_positive_frequency_hz")
+                    ),
+                    _number(
+                        current.get("mean_positive_frequency_hz")
+                    ),
                     _number(item.get("frequency_delta_percent")),
                     _number(baseline.get("share_percent")),
                     _number(current.get("share_percent")),
+                ),
+            )
+
+    def _render_payload_difference(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        _configure_table(
+            self.sessions_table,
+            _PAYLOAD_SESSION_HEADERS,
+        )
+        _configure_table(
+            self.changes_table,
+            _PAYLOAD_CHANGE_HEADERS,
+        )
+        summary = (
+            payload.get("summary")
+            if isinstance(payload.get("summary"), dict)
+            else {}
+        )
+        comparison = (
+            payload.get("comparison_set")
+            if isinstance(payload.get("comparison_set"), dict)
+            else {}
+        )
+        sessions = _dict_list(payload.get("sessions"))
+        changes = _dict_list(payload.get("notable_changes"))
+        base_id = str(summary.get("baseline_session_id") or "")
+        base_name = _session_name(sessions, base_id)
+        self.summary_label.setText(
+            f"Baza: {base_name or '—'}. "
+            f"Sesje: {summary.get('session_count', '—')}. "
+            f"Klucze payload: "
+            f"{summary.get('union_payload_message_key_count', '—')} "
+            f"(wspólne: "
+            f"{summary.get('common_payload_message_key_count', '—')}). "
+            f"Zmiany: {summary.get('notable_change_count', '—')}. "
+            f"Synchronizacja: "
+            f"{comparison.get('synchronization_mode', '—')}."
+        )
+        self.sessions_table.setRowCount(len(sessions))
+        for row, item in enumerate(sessions):
+            _set_row(
+                self.sessions_table,
+                row,
+                (
+                    item.get("name", "—"),
+                    _role(item),
+                    item.get("observed_data_frame_count", "—"),
+                    item.get("payload_message_key_count", "—"),
+                    item.get("new_payload_message_key_count", "—"),
+                    item.get(
+                        "missing_payload_message_key_count",
+                        "—",
+                    ),
+                    item.get("tracked_payload_variant_count", "—"),
+                    item.get(
+                        "untracked_payload_variant_frame_count",
+                        "—",
+                    ),
+                    item.get("constant_byte_position_count", "—"),
+                    item.get("variable_byte_position_count", "—"),
+                ),
+            )
+        self.changes_table.setRowCount(len(changes))
+        for row, item in enumerate(changes):
+            byte_index, payload_hex, baseline, current = (
+                _payload_change_details(item)
+            )
+            change_type = str(item.get("change_type") or "")
+            _set_row(
+                self.changes_table,
+                row,
+                (
+                    item.get("session_name", "—"),
+                    item.get("channel", "—"),
+                    item.get("arbitration_id_hex", "—"),
+                    "EXT" if item.get("is_extended_id") else "STD",
+                    _PAYLOAD_CHANGE_LABELS.get(
+                        change_type,
+                        change_type,
+                    ),
+                    byte_index,
+                    payload_hex,
+                    baseline,
+                    current,
                 ),
             )
 
@@ -409,26 +632,178 @@ class ComparisonAnalysisDialog(QDialog):
         super().closeEvent(event)
 
 
-def _table(parent: QWidget, name: str, headers: tuple[str, ...]) -> QTableWidget:
+def _table(
+    parent: QWidget,
+    name: str,
+    headers: tuple[str, ...],
+) -> QTableWidget:
     table = QTableWidget(0, len(headers), parent)
     table.setObjectName(name)
     table.setHorizontalHeaderLabels(headers)
-    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    table.setSelectionMode(
+        QAbstractItemView.SelectionMode.SingleSelection
+    )
+    table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
     table.setAlternatingRowColors(True)
     table.verticalHeader().setVisible(False)
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    table.horizontalHeader().setSectionResizeMode(
+        QHeaderView.ResizeMode.ResizeToContents
+    )
+    table.horizontalHeader().setSectionResizeMode(
+        0,
+        QHeaderView.ResizeMode.Stretch,
+    )
     return table
 
 
-def _set_row(table: QTableWidget, row: int, values: tuple[object, ...]) -> None:
+def _configure_table(
+    table: QTableWidget,
+    headers: tuple[str, ...],
+) -> None:
+    table.clearContents()
+    table.setRowCount(0)
+    table.setColumnCount(len(headers))
+    table.setHorizontalHeaderLabels(headers)
+    table.horizontalHeader().setSectionResizeMode(
+        QHeaderView.ResizeMode.ResizeToContents
+    )
+    table.horizontalHeader().setSectionResizeMode(
+        0,
+        QHeaderView.ResizeMode.Stretch,
+    )
+
+
+def _set_row(
+    table: QTableWidget,
+    row: int,
+    values: tuple[object, ...],
+) -> None:
     for column, value in enumerate(values):
         item = QTableWidgetItem(str(value))
         if isinstance(value, (int, float)):
-            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight
+                | Qt.AlignmentFlag.AlignVCenter
+            )
         table.setItem(row, column, item)
+
+
+def _dict_list(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _session_name(
+    sessions: list[dict],
+    session_id: str,
+) -> str:
+    return next(
+        (
+            str(item.get("name"))
+            for item in sessions
+            if item.get("id") == session_id
+        ),
+        session_id,
+    )
+
+
+def _role(item: dict) -> str:
+    return "Bazowa" if item.get("role") == "base" else "Porównywana"
+
+
+def _payload_change_details(
+    item: dict,
+) -> tuple[object, str, str, str]:
+    change_type = str(item.get("change_type") or "")
+    byte_index: object = item.get("byte_index", "—")
+    payload_hex = str(item.get("payload_hex") or "—")
+    baseline = (
+        item.get("baseline")
+        if isinstance(item.get("baseline"), dict)
+        else {}
+    )
+    current = (
+        item.get("current")
+        if isinstance(item.get("current"), dict)
+        else {}
+    )
+    if "byte_index" in item:
+        return (
+            byte_index,
+            "—",
+            _byte_summary(baseline),
+            _byte_summary(current),
+        )
+    if change_type == "dlc_set_changed":
+        return (
+            "—",
+            "—",
+            _dlc_summary(item.get("baseline_dlc_counts")),
+            _dlc_summary(item.get("current_dlc_counts")),
+        )
+    if change_type == "variant_comparison_truncated":
+        return (
+            "—",
+            "—",
+            str(item.get("baseline_untracked_frame_count", "—")),
+            str(item.get("current_untracked_frame_count", "—")),
+        )
+    if change_type in {
+        "new_payload_variant",
+        "missing_payload_variant",
+    }:
+        return (
+            "—",
+            payload_hex,
+            _variant_summary(baseline),
+            _variant_summary(current),
+        )
+    return "—", payload_hex, "—", "—"
+
+
+def _byte_summary(value: dict) -> str:
+    if not value:
+        return "—"
+    if value.get("is_constant"):
+        result = f"stały {value.get('constant_value_hex', '—')}"
+    else:
+        values = _dict_list(value.get("values"))
+        labels = [str(item.get("value_hex", "—")) for item in values[:8]]
+        suffix = (
+            f" +{len(values) - len(labels)}"
+            if len(values) > len(labels)
+            else ""
+        )
+        result = f"zmienny [{', '.join(labels)}]{suffix}"
+    presence = value.get("presence_percent")
+    if presence is not None and float(presence) != 100.0:
+        result += f", obecność {presence}%"
+    return result
+
+
+def _dlc_summary(value: object) -> str:
+    items = _dict_list(value)
+    if not items:
+        return "—"
+    return ", ".join(
+        f"{item.get('dlc', '—')}:{item.get('count', '—')}"
+        for item in items
+    )
+
+
+def _variant_summary(value: dict) -> str:
+    if not value:
+        return "—"
+    return (
+        f"{value.get('count', '—')} "
+        f"({value.get('share_percent', '—')}%)"
+    )
 
 
 def _number(value: object) -> str:
@@ -436,7 +811,11 @@ def _number(value: object) -> str:
 
 
 def _timestamp(value: str) -> str:
-    return value.replace("T", " ").replace("+00:00", "Z") if value else "—"
+    return (
+        value.replace("T", " ").replace("+00:00", "Z")
+        if value
+        else "—"
+    )
 
 
 __all__ = ["ComparisonAnalysisDialog", "ComparisonAnalysisTask"]
