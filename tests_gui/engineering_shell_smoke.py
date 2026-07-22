@@ -112,9 +112,9 @@ def main() -> None:
         assert close_button is not None
 
         assert window.explorer.tree.isHeaderHidden()
-        assert window.explorer.project_name.text() == "Engineering shell"
         root = window.explorer.model.item(0, 0)
         assert root is not None
+        assert root.text() == "Engineering shell"
         assert _find_node(root, "overview") is None
         assert _find_node(root, "live") is None
         assert _find_node(root, "filters") is not None
