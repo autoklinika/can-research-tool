@@ -9,7 +9,6 @@ from time import monotonic
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings, QThreadPool, Qt
-from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication
 
 from app.comparison_sets import ComparisonSetStore
@@ -48,20 +47,17 @@ def main() -> None:
         )
 
         dialog = ComparisonAnalysisDialog(project, comparison.id)
-        configure_comparison_analysis_window(dialog)
+        controller = configure_comparison_analysis_window(dialog)
         assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
-        shortcut = dialog.findChild(
-            QShortcut,
-            "comparisonAnalysisFullScreenShortcut",
-        )
-        assert shortcut is not None
+        assert controller.action.shortcut().toString() == "F11"
+        assert controller.action.objectName() == "comparisonAnalysisFullScreenAction"
         dialog.show()
         app.processEvents()
 
-        shortcut.activated.emit()
+        controller.action.trigger()
         app.processEvents()
         assert dialog.isFullScreen()
-        shortcut.activated.emit()
+        controller.action.trigger()
         app.processEvents()
         assert not dialog.isFullScreen()
 
