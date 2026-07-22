@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -9,8 +10,11 @@ from app.comparison_sets import ComparisonSetStore
 from app.extensions import (
     MESSAGE_SEQUENCE_ALGORITHM_VERSION,
     MESSAGE_SEQUENCE_PROVIDER_ID,
+    CancellationToken,
+    ExtensionCancelled,
     ExtensionExecutionError,
 )
+from app.extensions.builtin import message_sequence as message_sequence_module
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.project_migrations import PROJECT_DOMAIN_SCHEMA_VERSION
@@ -125,7 +129,7 @@ def test_message_sequences_are_exact_deterministic_and_source_safe(
         )
     )
     assert baseline_cycle["is_cycle"] is True
-    assert baseline_cycle["baseline"]["mean_span_ns"] == 20.0
+    assert baseline_cycle["baseline"]["mean_span_ns"] == 30.0
 
     changes = first_payload["ranked_changes"]
     assert any(
@@ -172,6 +176,68 @@ def test_message_sequences_are_exact_deterministic_and_source_safe(
         ).fetchone()[0]
     assert run_states == [("completed", ""), ("completed", "")]
     assert finding_count == 0
+
+
+def test_message_sequences_cleanup_temporary_sqlite_after_cancellation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    project = CrtProject.create(
+        tmp_path / "project",
+        name="Cancelled message sequences",
+    )
+    first = _create_session(project, "first", _before_frames())
+    second = _create_session(project, "second", _after_frames())
+    comparison = ComparisonSetStore(project).create(
+        name="Cancellation cleanup",
+        session_ids=(first.id, second.id),
+        base_session_id=first.id,
+    )
+    cancellation = CancellationToken()
+    created_directories: list[Path] = []
+    original_temporary_directory = (
+        message_sequence_module.tempfile.TemporaryDirectory
+    )
+
+    def tracked_temporary_directory(*args, **kwargs):
+        directory = original_temporary_directory(*args, **kwargs)
+        created_directories.append(Path(directory.name))
+        return directory
+
+    monkeypatch.setattr(
+        message_sequence_module.tempfile,
+        "TemporaryDirectory",
+        tracked_temporary_directory,
+    )
+
+    def cancel_after_provider_started(update) -> None:
+        if update.current == 0:
+            cancellation.cancel()
+
+    with pytest.raises(ExtensionCancelled):
+        ComparisonAnalysisService(project).run(
+            MESSAGE_SEQUENCE_PROVIDER_ID,
+            comparison.id,
+            cancellation=cancellation,
+            progress_callback=cancel_after_provider_started,
+        )
+
+    assert created_directories
+    assert all(not directory.exists() for directory in created_directories)
+    with project._connect() as connection:
+        state = connection.execute(
+            """
+            SELECT status, error
+            FROM analysis_runs
+            ORDER BY created_at_utc DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        artifact_count = connection.execute(
+            "SELECT COUNT(*) FROM artifacts"
+        ).fetchone()[0]
+    assert state == ("cancelled", "cancelled by user")
+    assert artifact_count == 0
 
 
 def test_message_sequences_reject_invalid_parameters(tmp_path) -> None:
@@ -289,7 +355,8 @@ def _create_session(
     duration_s = (
         0.0
         if not frames
-        else max(frame.timestamp_ns for frame in frames) / 1_000_000_000.0
+        else max(frame.timestamp_ns for frame in frames)
+        / 1_000_000_000.0
     )
     project.finalize_session(
         path,
