@@ -14,7 +14,21 @@ Gałąź jest stacked na:
 - PR #44,
 - commit bazowy `5f8522da066eedacfe9a1a237ddc5250a8e3c56b`.
 
-Sprawdź aktualny HEAD gałęzi i draft PR tego etapu przed wykonaniem jakichkolwiek zmian.
+PR etapu: #45, nadal draft. Sprawdź aktualny HEAD gałęzi przed wykonaniem jakichkolwiek zmian, ponieważ dokumentacja walidacyjna została dopisana po pierwotnym commicie implementacyjnym.
+
+## Aktualny status walidacji
+
+Ręczne uruchomienie w VS Code zostało potwierdzone przez użytkownika 22 lipca 2026 — funkcja działa.
+
+W chwili przygotowania tego handoffu:
+
+- PR #45 był otwarty, mergeable i draft,
+- nie było submitted reviews,
+- nie było review threads,
+- workflowy GitHub Actions dla wcześniejszego HEAD pozostawały w kolejce,
+- końcowa walidacja techniczna nie została jeszcze zamknięta.
+
+Nie oznaczaj PR jako ready i nie wykonuj merge bez wyraźnego polecenia użytkownika.
 
 ## Co zostało wykonane
 
@@ -80,15 +94,20 @@ Pełny opis znajduje się w:
 
 `docs/reports/COMPARISON_STATISTICS_PROVIDER_STAGE1_IMPLEMENTATION_REPORT_PL.md`
 
-## Walidacja do sprawdzenia w następnym czacie
+Plan kolejnego etapu znajduje się w:
 
-1. Sprawdź aktualny HEAD gałęzi.
-2. Sprawdź status, diff, review threads i CI draft PR.
-3. Nie oznaczaj PR jako ready i nie wykonuj merge bez wyraźnego polecenia użytkownika.
+`docs/reports/PAYLOAD_DIFFERENCE_PROVIDER_STAGE2_PLAN_PL.md`
+
+## Walidacja do wykonania w następnym czacie
+
+1. Sprawdź aktualny HEAD PR #45.
+2. Sprawdź status stacked PR #44 i PR #45, diff, review threads, reviews i CI.
+3. Zweryfikuj workflowy dla aktualnego HEAD, a nie dla starszego commita.
 4. Jeżeli CI nie jest zielone, odczytaj dokładny job i log przed modyfikacją kodu.
-5. Jeżeli CI jest zielone, wykonaj ręczną listę akceptacyjną z raportu.
+5. Jeżeli CI jest zielone, zapisz końcowy status w raporcie implementacyjnym.
 6. Zweryfikuj szczególnie Windows teardown po zamknięciu dialogu i `project.sqlite`.
-7. Potwierdź, że ponowne uruchomienie analizy daje identyczną treść i SHA-256 artefaktu.
+7. Potwierdź testem automatycznym, że ponowne uruchomienie analizy daje identyczną treść i SHA-256 artefaktu.
+8. Nie rozpoczynaj implementacji Stage 2 na gałęzi Stage 1. Po zielonym CI utwórz osobną gałąź stacked na aktualnym HEAD PR #45.
 
 ## Nienaruszalne kontrakty
 
@@ -108,7 +127,7 @@ Surowe ramki i pliki sesji pozostają niezmiennym źródłem prawdy.
 
 ## Następny proponowany etap
 
-Po ręcznej akceptacji i zielonym CI rozpocznij:
+Po ręcznej akceptacji i zielonym CI rozpocznij na osobnej gałęzi:
 
 `Payload Difference Provider Stage 2`
 
