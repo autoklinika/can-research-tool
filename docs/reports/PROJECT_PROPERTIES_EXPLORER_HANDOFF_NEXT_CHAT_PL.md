@@ -14,9 +14,13 @@ Issue: #40 `Usuń nagłówek i przyciski nad drzewem projektu`
 
 Etap jest funkcjonalnie zakończony i ręcznie potwierdzony przez użytkownika jako działający.
 
-Aktualny funkcjonalny HEAD przed końcową aktualizacją tego raportu:
+Końcowy funkcjonalny HEAD przed raportem:
 
 `f39fa5bea5a61da01c88e4c68b480d0cc30bd62e`
+
+Końcowy HEAD gałęzi z tym raportem:
+
+`344990685c08def4b41a52693c325f27d2f9775d`
 
 PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34), którego końcowy HEAD po poprawkach review to:
 
@@ -98,14 +102,14 @@ Dla końcowego HEAD PR #34 `b74b20225e7d79a695a81931ced17262329cfd8d` potwierdzo
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-Dla funkcjonalnego HEAD PR #35 `f39fa5bea5a61da01c88e4c68b480d0cc30bd62e` potwierdzono:
+Dla końcowego HEAD PR #35 `344990685c08def4b41a52693c325f27d2f9775d` potwierdzono:
 
 - `Tests` — PASS,
 - `GUI Regressions` — PASS,
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-Końcowa aktualizacja tego raportu uruchamia ostatni pełny przebieg CI PR #35 względem aktualnej bazy PR #34. `Windows Self-Hosted CI` nie blokuje tego etapu, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
+`Windows Self-Hosted CI` nie blokuje tych etapów, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
 
 Copilot został wykorzystany jako dodatkowy recenzent i wskazał kilka rzeczywistych przypadków brzegowych, które poprawiono. Ostatnia próba automatycznego review została zatrzymana przez limit przydziału Copilota; końcowe zmiany są zabezpieczone dedykowanymi smoke testami i pełnym GitHub-hosted CI.
 
