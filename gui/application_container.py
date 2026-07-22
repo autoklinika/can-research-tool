@@ -25,8 +25,8 @@ from .raw_frame_grouping import (
     GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
 from .session_management_integration import SessionManagementIntegration
-from .session_statistics_table_view import (
-    SessionStatisticsTableSessionViewWidget as SessionViewWidget,
+from .session_statistics_visual_summary import (
+    VisualSessionStatisticsViewWidget as SessionViewWidget,
 )
 from .study_area_view import StudyAreaViewWidget
 
