@@ -101,6 +101,26 @@ def main() -> None:
         assert overview_title is not None
         assert overview_title.text() == "Edited project"
 
+        project.update_manifest(default_bitrate=666_000)
+        custom_dialog = original_factory(window, project)
+        assert custom_dialog.bitrate_combo.currentData() == 666_000
+        custom_dialog.description_edit.setPlainText("Custom bitrate description")
+        window.services.create_project_properties_dialog = (
+            lambda _parent, _project: custom_dialog
+        )
+        try:
+            QTimer.singleShot(0, custom_dialog.accept)
+            action.trigger()
+        finally:
+            window.services.create_project_properties_dialog = original_factory
+        app.processEvents()
+
+        assert project.manifest.default_bitrate == 666_000
+        assert project.manifest.description == "Custom bitrate description"
+        assert fake_live.bitrate_combo.findData(666_000) >= 0
+        assert fake_live.bitrate_combo.currentData() == 666_000
+        assert "666 kbit/s" in window.project_context_label.text()
+
         saved_manifest = project.manifest
         failing_dialog = original_factory(window, project)
         failing_dialog.name_edit.setText("Unsaved project")
@@ -124,9 +144,11 @@ def main() -> None:
 
         reopened = CrtProject.open(original_root)
         assert reopened.manifest.name == "Edited project"
+        assert reopened.manifest.default_bitrate == 666_000
         assert reopened.database_path == original_database_path
 
         failing_dialog.close()
+        custom_dialog.close()
         dialog.close()
         window.navigator.widgets.pop("live-capture", None)
         fake_live.deleteLater()
@@ -139,6 +161,7 @@ def main() -> None:
 
         saved_manifest = None
         failing_dialog = None
+        custom_dialog = None
         fake_live = None
         explorer_root = None
         overview_title = None
