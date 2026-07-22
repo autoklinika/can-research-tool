@@ -84,6 +84,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         project = self.project
         if project is None:
             return
+        previous_manifest = project.manifest
         try:
             project.update_manifest(
                 name=dialog.project_name(),
@@ -92,6 +93,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
                 default_receive_mode=dialog.receive_mode(),
             )
         except Exception as exc:
+            project.manifest = previous_manifest
             QMessageBox.critical(
                 self,
                 "Nie można zapisać właściwości projektu",
@@ -106,7 +108,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         if self._has_active_capture():
             self._append_output(
                 "Trwająca rejestracja zachowuje ustawienia wybrane przy jej uruchomieniu; "
-                "nowe wartości domyślne dotyczą kolejnych sesji."
+                "pola domyślne widoku Live przygotowano dla kolejnej sesji."
             )
 
     def _refresh_project_identity(self) -> None:
@@ -120,6 +122,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         )
         self.explorer.refresh()
         self._update_project_context()
+        self._refresh_live_capture_defaults()
 
         overview = self.navigator.widget("project-overview")
         if overview is None:
@@ -138,3 +141,24 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
             self.tabs.setCurrentWidget(previous_widget)
 
         self.settings.setValue("project/lastPath", str(Path(project.root)))
+
+    def _refresh_live_capture_defaults(self) -> None:
+        project = self.project
+        if project is None:
+            return
+
+        live_capture = self.navigator.widget("live-capture")
+        if live_capture is None:
+            return
+
+        bitrate_combo = getattr(live_capture, "bitrate_combo", None)
+        if bitrate_combo is not None:
+            bitrate_index = bitrate_combo.findData(project.manifest.default_bitrate)
+            if bitrate_index >= 0:
+                bitrate_combo.setCurrentIndex(bitrate_index)
+
+        mode_combo = getattr(live_capture, "mode_combo", None)
+        if mode_combo is not None:
+            mode_index = mode_combo.findData(project.manifest.default_receive_mode)
+            if mode_index >= 0:
+                mode_combo.setCurrentIndex(mode_index)
