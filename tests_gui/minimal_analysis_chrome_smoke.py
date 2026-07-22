@@ -64,6 +64,20 @@ def main() -> int:
         assert widget.artifact_selector_bar.isHidden()
         assert widget.artifact_summary_line.isHidden()
 
+        active_task = object()
+        widget._analysis_task = active_task
+        widget.analysis_progress.setVisible(True)
+        widget.analysis_status.setText("Analiza w toku…")
+        widget.analysis_status.setVisible(True)
+        widget._refresh_artifacts()
+        assert widget._analysis_task is active_task
+        assert not widget.analysis_progress.isHidden()
+        assert not widget.analysis_status.isHidden()
+        widget._analysis_task = None
+        widget._sync_idle_activity_state()
+        assert widget.analysis_progress.isHidden()
+        assert widget.analysis_status.isHidden()
+
         widget.run_analysis_button.click()
         assert widget._analysis_task is not None
         assert not widget.analysis_progress.isHidden()
