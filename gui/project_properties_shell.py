@@ -6,7 +6,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from app.project import CrtProject
-from app.project_catalog import ProjectCatalog
+from app.project_catalog import ProjectCatalog, load_project_profile, save_project_profile
 
 from .project_catalog_dialog import ProjectCatalogDialog
 from .project_properties_dialog import ProjectPropertiesDialog
@@ -35,7 +35,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         self.project_properties_action = QAction("Właściwości projektu…", self)
         self.project_properties_action.setObjectName("projectPropertiesAction")
         self.project_properties_action.setToolTip(
-            "Edytuj nazwę, opis i domyślne ustawienia projektu bez zmiany folderu"
+            "Edytuj dane projektu, pojazdu i sterownika ECU bez zmiany folderu"
         )
         self.project_properties_action.setEnabled(False)
         self.project_properties_action.triggered.connect(self._edit_project)
@@ -162,6 +162,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         if project is None:
             return
         previous_manifest = project.manifest
+        previous_profile = load_project_profile(project.root)
         try:
             project.update_manifest(
                 name=dialog.project_name(),
@@ -169,9 +170,18 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
                 default_bitrate=dialog.bitrate(),
                 default_receive_mode=dialog.receive_mode(),
             )
+            save_project_profile(project.root, dialog.profile())
             self.project_catalog.register_project(project.root)
         except Exception as exc:
             project.manifest = previous_manifest
+            try:
+                project._write_manifest()
+                save_project_profile(project.root, previous_profile)
+                self.project_catalog.register_project(project.root)
+            except Exception as rollback_exc:
+                self._append_output(
+                    f"Nie udało się w pełni wycofać zmian właściwości projektu: {rollback_exc}"
+                )
             QMessageBox.critical(
                 self,
                 "Nie można zapisać właściwości projektu",
@@ -181,7 +191,7 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
 
         self._refresh_project_identity()
         self._append_output(
-            f"Zaktualizowano właściwości projektu: {project.manifest.name}"
+            f"Zaktualizowano właściwości projektu, pojazdu i ECU: {project.manifest.name}"
         )
         if self._has_active_capture():
             self._append_output(
