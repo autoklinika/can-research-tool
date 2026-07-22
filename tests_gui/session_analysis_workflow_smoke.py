@@ -10,13 +10,14 @@ from time import monotonic, sleep
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabWidget
 
 from app.extensions.builtin import SESSION_STATISTICS_PROVIDER_ID
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
 from gui.application_container import ApplicationContainer
+from gui.project_navigator import CloseTabResult
 
 
 def main() -> int:
@@ -56,7 +57,16 @@ def main() -> int:
         source_hash = _sha256(session_path)
 
         container = ApplicationContainer()
-        widget = container.create_session_view(session_path, project=project)
+        tabs = QTabWidget()
+        navigator = container.create_project_navigator(tabs)
+        output_messages: list[str] = []
+        widget = navigator.open_session(
+            session_path,
+            project=project,
+            inspector_sink=lambda _text: None,
+            output_sink=output_messages.append,
+        )
+        assert widget.project is project
         assert widget.analysis_provider_combo.count() == 1
         assert (
             widget.analysis_provider_combo.currentData()
@@ -85,18 +95,33 @@ def main() -> int:
         artifact = widget._analysis_artifacts[0]
         assert project.absolute_path(artifact.relative_path).is_file()
         assert _sha256(session_path) == source_hash
+        assert any("Analiza crt.analysis.session_statistics zakończona" in text for text in output_messages)
 
-        _dispose_widget(app, widget)
+        assert navigator.close_session(session_path) is CloseTabResult.CLOSED
+        _flush_deferred(app)
         del widget
         collect()
 
-        reopened = container.create_session_view(session_path, project=project)
+        reopened = navigator.open_session(
+            session_path,
+            project=project,
+            inspector_sink=lambda _text: None,
+            output_sink=output_messages.append,
+        )
+        assert reopened.project is project
         assert reopened.artifact_table.rowCount() == 1
         assert reopened.tabs.tabText(reopened.analysis_tab_index) == "Analizy (1)"
         assert "PODSUMOWANIE SESJI" in reopened.artifact_details.toPlainText()
         assert _sha256(session_path) == source_hash
-        _dispose_widget(app, reopened)
+        assert navigator.close_session(session_path) is CloseTabResult.CLOSED
+        _flush_deferred(app)
+
+        tabs.close()
+        tabs.deleteLater()
+        _flush_deferred(app)
         del reopened
+        del navigator
+        del tabs
         del project
         collect()
     return 0
@@ -113,12 +138,9 @@ def _wait_until(app: QApplication, predicate, *, timeout_s: float) -> None:
     app.processEvents()
 
 
-def _dispose_widget(app: QApplication, widget) -> None:
-    widget.shutdown()
+def _flush_deferred(app: QApplication) -> None:
     QThreadPool.globalInstance().waitForDone(5_000)
-    widget.close()
     app.processEvents()
-    widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
 
