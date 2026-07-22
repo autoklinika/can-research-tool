@@ -110,4 +110,4 @@ Przy ekstremalnej liczbie unikalnych payloadów sam wynik może więc być bardz
 
 ## Status
 
-Implementacja i testy zostały zapisane na osobnej gałęzi stacked na Stage 2. Pełny pytest, Linux GUI CI i Windows GitHub-hosted CI pozostają do potwierdzenia przez GitHub Actions.
+Implementacja i testy zostały zapisane na osobnej gałęzi stacked na Stage 2. Aktualny HEAD obejmuje także naprawę edycji i usuwania zestawów analizowanych. GitHub Actions dla tego HEAD zostały uruchomione; pełny pytest, Linux GUI CI i Windows GitHub-hosted CI pozostają do końcowego potwierdzenia.
