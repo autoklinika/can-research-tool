@@ -49,8 +49,10 @@ def test_comparison_set_crud_preserves_sessions_and_schema(tmp_path) -> None:
     assert updated.base_session_id == after.id
     assert store.get(updated.id) == updated
 
-    store.delete(updated.id)
+    history_preserved = store.delete(updated.id)
+    assert history_preserved is False
     assert store.list() == []
+    assert store.list(include_deleted=True) == []
     assert {session.id for session in project.list_sessions()} == {
         before.id,
         after.id,
@@ -61,19 +63,84 @@ def test_comparison_set_crud_preserves_sessions_and_schema(tmp_path) -> None:
         assert _sha256(project.absolute_path(session.relative_path)) == hashes[session.id]
 
 
-def test_comparison_set_used_by_analysis_is_immutable(tmp_path) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Locked comparison")
+def test_analysed_comparison_set_edit_creates_new_active_version(tmp_path) -> None:
+    project = CrtProject.create(tmp_path / "project", name="Versioned comparison")
     first = _create_session(project, "first", frame_count=1)
     second = _create_session(project, "second", frame_count=1)
+    third = _create_session(project, "third", frame_count=1)
     store = ComparisonSetStore(project)
-    comparison_set = store.create(
-        name="Locked source",
+    original = store.create(
+        name="Original source",
         session_ids=(first.id, second.id),
         base_session_id=first.id,
     )
 
     domain_store = ProjectDomainStore(project)
-    domain_store.create_analysis_run(
+    run = domain_store.create_analysis_run(
+        provider_id="crt.test.comparison",
+        provider_version="1.0.0",
+        algorithm_version="1",
+        inputs=(AnalysisInput(kind="comparison_set", source_id=original.id),),
+    )
+
+    assert store.analysis_run_count(original.id) == 1
+    assert store.is_locked(original.id)
+    with pytest.raises(ValueError, match="referenced by analysis runs"):
+        store.update(
+            original.id,
+            name="Changed in place",
+            session_ids=(first.id, second.id),
+            base_session_id=second.id,
+        )
+
+    replacement = store.fork(
+        original.id,
+        name="Revised source",
+        session_ids=(second.id, first.id, third.id),
+        base_session_id=second.id,
+    )
+
+    assert replacement.id != original.id
+    assert replacement.name == "Revised source"
+    assert replacement.session_ids == (second.id, first.id, third.id)
+    assert replacement.base_session_id == second.id
+    assert store.list() == [replacement]
+    assert not store.is_locked(replacement.id)
+
+    historical = store.get(original.id)
+    assert ComparisonSetStore.is_deleted(historical)
+    assert historical.name == original.name
+    assert historical.session_ids == original.session_ids
+    assert historical.base_session_id == original.base_session_id
+    assert store.analysis_run_count(original.id) == 1
+
+    with project._connect() as connection:
+        input_id = connection.execute(
+            """
+            SELECT input_id
+            FROM analysis_inputs
+            WHERE analysis_run_id = ? AND input_kind = 'comparison_set'
+            """,
+            (run.id,),
+        ).fetchone()[0]
+    assert input_id == original.id
+
+    all_sets = store.list(include_deleted=True)
+    assert {item.id for item in all_sets} == {original.id, replacement.id}
+
+
+def test_delete_analysed_comparison_hides_set_and_preserves_history(tmp_path) -> None:
+    project = CrtProject.create(tmp_path / "project", name="Delete comparison")
+    first = _create_session(project, "first", frame_count=1)
+    second = _create_session(project, "second", frame_count=1)
+    store = ComparisonSetStore(project)
+    comparison_set = store.create(
+        name="Analysed source",
+        session_ids=(first.id, second.id),
+        base_session_id=first.id,
+    )
+    domain_store = ProjectDomainStore(project)
+    run = domain_store.create_analysis_run(
         provider_id="crt.test.comparison",
         provider_version="1.0.0",
         algorithm_version="1",
@@ -82,18 +149,26 @@ def test_comparison_set_used_by_analysis_is_immutable(tmp_path) -> None:
         ),
     )
 
+    history_preserved = store.delete(comparison_set.id)
+
+    assert history_preserved is True
+    assert store.list() == []
+    historical = store.get(comparison_set.id)
+    assert ComparisonSetStore.is_deleted(historical)
     assert store.analysis_run_count(comparison_set.id) == 1
-    assert store.is_locked(comparison_set.id)
-    with pytest.raises(ValueError, match="referenced by analysis runs"):
-        store.update(
-            comparison_set.id,
-            name="Changed",
-            session_ids=(first.id, second.id),
-            base_session_id=second.id,
-        )
-    with pytest.raises(ValueError, match="referenced by analysis runs"):
-        store.delete(comparison_set.id)
-    assert store.get(comparison_set.id) == comparison_set
+    with project._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM analysis_runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM analysis_inputs
+            WHERE analysis_run_id = ? AND input_id = ?
+            """,
+            (run.id, comparison_set.id),
+        ).fetchone()[0] == 1
 
 
 def test_comparison_set_rejects_invalid_session_selection(tmp_path) -> None:
