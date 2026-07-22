@@ -208,7 +208,7 @@ class FinalStreamingLiveFilterIntegration(StreamingLiveFilterIntegration):
             label.setText(f"Filtry: oczekiwanie na preset | Include: {mode.value.upper()}")
         elif names:
             label.setText(
-                f"Aktywne presety: {names} | zastosowanie Live: WYŁĄCZONE | "
+                f"{names} | zastosowanie Live: WYŁĄCZONE | "
                 f"Include: {mode.value.upper()}"
             )
         else:
