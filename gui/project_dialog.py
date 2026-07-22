@@ -151,10 +151,10 @@ class NewProjectDialog(QDialog):
 
         location_row = QHBoxLayout()
         self.location_edit = QLineEdit(str((Path.home() / "CRT_Projects").resolve()))
-        browse = QPushButton("Wybierz…")
-        browse.clicked.connect(self._browse)
+        self.location_browse_button = QPushButton("Wybierz…")
+        self.location_browse_button.clicked.connect(self._browse)
         location_row.addWidget(self.location_edit, 1)
-        location_row.addWidget(browse)
+        location_row.addWidget(self.location_browse_button)
         location = QWidget()
         location.setLayout(location_row)
         form.addRow("Folder nadrzędny:", location)
