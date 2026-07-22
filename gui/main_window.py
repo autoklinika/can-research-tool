@@ -158,8 +158,6 @@ class MainWindow(QMainWindow):
         self.explorer.open_session.connect(self._open_session)
         self.explorer.open_area.connect(self._open_area)
         self.explorer.open_decoders.connect(self._open_decoders)
-        self.explorer.import_requested.connect(self._import_log)
-        self.explorer.add_area_requested.connect(self._add_study_area)
         self.explorer_dock = QDockWidget("Projekt", self)
         self.explorer_dock.setObjectName("projectExplorerDock")
         self.explorer_dock.setWidget(self.explorer)
