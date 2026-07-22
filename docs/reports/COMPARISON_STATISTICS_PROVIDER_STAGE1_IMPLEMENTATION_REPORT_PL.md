@@ -10,7 +10,7 @@ Gałąź jest stacked na:
 
 `agent/comparison-sets-stage1` — PR #44, baza `5f8522da066eedacfe9a1a237ddc5250a8e3c56b`.
 
-PR tego etapu pozostaje draftem do czasu zakończenia GitHub Actions i ręcznej oceny widoku. Nie należy oznaczać go jako ready ani wykonywać merge bez wyraźnej decyzji użytkownika.
+PR tego etapu pozostaje draftem. Ręczna ocena działania w VS Code została potwierdzona 22 lipca 2026, natomiast końcowe zamknięcie walidacji nadal wymaga zielonego GitHub Actions. Nie należy oznaczać PR jako ready ani wykonywać merge bez wyraźnej decyzji użytkownika.
 
 ## Cel etapu
 
@@ -175,6 +175,21 @@ W środowisku roboczym wykonano:
 
 Pełnego `pytest` i smoke Qt nie można było uruchomić w lokalnym kontenerze, ponieważ nie jest w nim dostępny checkout repozytorium ani PySide6. Źródłem pełnej walidacji pozostaje GitHub Actions po utworzeniu PR.
 
+## Walidacja ręczna — 22 lipca 2026
+
+Użytkownik uruchomił gałąź w VS Code i potwierdził, że funkcja działa. Potwierdzenie obejmuje praktyczne uruchomienie przygotowanego etapu w docelowym środowisku roboczym.
+
+Status akceptacji:
+
+- uruchomienie w VS Code: **potwierdzone**,
+- działanie widoku i providera: **potwierdzone przez użytkownika**,
+- review threads: **brak** w chwili aktualizacji raportu,
+- submitted reviews: **brak** w chwili aktualizacji raportu,
+- GitHub Actions: **oczekuje na zakończenie**,
+- PR #45: nadal **draft**, bez zgody na ready lub merge.
+
+Ręczne potwierdzenie nie zastępuje automatycznej walidacji Linux/Windows. Etap można uznać za funkcjonalnie zaakceptowany, ale jego końcowy status techniczny pozostaje warunkowy do czasu zielonego CI dla aktualnego HEAD.
+
 ## Ręczna lista akceptacyjna
 
 1. Utworzyć projekt z co najmniej dwiema zapisanymi sesjami.
@@ -188,11 +203,15 @@ Pełnego `pytest` i smoke Qt nie można było uruchomić w lokalnym kontenerze, 
 
 ## Następny etap
 
-Po akceptacji Stage 1 właściwym kolejnym krokiem jest `Payload Difference Provider Stage 2`:
+Po zielonym CI Stage 1 właściwym kolejnym krokiem jest `Payload Difference Provider Stage 2`:
 
 - warianty payloadów dla wspólnych CAN ID,
 - bajty stałe i zmienne,
 - wartości obecne tylko w wybranych sesjach,
 - deterministyczny artefakt z odwołaniem do sesji źródłowych.
+
+Szczegółowy plan znajduje się w:
+
+`docs/reports/PAYLOAD_DIFFERENCE_PROVIDER_STAGE2_PLAN_PL.md`
 
 Synchronizacja logów powinna pozostać osobnym etapem, ponieważ wymaga jawnego kontraktu punktów odniesienia i nie może być pozorowana przez prostą normalizację czasu.
