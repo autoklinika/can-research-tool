@@ -50,7 +50,10 @@ def main() -> None:
         controller = configure_comparison_analysis_window(dialog)
         assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
         assert controller.action.shortcut().toString() == "F11"
-        assert controller.action.objectName() == "comparisonAnalysisFullScreenAction"
+        assert (
+            controller.action.objectName()
+            == "comparisonAnalysisFullScreenAction"
+        )
         dialog.show()
         app.processEvents()
 
@@ -61,7 +64,7 @@ def main() -> None:
         app.processEvents()
         assert not dialog.isFullScreen()
 
-        assert dialog.provider_combo.count() == 2
+        assert dialog.provider_combo.count() == 3
         assert dialog.run_button.isEnabled()
         assert dialog.artifact_combo.count() == 0
         dialog.run_button.click()
@@ -84,7 +87,10 @@ def main() -> None:
             artifact_count = connection.execute(
                 "SELECT COUNT(*) FROM artifacts"
             ).fetchone()[0]
-        assert ProjectDomainStore(project).schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
+        assert (
+            ProjectDomainStore(project).schema_version
+            == PROJECT_DOMAIN_SCHEMA_VERSION
+        )
         assert artifact_count == 1
 
         dialog.close()
@@ -102,7 +108,10 @@ def main() -> None:
     print("Comparison statistics GUI smoke: OK")
 
 
-def _wait_for_analysis(app: QApplication, dialog: ComparisonAnalysisDialog) -> None:
+def _wait_for_analysis(
+    app: QApplication,
+    dialog: ComparisonAnalysisDialog,
+) -> None:
     deadline = monotonic() + 15.0
     while dialog._task is not None:
         QThreadPool.globalInstance().waitForDone(50)
@@ -134,7 +143,11 @@ def _after_frames() -> list[CanFrame]:
     ]
 
 
-def _frame(sequence: int, timestamp_ns: int, arbitration_id: int) -> CanFrame:
+def _frame(
+    sequence: int,
+    timestamp_ns: int,
+    arbitration_id: int,
+) -> CanFrame:
     return CanFrame(
         sequence=sequence,
         timestamp_ns=timestamp_ns,
@@ -145,20 +158,37 @@ def _frame(sequence: int, timestamp_ns: int, arbitration_id: int) -> CanFrame:
     )
 
 
-def _create_session(project: CrtProject, name: str, frames: list[CanFrame]):
+def _create_session(
+    project: CrtProject,
+    name: str,
+    frames: list[CanFrame],
+):
     path = project.live_sessions_dir / f"{name}.crt.jsonl"
-    capture = CaptureSession(name=name, source="test", bitrate=250_000, channel=0)
+    capture = CaptureSession(
+        name=name,
+        source="test",
+        bitrate=250_000,
+        channel=0,
+    )
     writer = SessionStreamWriter(capture, path)
     writer.open()
     for frame in frames:
         writer.append(frame)
     writer.close({"clean_close": True})
-    record = project.register_session(path, name=name, source="test", status="ready")
+    record = project.register_session(
+        path,
+        name=name,
+        source="test",
+        status="ready",
+    )
     project.finalize_session(
         path,
         frame_count=len(frames),
         marker_count=0,
-        duration_s=max(frame.timestamp_ns for frame in frames) / 1_000_000_000.0,
+        duration_s=(
+            max(frame.timestamp_ns for frame in frames)
+            / 1_000_000_000.0
+        ),
     )
     return project.session_by_path(path) or record
 
