@@ -9,9 +9,11 @@ from app.comparison_sets import ComparisonSetStore
 from app.extensions import (
     COMPARISON_STATISTICS_ALGORITHM_VERSION,
     COMPARISON_STATISTICS_PROVIDER_ID,
+    PAYLOAD_DIFFERENCE_PROVIDER_ID,
     ComparisonStatisticsProvider,
     ExtensionExecutionError,
     ExtensionRegistry,
+    PayloadDifferenceProvider,
     register_builtin_comparison_extensions,
 )
 from app.models import CanFrame, CaptureSession
@@ -24,15 +26,21 @@ def test_comparison_registry_exposes_statistics_provider() -> None:
     registry = ExtensionRegistry()
     manifests = register_builtin_comparison_extensions(registry)
 
-    assert manifests == (ComparisonStatisticsProvider.manifest,)
+    assert manifests == (
+        ComparisonStatisticsProvider.manifest,
+        PayloadDifferenceProvider.manifest,
+    )
     assert manifests[0].id == COMPARISON_STATISTICS_PROVIDER_ID
     assert manifests[0].inputs == ("comparison_set",)
     assert manifests[0].outputs == ("comparison_statistics",)
     assert manifests[0].type.value == "comparison"
     assert registry.get_comparison(COMPARISON_STATISTICS_PROVIDER_ID).manifest == manifests[0]
+    assert registry.get_comparison(PAYLOAD_DIFFERENCE_PROVIDER_ID).manifest == manifests[1]
 
 
-def test_comparison_statistics_are_persistent_deterministic_and_source_safe(tmp_path) -> None:
+def test_comparison_statistics_are_persistent_deterministic_and_source_safe(
+    tmp_path,
+) -> None:
     project = CrtProject.create(tmp_path / "project", name="Comparison statistics")
     before = _create_session(project, "before", _before_frames())
     after = _create_session(project, "after", _after_frames())
@@ -117,7 +125,9 @@ def test_comparison_statistics_are_persistent_deterministic_and_source_safe(tmp_
     assert service.store.schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
 
     for session in (before, after):
-        assert _sha256(project.absolute_path(session.relative_path)) == source_hashes[session.id]
+        assert _sha256(project.absolute_path(session.relative_path)) == source_hashes[
+            session.id
+        ]
 
     assert updates[0].current == 0
     assert updates[-1].current == updates[-1].total == 13
@@ -145,14 +155,18 @@ def test_comparison_uses_first_session_as_effective_baseline(tmp_path) -> None:
         COMPARISON_STATISTICS_PROVIDER_ID,
         comparison.id,
     )
-    payload = ComparisonAnalysisService(project).artifacts.read_json(result.artifacts[0])
+    payload = ComparisonAnalysisService(project).artifacts.read_json(
+        result.artifacts[0]
+    )
 
     assert payload["comparison_set"]["base_session_id"] is None
     assert payload["comparison_set"]["effective_baseline_session_id"] == first.id
     assert payload["sessions"][0]["role"] == "base"
 
 
-def test_comparison_rejects_invalid_threshold_without_touching_sources(tmp_path) -> None:
+def test_comparison_rejects_invalid_threshold_without_touching_sources(
+    tmp_path,
+) -> None:
     project = CrtProject.create(tmp_path / "project", name="Invalid parameter")
     first = _create_session(project, "first", [_frame(0, 0, 0x100)])
     second = _create_session(project, "second", [_frame(0, 0, 0x100)])
@@ -166,7 +180,10 @@ def test_comparison_rejects_invalid_threshold_without_touching_sources(tmp_path)
         for session in (first, second)
     }
 
-    with pytest.raises(ExtensionExecutionError, match="frequency_change_threshold_percent"):
+    with pytest.raises(
+        ExtensionExecutionError,
+        match="frequency_change_threshold_percent",
+    ):
         ComparisonAnalysisService(project).run(
             COMPARISON_STATISTICS_PROVIDER_ID,
             comparison.id,
