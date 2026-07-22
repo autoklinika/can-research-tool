@@ -64,23 +64,44 @@ Aktualne zachowanie:
 - znacznik ukrycia jest zapisany w istniejącym `parameters_json`, bez migracji schematu,
 - status GUI brzmi `Z analizami`, a opis wyjaśnia wersjonowanie i zachowanie historii.
 
+## Wspólny F11 dla dużych okien
+
+Dodano `gui/window_fullscreen.py` z jednym kontrolerem pełnego ekranu. Ponowne `F11` przywraca poprzedni stan zwykły lub zmaksymalizowany.
+
+Obsługiwane są:
+
+- główne okno CRT — dodatkowo akcja `Widok → Pełny ekran`,
+- analiza porównawcza — także natywny przycisk maksymalizacji,
+- okno globalnych filtrów,
+- okno wyszukiwania w logach,
+- katalog projektów — także natywny przycisk maksymalizacji.
+
+Małe dialogi formularzy i komunikatów nie otrzymały `F11`.
+
 ## Pliki kluczowe
 
 - `app/extensions/builtin/payload_difference_exact.py`
 - `app/extensions/builtin/__init__.py`
 - `app/comparison_sets.py`
 - `gui/comparison_sets_view.py`
+- `gui/comparison_sets_analysis_view.py`
+- `gui/window_fullscreen.py`
+- `gui/project_properties_shell.py`
+- `gui/filter_manager_window.py`
 - `tests/test_payload_difference_provider.py`
 - `tests/test_payload_difference_exact_storage.py`
 - `tests/test_comparison_sets.py`
 - `tests_gui/comparison_sets_smoke.py`
+- `tests_gui/application_startup_smoke.py`
+- `tests_gui/filter_manager_window_smoke.py`
+- `tests_gui/comparison_statistics_smoke.py`
 - `.github/workflows/gui-regression.yml`
 - `docs/reports/PAYLOAD_DIFFERENCE_EXACT_VARIANTS_STAGE2_1_IMPLEMENTATION_REPORT_PL.md`
 
 ## Walidacja do wykonania
 
 1. Sprawdź HEAD i bazę draft PR Stage 2.1.
-2. Sprawdź diff względem Stage 2, w tym cztery pliki naprawy zarządzania zestawami.
+2. Sprawdź diff względem Stage 2, w tym naprawę zarządzania zestawami i wspólny kontroler `F11`.
 3. Sprawdź review threads i submitted reviews.
 4. Sprawdź Linux `GUI Regressions`.
 5. Sprawdź pełny `Tests`.
@@ -92,8 +113,14 @@ Aktualne zachowanie:
 11. Potwierdź cleanup SQLite po anulowaniu na Windows.
 12. Potwierdź edycję analizowanego zestawu jako nową wersję.
 13. Potwierdź usunięcie analizowanego zestawu przy zachowaniu analysis runs i artefaktów.
-14. Uruchom ręcznie `tests_gui/comparison_sets_smoke.py`.
-15. Uruchom ręcznie `tests_gui/payload_difference_smoke.py`.
+14. Potwierdź `F11` głównego okna oraz powrót do poprzedniego stanu.
+15. Potwierdź `F11` analizy porównawczej, filtrów i wyszukiwania.
+16. Sprawdź natywną maksymalizację analizy porównawczej i katalogu projektów na Windows.
+17. Uruchom ręcznie `tests_gui/application_startup_smoke.py`.
+18. Uruchom ręcznie `tests_gui/filter_manager_window_smoke.py`.
+19. Uruchom ręcznie `tests_gui/comparison_statistics_smoke.py`.
+20. Uruchom ręcznie `tests_gui/comparison_sets_smoke.py`.
+21. Uruchom ręcznie `tests_gui/payload_difference_smoke.py`.
 
 ## Szczególnie ważne przypadki
 
@@ -108,6 +135,7 @@ Aktualne zachowanie:
 - bezpośrednie `update()` analizowanego zestawu ma pozostać zabronione,
 - wersjonowana edycja ma zachować pierwotny `analysis_inputs.input_id`,
 - usunięcie analizowanego zestawu nie może usuwać `analysis_runs`, artefaktów ani sesji,
+- `F11` ma mieć kontekst bieżącego okna, aby nie przełączać innego okna CRT,
 - provider nie tworzy automatycznych findings.
 
 ## Znane ograniczenie
