@@ -35,6 +35,19 @@ def main() -> None:
     app.processEvents()
     assert not window.isFullScreen()
 
+    window._open_log_search()
+    app.processEvents()
+    search_window = window._log_search_window
+    assert search_window is not None
+    assert search_window.full_screen_action.shortcut().toString() == "F11"
+    search_window.full_screen_action.trigger()
+    app.processEvents()
+    assert search_window.isFullScreen()
+    search_window.full_screen_action.trigger()
+    app.processEvents()
+    assert not search_window.isFullScreen()
+    search_window.close()
+
     started = time.monotonic()
     QTimer.singleShot(250, app.quit)
     exit_code = app.exec()
