@@ -3,7 +3,10 @@ from __future__ import annotations
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QWidget
 
-from .session_artifact_selector import CompactArtifactSessionViewWidget
+from .session_artifact_selector import (
+    CompactArtifactSessionViewWidget,
+    _selector_text,
+)
 
 
 class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
@@ -11,6 +14,7 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
 
     def __init__(self, *args, **kwargs) -> None:
         self._minimal_chrome_ready = False
+        self._artifact_catalog_error = False
         self.artifact_selector_bar: QWidget | None = None
         super().__init__(*args, **kwargs)
 
@@ -24,11 +28,57 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
         self._sync_idle_activity_state()
 
     def _load_artifacts(self, *, preferred_artifact_id: str = "") -> None:
-        super()._load_artifacts(preferred_artifact_id=preferred_artifact_id)
+        service = self._analysis_service
+        record = self._session_record
+        catalog_error = ""
+        if service is None or record is None:
+            self._analysis_artifacts = ()
+        else:
+            try:
+                self._analysis_artifacts = service.list_artifacts(record.id)
+            except Exception as exc:
+                self._analysis_artifacts = ()
+                catalog_error = f"Nie można odczytać katalogu artefaktów: {exc}"
+
+        selector = self.artifact_selector
+        self._artifact_catalog_error = bool(catalog_error)
+        if catalog_error:
+            self.analysis_status.setText(catalog_error)
+        elif self.analysis_status.text().startswith("Nie można odczytać"):
+            self.analysis_status.clear()
+
+        if selector is None:
+            return
+
+        previous_id = str(selector.currentData() or "")
+        target_id = preferred_artifact_id or previous_id
+        selector.blockSignals(True)
+        selector.clear()
+        target_index = -1
+        for index, artifact in enumerate(self._analysis_artifacts):
+            selector.addItem(_selector_text(artifact), artifact.id)
+            if artifact.id == target_id:
+                target_index = index
+        if not self._analysis_artifacts:
+            selector.addItem("Brak artefaktów analizy", "")
+        selector.setEnabled(bool(self._analysis_artifacts))
+        if self._analysis_artifacts:
+            selector.setCurrentIndex(target_index if target_index >= 0 else 0)
+        else:
+            selector.setCurrentIndex(0)
+        selector.blockSignals(False)
+
+        self.tabs.setTabText(self.analysis_tab_index, f"Analizy ({len(self._analysis_artifacts)})")
+        if self._analysis_artifacts:
+            self._show_artifact_details(selector.currentIndex())
+        else:
+            self._clear_statistics("Brak artefaktu statystyk dla tej sesji.")
+            self.artifact_details.setPlainText("Brak artefaktów analizy dla tej sesji.")
+            self._set_artifact_summary(None)
+
         if self._minimal_chrome_ready:
             self._sync_result_navigation()
-            if self.analysis_status.text().startswith("Nie można odczytać"):
-                self._set_activity_visible(progress=False, status=True)
+            self._sync_idle_activity_state()
 
     @Slot()
     def _start_analysis(self) -> None:
@@ -71,8 +121,9 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
         selector.setVisible(multiple_results)
 
     def _sync_idle_activity_state(self) -> None:
-        if self.analysis_status.text().startswith("Nie można odczytać"):
-            self._set_activity_visible(progress=False, status=True)
+        if self._artifact_catalog_error:
+            self._set_unavailable_progress("Błąd odczytu")
+            self._set_activity_visible(progress=True, status=True)
             return
 
         available = (
@@ -83,7 +134,13 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
         if available:
             self._set_activity_visible(progress=False, status=False)
         else:
-            self._set_activity_visible(progress=False, status=True)
+            self._set_unavailable_progress("Niedostępne")
+            self._set_activity_visible(progress=True, status=True)
+
+    def _set_unavailable_progress(self, text: str) -> None:
+        self.analysis_progress.setRange(0, 100)
+        self.analysis_progress.setValue(0)
+        self.analysis_progress.setFormat(text)
 
     def _set_activity_visible(self, *, progress: bool, status: bool) -> None:
         self.analysis_progress.setVisible(progress)
