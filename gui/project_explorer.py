@@ -21,8 +21,6 @@ class ProjectExplorer(QWidget):
     open_area = Signal(str)
     open_decoders = Signal()
     open_filters = Signal()
-    import_requested = Signal()
-    add_area_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
