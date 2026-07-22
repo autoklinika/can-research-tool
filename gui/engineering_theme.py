@@ -456,12 +456,10 @@ QSplitter::handle:hover {
     background: #3fa9e8;
 }
 
-QFrame#projectExplorerHeader,
 QFrame#overviewHeader {
     background: #20262c;
     border-bottom: 1px solid #394149;
 }
-QLabel#projectExplorerName,
 QLabel#projectOverviewTitle {
     color: #ffffff;
     font-weight: 700;
