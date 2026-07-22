@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -119,6 +120,27 @@ def test_missing_project_is_marked_without_losing_catalog_entry(tmp_path: Path) 
     assert not entry.available
     assert catalog.list_projects(include_missing=False) == []
     assert catalog.list_projects(include_missing=True)[0].project_id == project.manifest.id
+
+
+def test_registering_moved_project_updates_existing_catalog_location(tmp_path: Path) -> None:
+    original = CrtProject.create(tmp_path / "original" / "project", name="Movable")
+    catalog = ProjectCatalog(tmp_path / "catalog.sqlite")
+    catalog.register_project(original.root)
+    project_id = original.manifest.id
+
+    moved_root = tmp_path / "moved" / "project"
+    moved_root.parent.mkdir(parents=True)
+    shutil.move(str(original.root), str(moved_root))
+    catalog.refresh_availability()
+    assert not catalog.get(project_id).available
+
+    moved = CrtProject.open(moved_root)
+    relocated = catalog.register_project(moved.root)
+
+    assert relocated.project_id == project_id
+    assert relocated.available
+    assert relocated.root_path == str(moved_root.resolve())
+    assert len(catalog.list_projects()) == 1
 
 
 def test_profile_validation_and_tag_normalization() -> None:
