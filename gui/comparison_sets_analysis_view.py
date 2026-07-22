@@ -6,6 +6,9 @@ from app.project import CrtProject
 
 from .comparison_analysis_dialog import ComparisonAnalysisDialog
 from .comparison_sets_view import ComparisonSetsView
+from .message_sequence_analysis_dialog import (
+    MessageSequenceComparisonAnalysisDialog,
+)
 from .window_fullscreen import FullScreenController, enable_full_screen
 
 
@@ -25,7 +28,9 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         if root is None:
             raise RuntimeError("comparison sets view has no root layout")
         root.insertLayout(3, analysis_toolbar)
-        self.table.itemSelectionChanged.connect(self._analysis_selection_changed)
+        self.table.itemSelectionChanged.connect(
+            self._analysis_selection_changed
+        )
         self._analysis_selection_changed()
 
     def refresh(self, selected_id: str | None = None) -> None:
@@ -34,13 +39,15 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
             self._analysis_selection_changed()
 
     def _analysis_selection_changed(self) -> None:
-        self.analyze_button.setEnabled(self.selected_comparison_set() is not None)
+        self.analyze_button.setEnabled(
+            self.selected_comparison_set() is not None
+        )
 
     def _open_analysis(self) -> None:
         comparison_set = self.selected_comparison_set()
         if comparison_set is None:
             return
-        dialog = ComparisonAnalysisDialog(
+        dialog = MessageSequenceComparisonAnalysisDialog(
             self.project,
             comparison_set.id,
             parent=self,
