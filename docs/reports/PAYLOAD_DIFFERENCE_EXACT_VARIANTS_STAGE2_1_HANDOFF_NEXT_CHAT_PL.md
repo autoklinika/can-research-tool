@@ -50,19 +50,37 @@ Tymczasowa baza:
 - jest zamykana przed zapisem artefaktu,
 - jest usuwana po sukcesie, anulowaniu i wyjątku.
 
+## Przywrócona edycja i usuwanie zestawów
+
+Po uruchomieniu pierwszej analizy pierwotny Comparison Sets Stage 1 wyłączał `Edytuj…` i `Usuń zestaw`. Funkcja nie przestała działać w Stage 2.1; zestaw przechodził w zamierzony stan blokady.
+
+Aktualne zachowanie:
+
+- zestaw bez analiz: zwykła edycja w miejscu i fizyczne usunięcie,
+- zestaw z analizami: przyciski pozostają aktywne,
+- edycja zestawu z analizami tworzy nową wersję z nowym ID,
+- stara definicja jest ukrywana z aktywnego widoku i pozostaje źródłem historycznych analiz,
+- usunięcie zestawu z analizami ukrywa go, ale nie usuwa analiz, artefaktów ani sesji,
+- znacznik ukrycia jest zapisany w istniejącym `parameters_json`, bez migracji schematu,
+- status GUI brzmi `Z analizami`, a opis wyjaśnia wersjonowanie i zachowanie historii.
+
 ## Pliki kluczowe
 
 - `app/extensions/builtin/payload_difference_exact.py`
 - `app/extensions/builtin/__init__.py`
+- `app/comparison_sets.py`
+- `gui/comparison_sets_view.py`
 - `tests/test_payload_difference_provider.py`
 - `tests/test_payload_difference_exact_storage.py`
+- `tests/test_comparison_sets.py`
+- `tests_gui/comparison_sets_smoke.py`
 - `.github/workflows/gui-regression.yml`
 - `docs/reports/PAYLOAD_DIFFERENCE_EXACT_VARIANTS_STAGE2_1_IMPLEMENTATION_REPORT_PL.md`
 
 ## Walidacja do wykonania
 
 1. Sprawdź HEAD i bazę draft PR Stage 2.1.
-2. Sprawdź, czy diff względem Stage 2 zawiera tylko pliki Stage 2.1.
+2. Sprawdź diff względem Stage 2, w tym cztery pliki naprawy zarządzania zestawami.
 3. Sprawdź review threads i submitted reviews.
 4. Sprawdź Linux `GUI Regressions`.
 5. Sprawdź pełny `Tests`.
@@ -72,7 +90,10 @@ Tymczasowa baza:
 9. Potwierdź deterministyczność i identyczne SHA-256 dwóch artefaktów.
 10. Potwierdź test ponad 1000 wariantów.
 11. Potwierdź cleanup SQLite po anulowaniu na Windows.
-12. Uruchom ręcznie `tests_gui/payload_difference_smoke.py`.
+12. Potwierdź edycję analizowanego zestawu jako nową wersję.
+13. Potwierdź usunięcie analizowanego zestawu przy zachowaniu analysis runs i artefaktów.
+14. Uruchom ręcznie `tests_gui/comparison_sets_smoke.py`.
+15. Uruchom ręcznie `tests_gui/payload_difference_smoke.py`.
 
 ## Szczególnie ważne przypadki
 
@@ -84,6 +105,9 @@ Tymczasowa baza:
 - różne długości payloadu nie mogą być dopełniane zerami,
 - sesje i ich SHA-256 muszą pozostać niezmienione,
 - baza tymczasowa nie może pozostać po anulowaniu,
+- bezpośrednie `update()` analizowanego zestawu ma pozostać zabronione,
+- wersjonowana edycja ma zachować pierwotny `analysis_inputs.input_id`,
+- usunięcie analizowanego zestawu nie może usuwać `analysis_runs`, artefaktów ani sesji,
 - provider nie tworzy automatycznych findings.
 
 ## Znane ograniczenie
@@ -91,6 +115,8 @@ Tymczasowa baza:
 Zliczanie jest hybrydowe RAM/SQLite, lecz końcowy JSON i pełna macierz wariantów są materializowane przez istniejący `ArtifactWriter.write_json`. Ekstremalnie duży wynik może więc zużywać dużo pamięci podczas końcowej serializacji, mimo że żaden wariant nie jest pomijany.
 
 Nie rozszerzaj Stage 2.1 o nowy streaming writer albo trwały artefakt SQLite bez osobnej decyzji architektonicznej.
+
+Historyczne, ukryte zestawy nie są obecnie prezentowane w osobnym widoku archiwum. Pozostają dostępne w bazie projektu i zachowują powiązania analiz. Ewentualny widok `Historia zestawów` powinien być osobnym etapem UI.
 
 ## Nienaruszalne kontrakty
 
