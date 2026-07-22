@@ -1,15 +1,23 @@
 from .builtin import (
+    COMPARISON_STATISTICS_ALGORITHM_VERSION,
+    COMPARISON_STATISTICS_ARTIFACT_SCHEMA_VERSION,
+    COMPARISON_STATISTICS_PROVIDER_ID,
+    COMPARISON_STATISTICS_PROVIDER_VERSION,
+    ComparisonStatisticsProvider,
     SESSION_STATISTICS_ALGORITHM_VERSION,
     SESSION_STATISTICS_ARTIFACT_SCHEMA_VERSION,
     SESSION_STATISTICS_PROVIDER_ID,
     SESSION_STATISTICS_PROVIDER_VERSION,
     SessionStatisticsProvider,
     builtin_analysis_providers,
+    builtin_comparison_providers,
+    register_builtin_comparison_extensions,
     register_builtin_extensions,
 )
 from .contracts import (
     AnalysisContext,
     CancellationToken,
+    ComparisonContext,
     ExtensionCancelled,
     FrameQuery,
     ProgressReporter,
@@ -25,6 +33,7 @@ from .manifest import (
 )
 from .registry import (
     AnalysisProvider,
+    ComparisonProvider,
     ExtensionRegistrationError,
     ExtensionRegistry,
 )
@@ -35,8 +44,15 @@ __all__ = [
     "AnalysisContext",
     "AnalysisProvider",
     "ArtifactWriter",
+    "COMPARISON_STATISTICS_ALGORITHM_VERSION",
+    "COMPARISON_STATISTICS_ARTIFACT_SCHEMA_VERSION",
+    "COMPARISON_STATISTICS_PROVIDER_ID",
+    "COMPARISON_STATISTICS_PROVIDER_VERSION",
     "CRT_EXTENSION_API_VERSION",
     "CancellationToken",
+    "ComparisonContext",
+    "ComparisonProvider",
+    "ComparisonStatisticsProvider",
     "ExtensionCancelled",
     "ExtensionExecutionError",
     "ExtensionManifest",
@@ -57,5 +73,7 @@ __all__ = [
     "SessionSource",
     "SessionStatisticsProvider",
     "builtin_analysis_providers",
+    "builtin_comparison_providers",
+    "register_builtin_comparison_extensions",
     "register_builtin_extensions",
 ]
