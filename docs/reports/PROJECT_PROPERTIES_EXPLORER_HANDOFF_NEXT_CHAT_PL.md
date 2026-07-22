@@ -16,11 +16,11 @@ Etap jest funkcjonalnie zakończony i ręcznie potwierdzony przez użytkownika j
 
 Aktualny funkcjonalny HEAD przed końcową aktualizacją tego raportu:
 
-`2b8ea2a86160c476d4c94ed45e4d9be917cf43c1`
+`f39fa5bea5a61da01c88e4c68b480d0cc30bd62e`
 
-PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34), którego aktualny HEAD po końcowych poprawkach review to:
+PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34), którego końcowy HEAD po poprawkach review to:
 
-`f329221a30d179acdccfc51d04b916684c9c2a61`
+`b74b20225e7d79a695a81931ced17262329cfd8d`
 
 ## Zrealizowany zakres
 
@@ -75,21 +75,39 @@ Podczas końcowego review znaleziono i poprawiono rzeczywiste problemy w pierwot
 2. Już otwarty widok Live otrzymuje nowe domyślne bitrate i tryb odbioru dla kolejnej sesji.
 3. Usunięto lokalny limit 200 znaków w dialogu właściwości, który mógł skrócić istniejącą długą nazwę projektu przy zapisie innego pola.
 4. Usunięto martwe selektory QSS dla skasowanego nagłówka i etykiety nazwy Explorera, zachowując style widoku Przegląd.
+5. Niestandardowy bitrate zapisany w istniejącym manifeście jest dodawany do listy otwartego widoku Live i wybierany jako wartość domyślna kolejnej sesji.
 
-Smoke test właściwości projektu został rozszerzony tak, aby rzeczywiście uruchamiał akcję menu i akceptował modalny dialog zamiast omijać przepływ GUI.
+Smoke test właściwości projektu rzeczywiście uruchamia akcję menu, akceptuje modalny dialog, sprawdza rollback po błędzie zapisu oraz obejmuje standardowy i niestandardowy bitrate.
 
-Na bazowym PR #34 poprawiono również widoczność błędu katalogu artefaktów zarówno przy inicjalizacji widoku, jak i po zakończeniu analizy. Smoke Stage 8 obejmuje teraz stan poprawnego zakończenia, failure, cancellation, niedostępny kontekst oraz błąd odczytu katalogu artefaktów.
+Na bazowym PR #34 poprawiono również widoczność stanów analizy:
+
+- błąd katalogu artefaktów jest widoczny przy inicjalizacji i po zakończeniu analizy,
+- udane ponowienie usuwa nieaktualny komunikat błędu,
+- niedostępny kontekst pokazuje pasek i status,
+- odświeżenie artefaktów nie ukrywa postępu aktywnej analizy,
+- failure i cancellation pozostają widoczne.
+
+Smoke Stage 8 obejmuje wszystkie te warianty oraz niezmienność sesji źródłowej.
 
 ## Walidacja
 
-Dla funkcjonalnego HEAD PR #35 `2b8ea2a86160c476d4c94ed45e4d9be917cf43c1` potwierdzono:
+Dla końcowego HEAD PR #34 `b74b20225e7d79a695a81931ced17262329cfd8d` potwierdzono:
 
 - `Tests` — PASS,
 - `GUI Regressions` — PASS,
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-Końcowa aktualizacja raportu uruchamia nowy pełny przebieg CI PR #35 już względem zaktualizowanej bazy PR #34. `Windows Self-Hosted CI` nie blokuje tego etapu, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
+Dla funkcjonalnego HEAD PR #35 `f39fa5bea5a61da01c88e4c68b480d0cc30bd62e` potwierdzono:
+
+- `Tests` — PASS,
+- `GUI Regressions` — PASS,
+- `Live Preview Capacity` — PASS,
+- `Windows GitHub-Hosted CI` — PASS.
+
+Końcowa aktualizacja tego raportu uruchamia ostatni pełny przebieg CI PR #35 względem aktualnej bazy PR #34. `Windows Self-Hosted CI` nie blokuje tego etapu, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
+
+Copilot został wykorzystany jako dodatkowy recenzent i wskazał kilka rzeczywistych przypadków brzegowych, które poprawiono. Ostatnia próba automatycznego review została zatrzymana przez limit przydziału Copilota; końcowe zmiany są zabezpieczone dedykowanymi smoke testami i pełnym GitHub-hosted CI.
 
 Pierwszy wcześniejszy przebieg `Tests` miał pojedynczy niezwiązany z tym diffem wyścig czasowy w `test_capture_markers.py` (`225 passed, 1 failed`). Ponowiono wyłącznie nieudany job; drugi przebieg zakończył się sukcesem. Nie zmieniano z tego powodu `CaptureService` ani testu Capture.
 
@@ -104,10 +122,11 @@ Nie zmieniono:
 - kodu CAN TX/RX,
 - formatu sesji i indeksów,
 - kolejności ani kompletności zapisu surowych ramek,
-- warstwy analiz zapisanej sesji poza poprawką widoczności statusu w bazowym PR #34,
 - schematu `project.sqlite`,
 - struktury `.crt`,
 - zależności projektu.
+
+Zmiana w bazowym PR #34 dotyczy wyłącznie prezentacji statusu istniejącej analizy zapisanej sesji i nie zmienia `SessionAnalysisService`, providera ani artefaktów.
 
 ## Zasada użycia Copilota po tym etapie
 
@@ -127,10 +146,9 @@ Powód: dwa wcześniejsze uruchomienia dla issue #40 utworzyły błędne PR #41 
 
 Przed scaleniem należy:
 
-1. Potwierdzić końcowe CI i review PR #34.
-2. Potwierdzić końcowe CI i review PR #35 względem aktualnej bazy PR #34.
-3. Przejść cały stacked chain od najniższego niescalonego PR w poprawnej kolejności.
-4. Dopiero po wyraźnej decyzji użytkownika oznaczać PR-y jako ready i wykonywać merge.
-5. Po merge PR #35 zamknąć issue #40 jako completed.
+1. Przejść cały stacked chain od najniższego niescalonego PR w poprawnej kolejności.
+2. Po każdej aktualizacji bazy ponownie sprawdzić diff i CI kolejnego PR.
+3. Dopiero po wyraźnej decyzji użytkownika oznaczać PR-y jako ready i wykonywać merge.
+4. Po merge PR #35 zamknąć issue #40 jako completed.
 
 Nie wykonywać merge ani zmiany statusu draft bez jednoznacznego polecenia użytkownika.
