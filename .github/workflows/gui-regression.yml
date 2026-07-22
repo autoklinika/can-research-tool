@@ -83,6 +83,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/stored_logical_workspace_smoke.py
+      - name: Verify stored session analysis workflow
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_analysis_workflow_smoke.py
       - name: Verify protocol-aware logical details
         env:
           QT_QPA_PLATFORM: offscreen
