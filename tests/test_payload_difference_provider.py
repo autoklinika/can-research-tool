@@ -28,7 +28,7 @@ def test_comparison_registry_exposes_payload_difference_provider() -> None:
     assert manifest in manifests
     assert manifest.id == PAYLOAD_DIFFERENCE_PROVIDER_ID
     assert manifest.inputs == ("comparison_set",)
-    assert manifest.outputs == ("comparison_payload_difference",)
+    assert manifest.outputs == ("payload_differences",)
     assert manifest.type.value == "comparison"
     assert registry.get_comparison(PAYLOAD_DIFFERENCE_PROVIDER_ID).manifest == manifest
 
@@ -63,9 +63,9 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
 
     assert first_payload == second_payload
     assert first_artifact.sha256 == second_artifact.sha256
-    assert first_artifact.artifact_type == "comparison_payload_difference"
+    assert first_artifact.artifact_type == "payload_differences"
     assert first_artifact.schema_version == 1
-    assert first_payload["schema"] == "crt.comparison_payload_difference"
+    assert first_payload["schema"] == "crt.payload_differences"
     assert first_payload["generated_by"] == {
         "provider_id": PAYLOAD_DIFFERENCE_PROVIDER_ID,
         "provider_version": "1.0.0",
@@ -86,7 +86,7 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
     assert sessions[after.id]["new_payload_message_key_count"] == 1
     assert sessions[after.id]["missing_payload_message_key_count"] == 1
 
-    changes = first_payload["notable_changes"]
+    changes = first_payload["ranked_changes"]
     assert _has_change(changes, 0x300, "new_message_key")
     assert _has_change(changes, 0x200, "missing_message_key")
     assert _has_byte_change(changes, 0x100, 0, "constant_byte_changed")
@@ -98,25 +98,42 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
 
     id_100 = next(
         item
-        for item in first_payload["message_keys"]
+        for item in first_payload["message_payload_profiles"]
         if item["arbitration_id"] == 0x100
     )
     baseline_byte_0 = id_100["baseline"]["byte_positions"][0]
-    assert baseline_byte_0["is_constant"] is True
-    assert baseline_byte_0["constant_value_hex"] == "10"
+    assert baseline_byte_0["classification"] == "constant"
+    assert baseline_byte_0["dominant_value_hex"] == "10"
     current_row = next(
         item for item in id_100["sessions"] if item["session_id"] == after.id
     )
-    current_byte_0 = current_row["payload"]["byte_positions"][0]
-    assert current_byte_0["is_constant"] is True
-    assert current_byte_0["constant_value_hex"] == "11"
+    current_byte_0 = current_row["payload_profile"]["byte_positions"][0]
+    assert current_byte_0["classification"] == "constant"
+    assert current_byte_0["dominant_value_hex"] == "11"
+    variant_matrix = id_100["variant_matrix"]
+    assert id_100["variant_matrix_complete"] is True
+    assert any(
+        item["payload_hex"] == "10 20" and item["role"] == "baseline_only"
+        for item in variant_matrix
+    )
+    assert any(
+        item["payload_hex"] == "11 22" and item["role"] == "comparison_only"
+        for item in variant_matrix
+    )
+    baseline_variant = next(
+        item
+        for item in id_100["baseline"]["variants"]
+        if item["payload_hex"] == "10 20"
+    )
+    assert baseline_variant["first_timestamp_ns"] == 0
+    assert baseline_variant["last_timestamp_ns"] == 2
 
     assert tuple(source.session_id for source in first_artifact.sources) == (
         before.id,
         after.id,
     )
     assert first_artifact.sources[0].source_reference["role"] == "base"
-    assert first_artifact.sources[1].source_reference["role"] == "compared"
+    assert first_artifact.sources[1].source_reference["role"] == "comparison"
     assert ComparisonSetStore(project).is_locked(comparison.id)
     assert service.store.schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
 
@@ -127,7 +144,7 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
 
     assert updates[0].current == 0
     assert updates[-1].current == updates[-1].total == 17
-    assert updates[-1].message == "saved payload difference"
+    assert updates[-1].message == "saved payload differences"
 
     with project._connect() as connection:
         run_states = connection.execute(
@@ -169,21 +186,21 @@ def test_payload_variant_limit_is_explicit_and_does_not_invent_differences(
     result = ComparisonAnalysisService(project).run(
         PAYLOAD_DIFFERENCE_PROVIDER_ID,
         comparison.id,
-        parameters={"maximum_variants_per_message_session": 1},
+        parameters={"max_variants_per_message": 1},
     )
     service = ComparisonAnalysisService(project)
     payload = service.artifacts.read_json(result.artifacts[0])
-    changes = payload["notable_changes"]
+    changes = payload["ranked_changes"]
 
     assert _has_change(changes, 0x100, "variant_comparison_truncated")
     assert not _has_change(changes, 0x100, "new_payload_variant")
     assert not _has_change(changes, 0x100, "missing_payload_variant")
-    message = payload["message_keys"][0]
-    assert message["baseline"]["variants_truncated"] is True
+    message = payload["message_payload_profiles"][0]
+    assert message["baseline"]["variant_tracking"]["complete"] is False
     after_row = next(
         item for item in message["sessions"] if item["session_id"] == after.id
     )
-    assert after_row["payload"]["variants_truncated"] is True
+    assert after_row["payload_profile"]["variant_tracking"]["complete"] is False
 
 
 def test_payload_difference_rejects_invalid_limit_without_touching_sources(
@@ -212,12 +229,12 @@ def test_payload_difference_rejects_invalid_limit_without_touching_sources(
 
     with pytest.raises(
         ExtensionExecutionError,
-        match="maximum_variants_per_message_session",
+        match="max_variants_per_message",
     ):
         ComparisonAnalysisService(project).run(
             PAYLOAD_DIFFERENCE_PROVIDER_ID,
             comparison.id,
-            parameters={"maximum_variants_per_message_session": 0},
+            parameters={"max_variants_per_message": 0},
         )
 
     with project._connect() as connection:
@@ -226,7 +243,7 @@ def test_payload_difference_rejects_invalid_limit_without_touching_sources(
         ).fetchone()
         artifact_count = connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
     assert state[0] == "failed"
-    assert "maximum_variants_per_message_session" in state[1]
+    assert "max_variants_per_message" in state[1]
     assert artifact_count == 0
     for session in (before, after):
         assert _sha256(project.absolute_path(session.relative_path)) == hashes[session.id]
