@@ -8,7 +8,8 @@ from time import monotonic
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings, QThreadPool
+from PySide6.QtCore import QSettings, QThreadPool, Qt
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication
 
 from app.comparison_sets import ComparisonSetStore
@@ -18,6 +19,7 @@ from app.project_domain_store import ProjectDomainStore
 from app.project_migrations import PROJECT_DOMAIN_SCHEMA_VERSION
 from app.session_stream import SessionStreamWriter
 from gui.comparison_analysis_dialog import ComparisonAnalysisDialog
+from gui.comparison_sets_analysis_view import configure_comparison_analysis_window
 
 
 def main() -> None:
@@ -46,8 +48,22 @@ def main() -> None:
         )
 
         dialog = ComparisonAnalysisDialog(project, comparison.id)
+        configure_comparison_analysis_window(dialog)
+        assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
+        shortcut = dialog.findChild(
+            QShortcut,
+            "comparisonAnalysisFullScreenShortcut",
+        )
+        assert shortcut is not None
         dialog.show()
         app.processEvents()
+
+        shortcut.activated.emit()
+        app.processEvents()
+        assert dialog.isFullScreen()
+        shortcut.activated.emit()
+        app.processEvents()
+        assert not dialog.isFullScreen()
 
         assert dialog.provider_combo.count() == 2
         assert dialog.run_button.isEnabled()
