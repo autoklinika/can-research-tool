@@ -50,7 +50,7 @@ def main() -> None:
         dialog.show()
         app.processEvents()
 
-        assert dialog.provider_combo.count() == 2
+        assert dialog.provider_combo.count() == 3
         provider_index = dialog.provider_combo.findData(
             PAYLOAD_DIFFERENCE_PROVIDER_ID
         )
@@ -81,7 +81,10 @@ def main() -> None:
             artifact_count = connection.execute(
                 "SELECT COUNT(*) FROM artifacts"
             ).fetchone()[0]
-        assert ProjectDomainStore(project).schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
+        assert (
+            ProjectDomainStore(project).schema_version
+            == PROJECT_DOMAIN_SCHEMA_VERSION
+        )
         assert artifact_count == 1
 
         dialog.close()
@@ -150,20 +153,37 @@ def _frame(
     )
 
 
-def _create_session(project: CrtProject, name: str, frames: list[CanFrame]):
+def _create_session(
+    project: CrtProject,
+    name: str,
+    frames: list[CanFrame],
+):
     path = project.live_sessions_dir / f"{name}.crt.jsonl"
-    capture = CaptureSession(name=name, source="test", bitrate=250_000, channel=0)
+    capture = CaptureSession(
+        name=name,
+        source="test",
+        bitrate=250_000,
+        channel=0,
+    )
     writer = SessionStreamWriter(capture, path)
     writer.open()
     for frame in frames:
         writer.append(frame)
     writer.close({"clean_close": True})
-    record = project.register_session(path, name=name, source="test", status="ready")
+    record = project.register_session(
+        path,
+        name=name,
+        source="test",
+        status="ready",
+    )
     project.finalize_session(
         path,
         frame_count=len(frames),
         marker_count=0,
-        duration_s=max(frame.timestamp_ns for frame in frames) / 1_000_000_000.0,
+        duration_s=(
+            max(frame.timestamp_ns for frame in frames)
+            / 1_000_000_000.0
+        ),
     )
     return project.session_by_path(path) or record
 
