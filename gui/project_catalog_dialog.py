@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.project import CrtProject
 from app.project_catalog import CatalogProject, ProjectCatalog, ProjectTimeFilter
 
 
@@ -220,9 +222,9 @@ class ProjectCatalogDialog(QDialog):
             item = QTableWidgetItem(value)
             item.setData(Qt.ItemDataRole.UserRole, project.project_id)
             if not project.available:
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                 item.setToolTip(
-                    "Folder projektu lub plik project.crt.json nie jest obecnie dostępny."
+                    "Folder projektu lub plik project.crt.json nie jest obecnie dostępny. "
+                    "Kliknij prawym przyciskiem i wskaż nową lokalizację."
                 )
             self.table.setItem(row, column, item)
 
@@ -253,7 +255,7 @@ class ProjectCatalogDialog(QDialog):
                 self,
                 "Projekt niedostępny",
                 "Nie można otworzyć projektu, ponieważ jego folder lub manifest "
-                "nie jest dostępny.",
+                "nie jest dostępny. Użyj menu kontekstowego, aby wskazać nową lokalizację.",
             )
             return
         self.accept()
@@ -272,11 +274,49 @@ class ProjectCatalogDialog(QDialog):
         open_action.setEnabled(project.available)
         open_action.triggered.connect(self._accept_available)
         menu.addAction(open_action)
+
+        relocate_action = QAction("Wskaż nową lokalizację…", menu)
+        relocate_action.triggered.connect(self._relocate_selected_project)
+        menu.addAction(relocate_action)
+
         menu.addSeparator()
         remove_action = QAction("Usuń wpis z katalogu", menu)
         remove_action.triggered.connect(self._remove_selected_entry)
         menu.addAction(remove_action)
         menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def _relocate_selected_project(self) -> None:
+        selected = self.selected_project()
+        if selected is None:
+            return
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Wskaż folder projektu CRT",
+            selected.root_path,
+        )
+        if not directory:
+            return
+        try:
+            candidate = CrtProject.open(directory)
+            if candidate.manifest.id != selected.project_id:
+                raise ValueError(
+                    "Wybrany folder zawiera inny projekt CRT. "
+                    "Identyfikator projektu nie zgadza się z wpisem katalogowym."
+                )
+            self.catalog.register_project(candidate.root)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Nie można zmienić lokalizacji projektu",
+                str(exc),
+            )
+            return
+        self.refresh()
+        QMessageBox.information(
+            self,
+            "Lokalizacja projektu",
+            "Nowa lokalizacja projektu została zapisana w katalogu CRT.",
+        )
 
     def _remove_selected_entry(self) -> None:
         project = self.selected_project()
