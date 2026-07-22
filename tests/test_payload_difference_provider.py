@@ -77,6 +77,8 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
     assert first_payload["summary"]["session_count"] == 2
     assert first_payload["summary"]["union_payload_message_key_count"] == 5
     assert first_payload["summary"]["common_payload_message_key_count"] == 3
+    assert first_payload["variant_storage"]["exact"] is True
+    assert first_payload["truncation"]["variant_tracking_complete"] is True
 
     sessions = {item["id"]: item for item in first_payload["sessions"]}
     assert sessions[before.id]["role"] == "base"
@@ -155,10 +157,8 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
     assert finding_count == 0
 
 
-def test_payload_variant_limit_is_explicit_and_does_not_invent_differences(
-    tmp_path,
-) -> None:
-    project = CrtProject.create(tmp_path / "project", name="Payload limit")
+def test_payload_variant_threshold_spills_without_truncation(tmp_path) -> None:
+    project = CrtProject.create(tmp_path / "project", name="Payload spill")
     before = _create_session(
         project,
         "before",
@@ -178,7 +178,7 @@ def test_payload_variant_limit_is_explicit_and_does_not_invent_differences(
         ],
     )
     comparison = ComparisonSetStore(project).create(
-        name="Payload limit",
+        name="Payload spill",
         session_ids=(before.id, after.id),
         base_session_id=before.id,
     )
@@ -192,15 +192,26 @@ def test_payload_variant_limit_is_explicit_and_does_not_invent_differences(
     payload = service.artifacts.read_json(result.artifacts[0])
     changes = payload["ranked_changes"]
 
-    assert _has_change(changes, 0x100, "variant_comparison_truncated")
-    assert not _has_change(changes, 0x100, "new_payload_variant")
-    assert not _has_change(changes, 0x100, "missing_payload_variant")
+    assert not _has_change(changes, 0x100, "variant_comparison_truncated")
+    assert _has_change(changes, 0x100, "new_payload_variant")
+    assert _has_change(changes, 0x100, "missing_payload_variant")
+    assert payload["variant_storage"]["disk_backed_message_count"] == 2
+    assert payload["truncation"] == {
+        "variant_tracking_complete": True,
+        "selection_rule": "all_variants_exact",
+        "messages_with_truncated_variants": 0,
+        "untracked_variant_frame_count": 0,
+    }
     message = payload["message_payload_profiles"][0]
-    assert message["baseline"]["variant_tracking"]["complete"] is False
+    baseline_tracking = message["baseline"]["variant_tracking"]
+    assert baseline_tracking["configured_limit"] is None
+    assert baseline_tracking["memory_threshold"] == 1
+    assert baseline_tracking["storage_mode"] == "sqlite"
+    assert baseline_tracking["complete"] is True
     after_row = next(
         item for item in message["sessions"] if item["session_id"] == after.id
     )
-    assert after_row["payload_profile"]["variant_tracking"]["complete"] is False
+    assert after_row["payload_profile"]["variant_tracking"]["complete"] is True
 
 
 def test_payload_difference_rejects_invalid_limit_without_touching_sources(
