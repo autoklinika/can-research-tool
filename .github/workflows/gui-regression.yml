@@ -35,6 +35,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/engineering_shell_smoke.py
+      - name: Verify project properties editing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/project_properties_smoke.py
       - name: Verify project preparation progress
         env:
           QT_QPA_PLATFORM: offscreen
