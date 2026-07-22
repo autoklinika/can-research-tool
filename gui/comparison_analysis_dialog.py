@@ -48,6 +48,8 @@ _PAYLOAD_CHANGE_LABELS = {
     "missing_payload_variant": "Brakujący wariant payloadu",
     "new_payload_variant": "Nowy wariant payloadu",
     "byte_presence_changed": "Zmiana obecności bajtu",
+    "dominant_value_changed": "Zmiana dominującej wartości",
+    "dominant_share_changed": "Zmiana udziału dominanty",
 }
 _STATISTICS_SESSION_HEADERS = (
     "Sesja",
@@ -426,7 +428,7 @@ class ComparisonAnalysisDialog(QDialog):
         schema = payload.get("schema")
         if schema == "crt.comparison_statistics":
             self._render_statistics(payload)
-        elif schema == "crt.comparison_payload_difference":
+        elif schema == "crt.payload_differences":
             self._render_payload_difference(payload)
         else:
             self.summary_label.setText(
@@ -555,7 +557,7 @@ class ComparisonAnalysisDialog(QDialog):
             else {}
         )
         sessions = _dict_list(payload.get("sessions"))
-        changes = _dict_list(payload.get("notable_changes"))
+        changes = _dict_list(payload.get("ranked_changes"))
         base_id = str(summary.get("baseline_session_id") or "")
         base_name = _session_name(sessions, base_id)
         self.summary_label.setText(
@@ -770,8 +772,11 @@ def _payload_change_details(
 def _byte_summary(value: dict) -> str:
     if not value:
         return "—"
-    if value.get("is_constant"):
-        result = f"stały {value.get('constant_value_hex', '—')}"
+    classification = str(value.get("classification") or "")
+    if classification == "constant":
+        result = f"stały {value.get('dominant_value_hex', '—')}"
+    elif classification == "absent":
+        result = "nieobecny"
     else:
         values = _dict_list(value.get("values"))
         labels = [str(item.get("value_hex", "—")) for item in values[:8]]
@@ -781,6 +786,10 @@ def _byte_summary(value: dict) -> str:
             else ""
         )
         result = f"zmienny [{', '.join(labels)}]{suffix}"
+        dominant = value.get("dominant_value_hex")
+        share = value.get("dominant_share_percent")
+        if dominant is not None:
+            result += f", dominanta {dominant} ({share}%)"
     presence = value.get("presence_percent")
     if presence is not None and float(presence) != 100.0:
         result += f", obecność {presence}%"
