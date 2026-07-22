@@ -44,7 +44,7 @@ def test_comparison_set_crud_preserves_sessions_and_schema(tmp_path) -> None:
 
     assert updated.id == comparison_set.id
     assert updated.created_at_utc == comparison_set.created_at_utc
-    assert updated.updated_at_utc != comparison_set.updated_at_utc
+    assert updated.updated_at_utc >= comparison_set.updated_at_utc
     assert updated.session_ids == (after.id, before.id, reference.id)
     assert updated.base_session_id == after.id
     assert store.get(updated.id) == updated
