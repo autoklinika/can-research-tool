@@ -28,6 +28,7 @@ jobs:
           tests/test_search_engine.py
           tests/test_project_search_index.py
           tests/test_project_catalog.py
+          tests/test_comparison_sets.py
           tests/test_sqlite_architecture.py
           tests/test_session_filters.py
           tests/test_stored_search_navigation.py
@@ -44,6 +45,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/project_catalog_smoke.py
+      - name: Verify comparison set management
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_sets_smoke.py
       - name: Verify project preparation progress
         env:
           QT_QPA_PLATFORM: offscreen
