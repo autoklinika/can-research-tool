@@ -15,9 +15,6 @@ from infrastructure.desktop import reveal_path
 from .async_dbc_manager import AsyncDbcManagerWidget
 from .confirmed_start_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
-from .detailed_logical_session_view import (
-    DetailedLogicalSessionViewWidget as SessionViewWidget,
-)
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
 from .import_task import ProjectImportTask
 from .project_dialog import NewProjectDialog
@@ -27,6 +24,7 @@ from .project_overview import ProjectOverviewWidget
 from .raw_frame_grouping import (
     GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
+from .session_analysis_view import AnalysisEnabledSessionViewWidget as SessionViewWidget
 from .session_management_integration import SessionManagementIntegration
 from .study_area_view import StudyAreaViewWidget
 
@@ -91,6 +89,7 @@ class ApplicationContainer:
         path: str | Path,
         *,
         dbc_paths: tuple[Path, ...] = (),
+        project: CrtProject | None = None,
     ) -> SessionViewWidget:
         session_path = Path(path)
         # A stored session is always presented through a bounded page. The complete
@@ -103,6 +102,7 @@ class ApplicationContainer:
         )
         return SessionViewWidget(
             session_path,
+            project=project,
             dbc_paths=dbc_paths,
             controller=controller,
             stored_integration_factory=EnhancedStoredSessionIntegration,
