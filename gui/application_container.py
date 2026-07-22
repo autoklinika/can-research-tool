@@ -24,8 +24,10 @@ from .project_overview import ProjectOverviewWidget
 from .raw_frame_grouping import (
     GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
-from .session_analysis_view import AnalysisEnabledSessionViewWidget as SessionViewWidget
 from .session_management_integration import SessionManagementIntegration
+from .session_statistics_table_view import (
+    SessionStatisticsTableSessionViewWidget as SessionViewWidget,
+)
 from .study_area_view import StudyAreaViewWidget
 
 if TYPE_CHECKING:
