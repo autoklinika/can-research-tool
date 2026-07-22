@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.project_catalog import ProjectCatalog, load_project_profile
 from gui.application_container import ApplicationContainer
+from gui.project_catalog_dialog import ProjectCatalogDialog
 
 
 def main() -> None:
@@ -67,6 +68,35 @@ def main() -> None:
         assert matches[0].project_id == project.manifest.id
         assert matches[0].last_opened_at_utc
 
+        picker = ProjectCatalogDialog(catalog, window)
+        assert picker.windowTitle() == "Projekty CRT"
+        assert picker.table.rowCount() == 1
+        assert picker.open_button.isEnabled()
+        assert picker.selected_project_path() == str(project.root)
+
+        picker.search_edit.setText("bosch h21")
+        app.processEvents()
+        assert picker.table.rowCount() == 1
+        picker.search_edit.setText("scania s8")
+        app.processEvents()
+        assert picker.table.rowCount() == 0
+        assert not picker.open_button.isEnabled()
+
+        picker.search_edit.clear()
+        picker.time_tabs.setCurrentIndex(4)
+        app.processEvents()
+        assert picker.table.rowCount() == 1
+
+        project.manifest_path.rename(project.manifest_path.with_suffix(".missing"))
+        picker._refresh_catalog()
+        app.processEvents()
+        assert picker.table.rowCount() == 1
+        assert picker.selected_project() is not None
+        assert not picker.selected_project().available
+        assert not picker.open_button.isEnabled()
+        project.manifest_path.with_suffix(".missing").rename(project.manifest_path)
+
+        picker.close()
         dialog.close()
         window._close_project_tabs()
         window.close()
@@ -79,6 +109,7 @@ def main() -> None:
         catalog = None
         profile = None
         project = None
+        picker = None
         dialog = None
         window = None
         gc.collect()
