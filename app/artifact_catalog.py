@@ -40,6 +40,27 @@ class ArtifactCatalog:
             ).fetchall()
             return tuple(self._artifact_from_row(connection, row) for row in rows)
 
+    def list_for_comparison_set(self, comparison_set_id: str) -> tuple[Artifact, ...]:
+        cleaned = comparison_set_id.strip()
+        if not cleaned:
+            raise ValueError("comparison_set_id cannot be empty")
+        with self.project._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT
+                       a.id, a.analysis_run_id, a.artifact_type, a.schema_version,
+                       a.provider_id, a.provider_version, a.algorithm_version,
+                       a.relative_path, a.sha256, a.metadata_json, a.created_at_utc
+                FROM artifacts AS a
+                JOIN analysis_inputs AS input
+                  ON input.analysis_run_id = a.analysis_run_id
+                WHERE input.input_kind = 'comparison_set' AND input.input_id = ?
+                ORDER BY a.created_at_utc DESC, a.id DESC
+                """,
+                (cleaned,),
+            ).fetchall()
+            return tuple(self._artifact_from_row(connection, row) for row in rows)
+
     def get(self, artifact_id: str) -> Artifact:
         cleaned = artifact_id.strip()
         if not cleaned:
