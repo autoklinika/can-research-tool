@@ -25,6 +25,15 @@ def main() -> None:
 
     assert window.isVisible()
     assert window.objectName() == "engineeringMainWindow"
+    assert window.full_screen_action.shortcut().toString() == "F11"
+    assert window.full_screen_action in window.actions()
+
+    window.full_screen_action.trigger()
+    app.processEvents()
+    assert window.isFullScreen()
+    window.full_screen_action.trigger()
+    app.processEvents()
+    assert not window.isFullScreen()
 
     started = time.monotonic()
     QTimer.singleShot(250, app.quit)
