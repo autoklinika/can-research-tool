@@ -6,7 +6,13 @@ from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import QEvent, QSettings, QThreadPool, Qt
 from PySide6.QtGui import QStandardItem
-from PySide6.QtWidgets import QApplication, QTableView, QTableWidget, QToolButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QTableView,
+    QTableWidget,
+    QToolButton,
+    QWidget,
+)
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
@@ -112,9 +118,17 @@ def main() -> None:
         assert close_button is not None
 
         assert window.explorer.tree.isHeaderHidden()
-        assert window.explorer.project_name.text() == "Engineering shell"
+        explorer_layout = window.explorer.layout()
+        assert explorer_layout is not None
+        assert explorer_layout.count() == 1
+        assert explorer_layout.itemAt(0).widget() is window.explorer.tree
+        assert window.explorer.findChild(QWidget, "projectExplorerHeader") is None
+        assert window.explorer.findChild(QWidget, "addStudyAreaButton") is None
+        assert window.explorer.findChild(QWidget, "importProjectLogButton") is None
         root = window.explorer.model.item(0, 0)
         assert root is not None
+        assert root.text() == "Engineering shell"
+        assert root.toolTip() == str(project.root)
         assert _find_node(root, "overview") is None
         assert _find_node(root, "live") is None
         assert _find_node(root, "filters") is not None
@@ -230,6 +244,8 @@ def main() -> None:
         collapse_button = None
         close_button = None
         view_menu = None
+        explorer_layout = None
+        root = None
         window = None
         project = None
         gc.collect()
