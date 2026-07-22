@@ -24,6 +24,7 @@ from .project_dialog import NewProjectDialog
 from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
+from .project_properties_dialog import ProjectPropertiesDialog
 from .raw_frame_grouping import (
     GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
 )
@@ -56,7 +57,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .search_enabled_shell import SearchEnabledMainWindow as MainWindow
+        from .project_properties_shell import ProjectPropertiesMainWindow as MainWindow
 
         return MainWindow(self)
 
@@ -77,6 +78,13 @@ class ApplicationContainer:
 
     def create_project_dialog(self, parent: QWidget) -> NewProjectDialog:
         return NewProjectDialog(parent)
+
+    def create_project_properties_dialog(
+        self,
+        parent: QWidget,
+        project: CrtProject,
+    ) -> ProjectPropertiesDialog:
+        return ProjectPropertiesDialog(project, parent)
 
     def create_live_capture_view(self, project: CrtProject) -> BoundedLiveCaptureWidget:
         controller = self._live_controller_factory()
