@@ -92,11 +92,11 @@ def main() -> int:
         assert widget.tabs.tabText(widget.analysis_tab_index) == "Analizy (1)"
         assert "Statystyki sesji" in widget.artifact_selector.currentText()
         assert "wersja 1.0.0" in widget.artifact_summary_line.text()
-        assert not widget.artifact_details.isVisible()
+        assert widget.artifact_details.isHidden()
         widget.artifact_info_toggle.click()
         app.processEvents()
         details = widget.artifact_details.toPlainText()
-        assert widget.artifact_details.isVisible()
+        assert not widget.artifact_details.isHidden()
         assert "INFORMACJE O ARTEFAKCIE" in details
         assert "Provider: crt.analysis.session_statistics" in details
         assert "Schemat: 1" in details
@@ -122,7 +122,7 @@ def main() -> int:
         assert reopened.artifact_selector.count() == 1
         assert reopened.tabs.tabText(reopened.analysis_tab_index) == "Analizy (1)"
         assert "Statystyki sesji" in reopened.artifact_summary_line.text()
-        assert not reopened.artifact_details.isVisible()
+        assert reopened.artifact_details.isHidden()
         assert _sha256(session_path) == source_hash
         assert navigator.close_session(session_path) is CloseTabResult.CLOSED
         _flush_deferred(app)
