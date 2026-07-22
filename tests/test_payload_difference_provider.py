@@ -68,7 +68,7 @@ def test_payload_difference_is_deterministic_and_source_safe(tmp_path) -> None:
     assert first_payload["schema"] == "crt.payload_differences"
     assert first_payload["generated_by"] == {
         "provider_id": PAYLOAD_DIFFERENCE_PROVIDER_ID,
-        "provider_version": "1.0.0",
+        "provider_version": "1.1.0",
         "algorithm_version": PAYLOAD_DIFFERENCE_ALGORITHM_VERSION,
         "crt_api": "1",
     }
