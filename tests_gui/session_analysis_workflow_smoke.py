@@ -73,7 +73,9 @@ def main() -> int:
             == SESSION_STATISTICS_PROVIDER_ID
         )
         assert widget.run_analysis_button.isEnabled()
-        assert widget.artifact_table.rowCount() == 0
+        assert widget.artifact_table is None
+        assert widget.artifact_selector.count() == 1
+        assert not widget.artifact_selector.isEnabled()
         assert widget.tabs.tabText(widget.analysis_tab_index) == "Analizy (0)"
 
         widget.tabs.setCurrentIndex(widget.analysis_tab_index)
@@ -85,13 +87,20 @@ def main() -> int:
         _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
         assert widget.analysis_progress.value() == 100
         assert widget.analysis_progress.format() == "Gotowe — 100%"
-        assert widget.artifact_table.rowCount() == 1
+        assert widget.artifact_selector.count() == 1
+        assert widget.artifact_selector.isEnabled()
         assert widget.tabs.tabText(widget.analysis_tab_index) == "Analizy (1)"
+        assert "Statystyki sesji" in widget.artifact_selector.currentText()
+        assert "wersja 1.0.0" in widget.artifact_summary_line.text()
+        assert not widget.artifact_details.isVisible()
+        widget.artifact_info_toggle.click()
+        app.processEvents()
         details = widget.artifact_details.toPlainText()
-        assert "ARTEFAKT ANALIZY" in details
-        assert "PODSUMOWANIE SESJI" in details
-        assert "Ramki: 12" in details
-        assert "Unikalne CAN ID: 3" in details
+        assert widget.artifact_details.isVisible()
+        assert "INFORMACJE O ARTEFAKCIE" in details
+        assert "Provider: crt.analysis.session_statistics" in details
+        assert "Schemat: 1" in details
+        assert "session-statistics.json" in details
         artifact = widget._analysis_artifacts[0]
         assert project.absolute_path(artifact.relative_path).is_file()
         assert _sha256(session_path) == source_hash
@@ -109,9 +118,11 @@ def main() -> int:
             output_sink=output_messages.append,
         )
         assert reopened.project is project
-        assert reopened.artifact_table.rowCount() == 1
+        assert reopened.artifact_table is None
+        assert reopened.artifact_selector.count() == 1
         assert reopened.tabs.tabText(reopened.analysis_tab_index) == "Analizy (1)"
-        assert "PODSUMOWANIE SESJI" in reopened.artifact_details.toPlainText()
+        assert "Statystyki sesji" in reopened.artifact_summary_line.text()
+        assert not reopened.artifact_details.isVisible()
         assert _sha256(session_path) == source_hash
         assert navigator.close_session(session_path) is CloseTabResult.CLOSED
         _flush_deferred(app)
