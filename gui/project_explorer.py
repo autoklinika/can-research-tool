@@ -4,16 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QTreeView,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QAbstractItemView, QTreeView, QVBoxLayout, QWidget
 
 from app.project import CrtProject, SessionRecord
 from app.project_dbc import list_project_dbc
@@ -41,42 +32,6 @@ class ProjectExplorer(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        header = QFrame(self)
-        header.setObjectName("projectExplorerHeader")
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(8, 7, 8, 6)
-        header_layout.setSpacing(2)
-
-        self.project_name = QLabel("Brak projektu", header)
-        self.project_name.setObjectName("projectExplorerName")
-        header_layout.addWidget(self.project_name)
-
-        self.project_path = QLabel("", header)
-        self.project_path.setObjectName("secondaryText")
-        self.project_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.project_path.setToolTip("")
-        header_layout.addWidget(self.project_path)
-        root.addWidget(header)
-
-        toolbar_widget = QWidget(self)
-        toolbar = QHBoxLayout(toolbar_widget)
-        toolbar.setContentsMargins(5, 5, 5, 5)
-        toolbar.setSpacing(4)
-
-        self.add_area_button = QPushButton("+ Obszar", toolbar_widget)
-        self.add_area_button.setObjectName("addStudyAreaButton")
-        self.add_area_button.setToolTip("Dodaj obszar badań, np. EGR lub VGT")
-        self.add_area_button.clicked.connect(self.add_area_requested)
-        toolbar.addWidget(self.add_area_button)
-
-        self.import_button = QPushButton("Importuj", toolbar_widget)
-        self.import_button.setObjectName("importProjectLogButton")
-        self.import_button.setToolTip("Importuj zapisany log CRT lub Kvaser CSV")
-        self.import_button.clicked.connect(self.import_requested)
-        toolbar.addWidget(self.import_button)
-        toolbar.addStretch(1)
-        root.addWidget(toolbar_widget)
-
         self.model = QStandardItemModel(self)
         self.model.setHorizontalHeaderLabels(["Projekt"])
         self.tree = QTreeView(self)
@@ -99,23 +54,11 @@ class ProjectExplorer(QWidget):
         self.model.clear()
         self.model.setHorizontalHeaderLabels(["Projekt"])
 
-        enabled = project is not None
-        self.add_area_button.setEnabled(enabled)
-        self.import_button.setEnabled(enabled)
-
         if project is None:
-            self.project_name.setText("Brak projektu")
-            self.project_path.clear()
-            self.project_path.setToolTip("")
             item = QStandardItem("Otwórz lub utwórz projekt CRT")
             item.setEnabled(False)
             self.model.appendRow(item)
             return
-
-        self.project_name.setText(project.manifest.name)
-        path_text = str(project.root)
-        self.project_path.setText(path_text)
-        self.project_path.setToolTip(path_text)
 
         self._build_tree(project)
         self.tree.expandToDepth(1)
