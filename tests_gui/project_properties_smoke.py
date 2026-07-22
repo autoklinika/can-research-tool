@@ -6,9 +6,9 @@ from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings, QThreadPool
+from PySide6.QtCore import QSettings, QThreadPool, QTimer
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox, QWidget
 
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
@@ -42,6 +42,19 @@ def main() -> None:
         assert action is not None
         assert action.isEnabled()
 
+        fake_live = QWidget(window)
+        fake_live.bitrate_combo = QComboBox(fake_live)
+        for bitrate in (125_000, 250_000, 500_000, 1_000_000):
+            fake_live.bitrate_combo.addItem(str(bitrate), bitrate)
+        fake_live.bitrate_combo.setCurrentIndex(
+            fake_live.bitrate_combo.findData(250_000)
+        )
+        fake_live.mode_combo = QComboBox(fake_live)
+        fake_live.mode_combo.addItem("BENCH", "bench")
+        fake_live.mode_combo.addItem("LISTEN ONLY", "listen-only")
+        fake_live.mode_combo.setCurrentIndex(fake_live.mode_combo.findData("bench"))
+        window.navigator.widgets["live-capture"] = fake_live
+
         dialog = window.services.create_project_properties_dialog(window, project)
         dialog.name_edit.setText("Edited project")
         dialog.description_edit.setPlainText("Edited description")
@@ -52,7 +65,15 @@ def main() -> None:
             dialog.mode_combo.findData("listen-only")
         )
 
-        window._apply_project_properties_from_dialog(dialog)
+        original_factory = window.services.create_project_properties_dialog
+        window.services.create_project_properties_dialog = (
+            lambda _parent, _project: dialog
+        )
+        try:
+            QTimer.singleShot(0, dialog.accept)
+            action.trigger()
+        finally:
+            window.services.create_project_properties_dialog = original_factory
         app.processEvents()
 
         assert project.root == original_root
@@ -66,6 +87,8 @@ def main() -> None:
         assert "Edited project" in window.project_status.text()
         assert "500 kbit/s" in window.project_context_label.text()
         assert "LISTEN-ONLY" in window.project_context_label.text()
+        assert fake_live.bitrate_combo.currentData() == 500_000
+        assert fake_live.mode_combo.currentData() == "listen-only"
 
         explorer_root = window.explorer.model.item(0, 0)
         assert explorer_root is not None
@@ -78,11 +101,35 @@ def main() -> None:
         assert overview_title is not None
         assert overview_title.text() == "Edited project"
 
+        saved_manifest = project.manifest
+        failing_dialog = original_factory(window, project)
+        failing_dialog.name_edit.setText("Unsaved project")
+        original_write_manifest = project._write_manifest
+        original_critical = QMessageBox.critical
+
+        def fail_write_manifest() -> None:
+            raise OSError("simulated manifest write failure")
+
+        project._write_manifest = fail_write_manifest
+        QMessageBox.critical = lambda *_args, **_kwargs: QMessageBox.StandardButton.Ok
+        try:
+            window._apply_project_properties_from_dialog(failing_dialog)
+        finally:
+            project._write_manifest = original_write_manifest
+            QMessageBox.critical = original_critical
+
+        assert project.manifest == saved_manifest
+        assert window.windowTitle() == "Edited project — CAN Research Tool"
+        assert window.explorer.model.item(0, 0).text() == "Edited project"
+
         reopened = CrtProject.open(original_root)
         assert reopened.manifest.name == "Edited project"
         assert reopened.database_path == original_database_path
 
+        failing_dialog.close()
         dialog.close()
+        window.navigator.widgets.pop("live-capture", None)
+        fake_live.deleteLater()
         window._close_project_tabs()
         window.close()
         window.deleteLater()
@@ -90,6 +137,9 @@ def main() -> None:
         app.sendPostedEvents()
         app.processEvents()
 
+        saved_manifest = None
+        failing_dialog = None
+        fake_live = None
         explorer_root = None
         overview_title = None
         overview = None
