@@ -71,6 +71,13 @@ def main() -> None:
         assert isinstance(filter_window, FilterManagerWindow)
         assert filter_window.isWindow()
         assert filter_window.isVisible()
+        assert filter_window.full_screen_action.shortcut().toString() == "F11"
+        filter_window.full_screen_action.trigger()
+        app.processEvents()
+        assert filter_window.isFullScreen()
+        filter_window.full_screen_action.trigger()
+        app.processEvents()
+        assert not filter_window.isFullScreen()
         assert window.tabs.count() == tab_count
         assert "global-filters" not in window.navigator.widgets
         assert window.tabs.indexOf(filter_window.manager) == -1
