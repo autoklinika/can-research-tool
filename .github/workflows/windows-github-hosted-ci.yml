@@ -50,6 +50,7 @@ jobs:
             @{ Name = "Project properties smoke"; Command = "python .\tests_gui\project_properties_smoke.py" },
             @{ Name = "Comparison sets smoke"; Command = "python .\tests_gui\comparison_sets_smoke.py" },
             @{ Name = "Comparison statistics smoke"; Command = "python .\tests_gui\comparison_statistics_smoke.py" },
+            @{ Name = "Payload difference smoke"; Command = "python .\tests_gui\payload_difference_smoke.py" },
             @{ Name = "Deferred Live log save smoke"; Command = "python .\tests_gui\deferred_log_save_smoke.py" },
             @{ Name = "Project overview session details smoke"; Command = "python .\tests_gui\project_overview_session_details_smoke.py" },
             @{ Name = "Static filter editor smoke"; Command = "python .\tests_gui\static_filter_editor_smoke.py" },
