@@ -82,7 +82,7 @@ def main() -> int:
         assert widget.artifact_detail_tabs.tabText(0) == "Podsumowanie"
         assert widget.artifact_detail_tabs.tabText(1) == "Statystyki CAN ID"
         assert "Statystyki sesji" in widget.artifact_summary_line.text()
-        assert not widget.artifact_details.isVisible()
+        assert widget.artifact_details.isHidden()
 
         cards = widget.statistics_kpi_cards
         assert set(cards) == {"frames", "ids", "duration", "frequency", "anomalies"}
@@ -108,7 +108,7 @@ def main() -> int:
         assert delegate is widget.statistics_share_delegate
         widget.artifact_info_toggle.click()
         app.processEvents()
-        assert widget.artifact_details.isVisible()
+        assert not widget.artifact_details.isHidden()
         assert "INFORMACJE O ARTEFAKCIE" in widget.artifact_details.toPlainText()
         assert _sha256(session_path) == source_hash
 
@@ -123,7 +123,7 @@ def main() -> int:
         assert reopened.statistics_kpi_cards["frames"].value_label.text() == "6"
         assert reopened.statistics_kpi_cards["ids"].value_label.text() == "3"
         assert "Statystyki sesji" in reopened.artifact_summary_line.text()
-        assert not reopened.artifact_details.isVisible()
+        assert reopened.artifact_details.isHidden()
         assert _sha256(session_path) == source_hash
         _dispose_widget(app, reopened)
         del reopened
