@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from app.project import CrtProject
 
 from .comparison_analysis_dialog import ComparisonAnalysisDialog
 from .comparison_sets_view import ComparisonSetsView
+
+
+_FULL_SCREEN_STATE_PROPERTY = "comparisonAnalysisWasMaximized"
 
 
 class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
@@ -44,10 +49,36 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
             comparison_set.id,
             parent=self,
         )
+        configure_comparison_analysis_window(dialog)
         dialog.output_message.connect(self.output_message.emit)
         dialog.exec()
         self.refresh(comparison_set.id)
         self.changed.emit()
 
 
-__all__ = ["AnalysisEnabledComparisonSetsView"]
+def configure_comparison_analysis_window(dialog: ComparisonAnalysisDialog) -> None:
+    """Enable native maximization and an F11 full-screen toggle."""
+
+    dialog.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+    shortcut = QShortcut(QKeySequence("F11"), dialog)
+    shortcut.setObjectName("comparisonAnalysisFullScreenShortcut")
+    shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+    shortcut.activated.connect(lambda: _toggle_full_screen(dialog))
+
+
+def _toggle_full_screen(dialog: ComparisonAnalysisDialog) -> None:
+    if dialog.isFullScreen():
+        if bool(dialog.property(_FULL_SCREEN_STATE_PROPERTY)):
+            dialog.showMaximized()
+        else:
+            dialog.showNormal()
+        return
+
+    dialog.setProperty(_FULL_SCREEN_STATE_PROPERTY, dialog.isMaximized())
+    dialog.showFullScreen()
+
+
+__all__ = [
+    "AnalysisEnabledComparisonSetsView",
+    "configure_comparison_analysis_window",
+]
