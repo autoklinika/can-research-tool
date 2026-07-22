@@ -49,7 +49,7 @@ def main() -> None:
         dialog.show()
         app.processEvents()
 
-        assert dialog.provider_combo.count() == 1
+        assert dialog.provider_combo.count() == 2
         assert dialog.run_button.isEnabled()
         assert dialog.artifact_combo.count() == 0
         dialog.run_button.click()
@@ -69,7 +69,9 @@ def main() -> None:
             )
 
         with project._connect() as connection:
-            artifact_count = connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
+            artifact_count = connection.execute(
+                "SELECT COUNT(*) FROM artifacts"
+            ).fetchone()[0]
         assert ProjectDomainStore(project).schema_version == PROJECT_DOMAIN_SCHEMA_VERSION
         assert artifact_count == 1
 
