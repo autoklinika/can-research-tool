@@ -60,11 +60,13 @@ def main() -> int:
         widget.run_analysis_button.click()
         _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
 
+        assert widget.artifact_table is None
+        assert widget.artifact_selector.count() == 1
         assert widget.artifact_detail_tabs is not None
         assert widget.artifact_detail_tabs.count() == 2
         assert widget.artifact_detail_tabs.tabText(0) == "Podsumowanie"
         assert widget.artifact_detail_tabs.tabText(1) == "Statystyki CAN ID"
-        assert "PODSUMOWANIE SESJI" in widget.artifact_details.toPlainText()
+        assert "Statystyki sesji" in widget.artifact_summary_line.text()
 
         model = widget.statistics_model
         table = widget.statistics_table
@@ -105,11 +107,12 @@ def main() -> int:
         collect()
 
         reopened = container.create_session_view(session_path, project=project)
-        assert reopened.artifact_table.rowCount() == 1
+        assert reopened.artifact_table is None
+        assert reopened.artifact_selector.count() == 1
         assert reopened.statistics_model.total_rows == 3
         assert reopened.artifact_detail_tabs.tabText(0) == "Podsumowanie"
         assert reopened.artifact_detail_tabs.tabText(1) == "Statystyki CAN ID"
-        assert "PODSUMOWANIE SESJI" in reopened.artifact_details.toPlainText()
+        assert "Statystyki sesji" in reopened.artifact_summary_line.text()
         assert _sha256(session_path) == source_hash
         _dispose_widget(app, reopened)
         del reopened
