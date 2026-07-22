@@ -9,7 +9,7 @@ from .comparison_statistics import (
     COMPARISON_STATISTICS_PROVIDER_VERSION,
     ComparisonStatisticsProvider,
 )
-from .payload_difference_exact import (
+from .payload_difference_stage2_1 import (
     PAYLOAD_DIFFERENCE_ALGORITHM_VERSION,
     PAYLOAD_DIFFERENCE_ARTIFACT_SCHEMA_VERSION,
     PAYLOAD_DIFFERENCE_PROVIDER_ID,
