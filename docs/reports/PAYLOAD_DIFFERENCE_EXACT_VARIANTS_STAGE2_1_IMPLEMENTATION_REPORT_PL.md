@@ -71,6 +71,20 @@ Blokadę zastąpiono wersjonowaniem i bezpiecznym usuwaniem:
 
 Stan w tabeli zmieniono z mylącego `Zablokowany` na `Z analizami`. Przyciski pozostają aktywne, a opis wyjaśnia semantykę tworzenia nowej wersji i zachowania historii.
 
+## Wspólny tryb pełnoekranowy F11
+
+Dodano wspólny `FullScreenController`, aby duże okna CRT korzystały z jednej implementacji zamiast własnych skrótów i rozbieżnych zasad przywracania stanu.
+
+Obsługę `F11` otrzymały:
+
+- główne okno CAN Research Tool,
+- okno analizy porównawczej,
+- osobne okno globalnych filtrów,
+- osobne okno wyszukiwania w logach,
+- katalog projektów CRT.
+
+Dla głównego okna akcja `Pełny ekran` jest również dostępna w menu `Widok`. Ponowne naciśnięcie `F11` przywraca poprzedni stan: zwykły albo zmaksymalizowany. Okna dialogowe analizy i katalogu otrzymują również natywny przycisk maksymalizacji.
+
 ## Walidacja dodana do repozytorium
 
 - test deterministyczności i identycznego SHA-256,
@@ -83,6 +97,9 @@ Stan w tabeli zmieniono z mylącego `Zablokowany` na `Z analizami`. Przyciski po
 - test edycji analizowanego zestawu przez utworzenie nowej wersji,
 - test bezpiecznego usunięcia analizowanego zestawu bez usuwania historii,
 - smoke GUI obejmujący aktywne przyciski po analizie, wersjonowaną edycję i usunięcie,
+- smoke startu aplikacji obejmujący `F11` głównego okna i okna wyszukiwania,
+- smoke okna filtrów obejmujący wejście i wyjście z pełnego ekranu,
+- smoke analizy porównawczej obejmujący wspólną akcję `F11` i przycisk maksymalizacji,
 - nowy test został dodany do workflow GUI Regressions; pełny Windows CI uruchamia cały pytest.
 
 Izolowany test magazynu SQLite wykonany poza repozytorium potwierdził poprawne zliczanie, timestampy, przejście do SQLite i usunięcie katalogu tymczasowego.
@@ -110,4 +127,4 @@ Przy ekstremalnej liczbie unikalnych payloadów sam wynik może więc być bardz
 
 ## Status
 
-Implementacja i testy zostały zapisane na osobnej gałęzi stacked na Stage 2. Aktualny HEAD obejmuje także naprawę edycji i usuwania zestawów analizowanych. GitHub Actions dla tego HEAD zostały uruchomione; pełny pytest, Linux GUI CI i Windows GitHub-hosted CI pozostają do końcowego potwierdzenia.
+Implementacja i testy zostały zapisane na osobnej gałęzi stacked na Stage 2. Aktualny HEAD obejmuje także naprawę edycji i usuwania zestawów analizowanych oraz wspólną obsługę `F11` w dużych oknach CRT. GitHub Actions dla tego HEAD zostały uruchomione; pełny pytest, Linux GUI CI i Windows GitHub-hosted CI pozostają do końcowego potwierdzenia.
