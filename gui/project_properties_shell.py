@@ -153,9 +153,15 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
 
         bitrate_combo = getattr(live_capture, "bitrate_combo", None)
         if bitrate_combo is not None:
-            bitrate_index = bitrate_combo.findData(project.manifest.default_bitrate)
-            if bitrate_index >= 0:
-                bitrate_combo.setCurrentIndex(bitrate_index)
+            default_bitrate = int(project.manifest.default_bitrate)
+            bitrate_index = bitrate_combo.findData(default_bitrate)
+            if bitrate_index < 0:
+                bitrate_combo.addItem(
+                    f"{default_bitrate:,}".replace(",", " "),
+                    default_bitrate,
+                )
+                bitrate_index = bitrate_combo.findData(default_bitrate)
+            bitrate_combo.setCurrentIndex(bitrate_index)
 
         mode_combo = getattr(live_capture, "mode_combo", None)
         if mode_combo is not None:
