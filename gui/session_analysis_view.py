@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -172,7 +170,7 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         self.artifact_details = QPlainTextEdit(splitter)
         self.artifact_details.setObjectName("sessionArtifactDetails")
         self.artifact_details.setReadOnly(True)
-        self.artifact_details.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.artifact_details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         splitter.addWidget(self.artifact_details)
         splitter.setSizes((760, 520))
         root.addWidget(splitter, 1)
@@ -249,7 +247,7 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         self.analysis_progress.setValue(100)
         self.analysis_progress.setFormat("Gotowe — 100%")
         self.analysis_status.setText("Analiza zakończona. Artefakt został zapisany w projekcie.")
-        self._refresh_artifacts(preferred_artifact_id=preferred)
+        self._load_artifacts(preferred_artifact_id=preferred)
         if execution is not None:
             self.output_message.emit(
                 f"Analiza {execution.provider_id} zakończona: "
@@ -282,7 +280,10 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         self.cancel_analysis_button.setEnabled(False)
 
     @Slot()
-    def _refresh_artifacts(self, *, preferred_artifact_id: str = "") -> None:
+    def _refresh_artifacts(self) -> None:
+        self._load_artifacts()
+
+    def _load_artifacts(self, *, preferred_artifact_id: str = "") -> None:
         service = self._analysis_service
         record = self._session_record
         if service is None or record is None:
