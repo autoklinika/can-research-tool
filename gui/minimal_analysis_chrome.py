@@ -47,7 +47,7 @@ class MinimalAnalysisChromeSessionViewWidget(CompactArtifactSessionViewWidget):
     def _analysis_completed(self, result: object) -> None:
         super()._analysis_completed(result)
         self._sync_result_navigation()
-        self._set_activity_visible(progress=False, status=False)
+        self._sync_idle_activity_state()
 
     @Slot(str)
     def _analysis_failed(self, error: str) -> None:
