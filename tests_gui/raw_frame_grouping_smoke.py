@@ -10,6 +10,7 @@ from app.models import CanFrame
 from app.project import CrtProject
 from gui.grouped_frame_model import GroupedFrameTableModel
 from gui.live_capture import LiveCaptureWidget
+from gui.live_filter_integration import _find_layout_containing
 from gui.raw_frame_grouping import GroupedFinalStreamingLiveFilterIntegration
 
 
@@ -71,6 +72,15 @@ def main() -> None:
             filter_integration_factory=GroupedFinalStreamingLiveFilterIntegration,
         )
         integration = widget._live_filter_integration
+
+        view_controls = _find_layout_containing(widget.layout(), widget.pause_view)
+        assert view_controls is not None
+        controls_index = view_controls.indexOf(widget.raw_frame_view_controls)
+        pause_index = view_controls.indexOf(widget.pause_view)
+        assert controls_index >= 0
+        assert controls_index < pause_index
+        raw_page = widget.data_tabs.widget(widget.raw_tab_index)
+        assert raw_page.layout().indexOf(widget.raw_frame_view_controls) == -1
 
         assert widget.raw_frame_list_view.isChecked()
         assert widget.frame_table.model() is widget.frame_model
