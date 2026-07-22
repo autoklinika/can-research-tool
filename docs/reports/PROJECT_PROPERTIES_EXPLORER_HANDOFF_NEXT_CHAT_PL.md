@@ -14,11 +14,13 @@ Issue: #40 `Usuń nagłówek i przyciski nad drzewem projektu`
 
 Etap jest funkcjonalnie zakończony i ręcznie potwierdzony przez użytkownika jako działający.
 
-Zwalidowany commit kodu przed dodaniem tego raportu:
+Aktualny funkcjonalny HEAD przed końcową aktualizacją tego raportu:
 
-`5264e0ddd3c1f8175fa1749723ecdb555c8f0e55`
+`2b8ea2a86160c476d4c94ed45e4d9be917cf43c1`
 
-PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34).
+PR #35 pozostaje draftem. Nie został oznaczony jako gotowy do review i nie został scalony. PR jest stacked na `agent/minimal-analysis-chrome-stage8` (PR #34), którego aktualny HEAD po końcowych poprawkach review to:
+
+`f329221a30d179acdccfc51d04b916684c9c2a61`
 
 ## Zrealizowany zakres
 
@@ -63,30 +65,35 @@ Zachowane funkcje:
 - import pozostaje dostępny również w widoku Przegląd,
 - dodawanie obszaru pozostaje dostępne w widoku Przegląd.
 
-Usunięto również martwe sygnały `import_requested` i `add_area_requested` oraz ich nieużywane połączenia w oknie głównym.
+Usunięto również martwe sygnały `import_requested` i `add_area_requested`, ich nieużywane połączenia w oknie głównym oraz selektory motywów `projectExplorerHeader` i `projectExplorerName`, które pozostały po usuniętych widgetach.
 
 ## Dodatkowe poprawki wykryte podczas review
 
-Podczas końcowego review znaleziono i poprawiono trzy rzeczywiste problemy w pierwotnym zakresie PR #35:
+Podczas końcowego review znaleziono i poprawiono rzeczywiste problemy w pierwotnym zakresie PR #35:
 
 1. Przy błędzie zapisu manifestu poprzedni manifest jest przywracany również w pamięci, dzięki czemu aplikacja nie używa wartości, których zapis na dysku się nie powiódł.
 2. Już otwarty widok Live otrzymuje nowe domyślne bitrate i tryb odbioru dla kolejnej sesji.
 3. Usunięto lokalny limit 200 znaków w dialogu właściwości, który mógł skrócić istniejącą długą nazwę projektu przy zapisie innego pola.
+4. Usunięto martwe selektory QSS dla skasowanego nagłówka i etykiety nazwy Explorera, zachowując style widoku Przegląd.
 
 Smoke test właściwości projektu został rozszerzony tak, aby rzeczywiście uruchamiał akcję menu i akceptował modalny dialog zamiast omijać przepływ GUI.
 
+Na bazowym PR #34 poprawiono również widoczność błędu katalogu artefaktów zarówno przy inicjalizacji widoku, jak i po zakończeniu analizy. Smoke Stage 8 obejmuje teraz stan poprawnego zakończenia, failure, cancellation, niedostępny kontekst oraz błąd odczytu katalogu artefaktów.
+
 ## Walidacja
 
-Dla commita `5264e0ddd3c1f8175fa1749723ecdb555c8f0e55` potwierdzono:
+Dla funkcjonalnego HEAD PR #35 `2b8ea2a86160c476d4c94ed45e4d9be917cf43c1` potwierdzono:
 
 - `Tests` — PASS,
 - `GUI Regressions` — PASS,
 - `Live Preview Capacity` — PASS,
 - `Windows GitHub-Hosted CI` — PASS.
 
-Pierwszy przebieg `Tests` miał pojedynczy niezwiązany z tym diffem wyścig czasowy w `test_capture_markers.py` (`225 passed, 1 failed`). Ponowiono wyłącznie nieudany job; drugi przebieg zakończył się sukcesem. Nie zmieniano z tego powodu `CaptureService` ani testu Capture.
+Końcowa aktualizacja raportu uruchamia nowy pełny przebieg CI PR #35 już względem zaktualizowanej bazy PR #34. `Windows Self-Hosted CI` nie blokuje tego etapu, ponieważ zmiany nie korzystają z Kvasera, CANlib ani sprzętu CAN.
 
-Użytkownik uruchomił aktualną gałąź lokalnie w VS Code i potwierdził, że zmiana GUI działa poprawnie.
+Pierwszy wcześniejszy przebieg `Tests` miał pojedynczy niezwiązany z tym diffem wyścig czasowy w `test_capture_markers.py` (`225 passed, 1 failed`). Ponowiono wyłącznie nieudany job; drugi przebieg zakończył się sukcesem. Nie zmieniano z tego powodu `CaptureService` ani testu Capture.
+
+Użytkownik uruchomił gałąź lokalnie w VS Code i potwierdził, że zmiana GUI działa poprawnie.
 
 ## Zachowane kontrakty
 
@@ -97,7 +104,7 @@ Nie zmieniono:
 - kodu CAN TX/RX,
 - formatu sesji i indeksów,
 - kolejności ani kompletności zapisu surowych ramek,
-- warstwy analiz zapisanej sesji,
+- warstwy analiz zapisanej sesji poza poprawką widoczności statusu w bazowym PR #34,
 - schematu `project.sqlite`,
 - struktury `.crt`,
 - zależności projektu.
@@ -120,10 +127,10 @@ Powód: dwa wcześniejsze uruchomienia dla issue #40 utworzyły błędne PR #41 
 
 Przed scaleniem należy:
 
-1. Sprawdzić aktualny HEAD PR #34 i zależność stacked PR #35.
-2. Potwierdzić, że PR #34 jest gotowy i bezpiecznie włączyć go w poprawnej kolejności.
-3. Po aktualizacji bazy ponownie sprawdzić diff i CI PR #35.
-4. Dopiero po wyraźnej decyzji użytkownika oznaczyć PR #35 jako ready i wykonać merge.
-5. Po merge zamknąć issue #40 jako completed.
+1. Potwierdzić końcowe CI i review PR #34.
+2. Potwierdzić końcowe CI i review PR #35 względem aktualnej bazy PR #34.
+3. Przejść cały stacked chain od najniższego niescalonego PR w poprawnej kolejności.
+4. Dopiero po wyraźnej decyzji użytkownika oznaczać PR-y jako ready i wykonywać merge.
+5. Po merge PR #35 zamknąć issue #40 jako completed.
 
 Nie wykonywać merge ani zmiany statusu draft bez jednoznacznego polecenia użytkownika.
