@@ -11,6 +11,7 @@ from app.project_catalog import ProjectCatalog, load_project_profile, save_proje
 from .project_catalog_dialog import ProjectCatalogDialog
 from .project_properties_dialog import ProjectPropertiesDialog
 from .search_enabled_shell import SearchEnabledMainWindow
+from .window_fullscreen import enable_full_screen
 
 
 class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
@@ -40,6 +41,12 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         self.project_properties_action.setEnabled(False)
         self.project_properties_action.triggered.connect(self._edit_project)
 
+        self.full_screen_controller = enable_full_screen(
+            self,
+            action_object_name="mainWindowFullScreenAction",
+        )
+        self.full_screen_action = self.full_screen_controller.action
+
     def _build_menu(self) -> None:
         menu_bar = self.menuBar()
         menu_bar.clear()
@@ -61,6 +68,8 @@ class ProjectPropertiesMainWindow(SearchEnabledMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.toggle_primary_toolbar_action)
         view_menu.addAction(self.reset_layout_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.full_screen_action)
 
         capture_menu = menu_bar.addMenu("Capture")
         capture_menu.addAction(self.live_action)
