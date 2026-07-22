@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QAbstractItemView, QTreeView, QVBoxLayout, QWidget
 
+from app.comparison_sets import ComparisonSetStore
 from app.project import CrtProject, SessionRecord
 from app.project_dbc import list_project_dbc
 
@@ -19,6 +20,7 @@ class ProjectExplorer(QWidget):
     open_live_capture = Signal()
     open_session = Signal(str)
     open_area = Signal(str)
+    open_comparison_sets = Signal(str)
     open_decoders = Signal()
     open_filters = Signal()
 
@@ -109,8 +111,40 @@ class ProjectExplorer(QWidget):
             areas_root.appendRow(self._placeholder("Brak obszarów"))
         root.appendRow(areas_root)
 
+        root.appendRow(self._build_comparison_sets(project))
         root.appendRow(self._build_decoders(project))
         root.appendRow(self._item("Filtry globalne", "filters", ""))
+
+    def _build_comparison_sets(self, project: CrtProject) -> QStandardItem:
+        comparison_root = self._item(
+            "Zestawy porównawcze",
+            "comparison_sets",
+            "",
+        )
+        sessions_by_id = {
+            session.id: session for session in project.list_sessions()
+        }
+        for comparison_set in ComparisonSetStore(project).list():
+            item = self._item(
+                f"{comparison_set.name} ({len(comparison_set.session_ids)})",
+                "comparison_set",
+                comparison_set.id,
+            )
+            base = sessions_by_id.get(comparison_set.base_session_id or "")
+            session_names = [
+                sessions_by_id[session_id].name
+                for session_id in comparison_set.session_ids
+                if session_id in sessions_by_id
+            ]
+            item.setToolTip(
+                f"Sesja bazowa: {'—' if base is None else base.name}\n"
+                f"Sesje: {', '.join(session_names)}\n"
+                f"Synchronizacja: {comparison_set.synchronization_mode}"
+            )
+            comparison_root.appendRow(item)
+        if comparison_root.rowCount() == 0:
+            comparison_root.appendRow(self._placeholder("Brak zestawów"))
+        return comparison_root
 
     def _build_decoders(self, project: CrtProject) -> QStandardItem:
         records = list_project_dbc(project)
@@ -185,6 +219,8 @@ class ProjectExplorer(QWidget):
             self.open_session.emit(str(Path(value)))
         elif node_type == "area" and value:
             self.open_area.emit(str(value))
+        elif node_type in {"comparison_sets", "comparison_set"}:
+            self.open_comparison_sets.emit(str(value or ""))
         elif node_type in {"decoders", "dbc"}:
             self.open_decoders.emit()
         elif node_type == "filters":
