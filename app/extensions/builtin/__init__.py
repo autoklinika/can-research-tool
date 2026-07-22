@@ -9,7 +9,7 @@ from .comparison_statistics import (
     COMPARISON_STATISTICS_PROVIDER_VERSION,
     ComparisonStatisticsProvider,
 )
-from .message_sequence import (
+from .message_sequence_exact import (
     MESSAGE_SEQUENCE_ALGORITHM_VERSION,
     MESSAGE_SEQUENCE_ARTIFACT_SCHEMA_VERSION,
     MESSAGE_SEQUENCE_PROVIDER_ID,
