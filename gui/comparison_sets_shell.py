@@ -7,7 +7,7 @@ from .project_properties_shell import ProjectPropertiesMainWindow
 
 
 class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
-    """CRT shell with persistent multi-session comparison-set management."""
+    """CRT shell with persistent comparison sets and passive comparison analyses."""
 
     def _build_actions(self) -> None:
         super()._build_actions()
@@ -16,7 +16,7 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         except (RuntimeError, TypeError):
             pass
         self.compare_action.setToolTip(
-            "Twórz trwałe zestawy wielu zapisanych sesji do przyszłych analiz porównawczych"
+            "Twórz trwałe zestawy sesji i uruchamiaj pasywne analizy porównawcze"
         )
         self.compare_action.triggered.connect(
             lambda _checked=False: self._open_comparison_sets()
