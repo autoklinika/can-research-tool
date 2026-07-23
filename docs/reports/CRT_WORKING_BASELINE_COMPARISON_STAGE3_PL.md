@@ -63,4 +63,4 @@ Końcowa gałąź Stage 3 zastępuje długi stack historycznych PR-ów. Do `main
 
 ## Końcowy PR integracyjny
 
-PR #48 został przestawiony bezpośrednio na `main`. Ten commit uruchamia pełny końcowy zestaw GitHub Actions dla skumulowanej wersji przed merge.
+PR #48 został przestawiony bezpośrednio na `main`. Gałąź zawiera aktualny `main`, zachowuje Master Plan i konfigurację Copilota bez zmian, a ten commit uruchamia pełny końcowy zestaw GitHub Actions przed merge.
