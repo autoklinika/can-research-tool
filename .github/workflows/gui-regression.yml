@@ -65,6 +65,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/message_sequence_comparison_smoke.py
+      - name: Verify graphical comparison dashboard
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_visualization_smoke.py
       - name: Verify project preparation progress
         env:
           QT_QPA_PLATFORM: offscreen
