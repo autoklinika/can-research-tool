@@ -1,16 +1,41 @@
 from __future__ import annotations
 
+import gc
 import os
+from tempfile import TemporaryDirectory
+from time import monotonic
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QSettings, QThreadPool
 from PySide6.QtWidgets import QApplication
 
-from gui.comparison_visualization import ComparisonVisualizationWidget
+from app.comparison_sets import ComparisonSetStore
+from app.models import CanFrame, CaptureSession
+from app.project import CrtProject
+from app.session_stream import SessionStreamWriter
+from gui.comparison_visualization import (
+    ComparisonVisualizationDialog,
+    ComparisonVisualizationWidget,
+)
 
 
 def main() -> None:
     app = QApplication.instance() or QApplication([])
+    app.setOrganizationName("AutoklinikaTests")
+    app.setApplicationName("CRTComparisonVisualizationSmoke")
+    settings = QSettings()
+    settings.clear()
+
+    _widget_smoke(app)
+    _dialog_smoke(app)
+
+    settings.clear()
+    os.environ.pop("CRT_APP_DATA_DIR", None)
+    print("Comparison visualization smoke: OK")
+
+
+def _widget_smoke(app: QApplication) -> None:
     widget = ComparisonVisualizationWidget("Przed i po naprawie")
     widget.resize(1400, 850)
     widget.show()
@@ -35,6 +60,7 @@ def main() -> None:
     widget.table.selectRow(changed_row)
     app.processEvents()
     assert "0x100" in widget.inspector.key_label.text()
+    assert widget.payload_preview.isVisible()
     assert widget.payload_preview.table.columnCount() == 2
     assert widget.payload_preview.table.item(2, 0).text() == "+1"
 
@@ -44,6 +70,9 @@ def main() -> None:
     assert widget.table.rowCount() == 100
     assert widget.rows_label.text() == "Wyświetlanie 1–100 z 620"
     assert widget.page_label.text() == "Strona 1 z 7"
+    assert not widget.frequency_panel.rows
+    assert widget.frequency_card.value_label.text() == "—"
+    assert not widget.payload_preview.isVisible()
 
     page_size_index = widget.page_size_combo.findData(500)
     assert page_size_index >= 0
@@ -66,7 +95,68 @@ def main() -> None:
     widget.deleteLater()
     app.sendPostedEvents()
     app.processEvents()
-    print("Comparison visualization smoke: OK")
+
+
+def _dialog_smoke(app: QApplication) -> None:
+    with TemporaryDirectory() as temporary:
+        os.environ["CRT_APP_DATA_DIR"] = f"{temporary}/app-data"
+        project = CrtProject.create(
+            f"{temporary}/project",
+            name="Comparison visualization dialog",
+        )
+        before = _create_session(project, "before", _before_frames())
+        after = _create_session(project, "after", _after_frames())
+        comparison = ComparisonSetStore(project).create(
+            name="Before versus after",
+            session_ids=(before.id, after.id),
+            base_session_id=before.id,
+        )
+
+        dialog = ComparisonVisualizationDialog(project, comparison.id)
+        dialog.resize(1400, 850)
+        dialog.show()
+        app.processEvents()
+
+        assert dialog.result_tabs.count() == 2
+        assert dialog.result_tabs.tabText(0) == "Przegląd graficzny"
+        assert dialog.result_tabs.tabText(1) == "Dane artefaktu"
+        assert dialog.run_all_button.isEnabled()
+        assert dialog.artifact_combo.count() == 0
+
+        dialog.run_all_button.click()
+        _wait_for_batch(app, dialog)
+
+        assert dialog.artifact_combo.count() == 3
+        assert len(dialog.dashboard.data.artifact_schemas) == 3
+        assert dialog.dashboard.table.rowCount() > 0
+        assert dialog.dashboard.payload_card.value_label.text() != "—"
+        assert dialog.dashboard.sequence_card.value_label.text() != "—"
+        assert "Komplet analiz zakończony" in dialog.status_label.text()
+        assert not dialog.progress.isVisible()
+        assert dialog.run_all_button.isEnabled()
+
+        dialog.close()
+        dialog.deleteLater()
+        assert QThreadPool.globalInstance().waitForDone(5_000)
+        app.sendPostedEvents()
+        app.processEvents()
+
+        dialog = None
+        project = None
+        gc.collect()
+
+
+def _wait_for_batch(
+    app: QApplication,
+    dialog: ComparisonVisualizationDialog,
+) -> None:
+    deadline = monotonic() + 30.0
+    while dialog._task is not None or dialog._batch_total > 0:
+        QThreadPool.globalInstance().waitForDone(50)
+        app.sendPostedEvents()
+        app.processEvents()
+        if monotonic() > deadline:
+            raise TimeoutError("comparison visualization batch did not finish")
 
 
 def _find_row(widget: ComparisonVisualizationWidget, text: str) -> int:
@@ -249,6 +339,76 @@ def _profile(first: str, second: str) -> dict:
             },
         ],
     }
+
+
+def _before_frames() -> list[CanFrame]:
+    return [
+        _frame(0, 0, 0x100, b"\x10\x20"),
+        _frame(1, 20_000_000, 0x200, b"\xAA"),
+        _frame(2, 50_000_000, 0x100, b"\x10\x21"),
+        _frame(3, 100_000_000, 0x100, b"\x10\x20"),
+        _frame(4, 120_000_000, 0x200, b"\xAA"),
+    ]
+
+
+def _after_frames() -> list[CanFrame]:
+    return [
+        _frame(0, 0, 0x100, b"\x11\x20"),
+        _frame(1, 10_000_000, 0x300, b"\xBB"),
+        _frame(2, 25_000_000, 0x100, b"\x11\x22"),
+        _frame(3, 50_000_000, 0x100, b"\x11\x22"),
+        _frame(4, 60_000_000, 0x300, b"\xBB"),
+        _frame(5, 75_000_000, 0x100, b"\x11\x20"),
+        _frame(6, 100_000_000, 0x100, b"\x11\x22"),
+    ]
+
+
+def _frame(
+    sequence: int,
+    timestamp_ns: int,
+    arbitration_id: int,
+    data: bytes,
+) -> CanFrame:
+    return CanFrame(
+        sequence=sequence,
+        timestamp_ns=timestamp_ns,
+        arbitration_id=arbitration_id,
+        data=data,
+        channel=0,
+        is_extended_id=False,
+    )
+
+
+def _create_session(
+    project: CrtProject,
+    name: str,
+    frames: list[CanFrame],
+):
+    path = project.live_sessions_dir / f"{name}.crt.jsonl"
+    capture = CaptureSession(
+        name=name,
+        source="test",
+        bitrate=250_000,
+        channel=0,
+    )
+    writer = SessionStreamWriter(capture, path)
+    writer.open()
+    for frame in frames:
+        writer.append(frame)
+    writer.close({"clean_close": True})
+    record = project.register_session(
+        path,
+        name=name,
+        source="test",
+        status="ready",
+    )
+    project.finalize_session(
+        path,
+        frame_count=len(frames),
+        marker_count=0,
+        duration_s=max(frame.timestamp_ns for frame in frames) / 1e9,
+    )
+    return project.session_by_path(path) or record
 
 
 if __name__ == "__main__":
