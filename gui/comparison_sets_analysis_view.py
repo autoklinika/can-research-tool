@@ -58,13 +58,17 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
             existing.activateWindow()
             return
 
+        # Keep this window fully independent from the main CRT window. On
+        # Windows, a non-modal dialog with an owner is still kept above that
+        # owner and can hide the session opened by evidence navigation.
         dialog = ComparisonVisualizationDialog(
             self.project,
             comparison_set.id,
-            parent=self,
+            parent=None,
         )
         dialog.setModal(False)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         configure_comparison_analysis_window(dialog)
         dialog.output_message.connect(self.output_message.emit)
         dialog.evidence_open_requested.connect(self.evidence_open_requested.emit)
