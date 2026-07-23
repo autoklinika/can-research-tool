@@ -60,3 +60,7 @@ Integracja nie zmienia założeń bezpieczeństwa:
 ## Strategia integracji
 
 Końcowa gałąź Stage 3 zastępuje długi stack historycznych PR-ów. Do `main` powinna zostać scalona jednym końcowym PR-em integracyjnym, najlepiej metodą squash. Starsze PR-y stacka należy następnie zamknąć jako zastąpione przez integrację, bez osobnego merge każdego etapu.
+
+## Końcowy PR integracyjny
+
+PR #48 został przestawiony bezpośrednio na `main`. Ten commit uruchamia pełny końcowy zestaw GitHub Actions dla skumulowanej wersji przed merge.
