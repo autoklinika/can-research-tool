@@ -1,27 +1,39 @@
 from __future__ import annotations
 
+import gc
 import os
 from tempfile import TemporaryDirectory
+from time import monotonic
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QThreadPool
 from PySide6.QtWidgets import QApplication
 
 from app.comparison_sets import ComparisonSetStore
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
+from gui.application_container import ApplicationContainer
 from gui.comparison_visualization import (
     ComparisonVisualizationDialog,
     ComparisonVisualizationWidget,
 )
 from gui.comparison_visualization_model import STATUS_MISSING
+from gui.project_navigator import ProjectNavigator
 
 
 def main() -> None:
     app = QApplication.instance() or QApplication([])
+    app.setOrganizationName("AutoklinikaTests")
+    app.setApplicationName("CRTComparisonVisualizationNavigationSmoke")
+    QSettings().clear()
+
     _filter_and_evidence_widget_smoke(app)
     _advanced_dialog_smoke(app)
+    _coordinator_smoke(app)
+
+    QSettings().clear()
     print("Comparison visualization navigation smoke: OK")
 
 
@@ -66,8 +78,7 @@ def _filter_and_evidence_widget_smoke(app: QApplication) -> None:
 
     widget.close()
     widget.deleteLater()
-    app.sendPostedEvents()
-    app.processEvents()
+    _drain_events(app)
 
 
 def _advanced_dialog_smoke(app: QApplication) -> None:
@@ -76,8 +87,8 @@ def _advanced_dialog_smoke(app: QApplication) -> None:
             f"{temporary}/project",
             name="Advanced controls",
         )
-        before = _create_session(project, "before", 0x100)
-        after = _create_session(project, "after", 0x200)
+        before = _create_session(project, "before", (0x100,))
+        after = _create_session(project, "after", (0x200,))
         comparison = ComparisonSetStore(project).create(
             name="Before versus after",
             session_ids=(before.id, after.id),
@@ -97,9 +108,60 @@ def _advanced_dialog_smoke(app: QApplication) -> None:
 
         dialog._prepare_evidence(after.id, "0:STD:200:data")
         assert dialog.pending_evidence == (after.id, "0:STD:200:data")
+        dialog.close()
         dialog.deleteLater()
-        app.sendPostedEvents()
+        _drain_events(app)
+
+        dialog = None
+        project = None
+        gc.collect()
+
+
+def _coordinator_smoke(app: QApplication) -> None:
+    with TemporaryDirectory() as temporary:
+        os.environ["CRT_APP_DATA_DIR"] = f"{temporary}/app-data"
+        project = CrtProject.create(
+            f"{temporary}/project",
+            name="Evidence navigation",
+        )
+        session = _create_session(project, "evidence", (0x100, 0x200))
+        session_path = project.absolute_path(session.relative_path)
+
+        window = ApplicationContainer().create_main_window()
+        window.show()
+        window._set_project(project)
         app.processEvents()
+        window._open_comparison_evidence(session.id, "0:STD:200:data")
+
+        key = ProjectNavigator.session_key(session_path)
+        deadline = monotonic() + 15.0
+        view = None
+        while monotonic() < deadline:
+            QThreadPool.globalInstance().waitForDone(50)
+            app.sendPostedEvents()
+            app.processEvents()
+            view = window.navigator.widget(key)
+            if view is not None and view.frame_table.currentIndex().row() == 1:
+                break
+        assert view is not None
+        assert window.tabs.currentWidget() is view
+        assert view.tabs.currentIndex() == view.raw_tab_index
+        assert view.frame_table.currentIndex().row() == 1
+        assert "0x200" in view.frame_table.model().data(
+            view.frame_table.model().index(1, 2)
+        )
+
+        assert QThreadPool.globalInstance().waitForDone(5_000)
+        window.navigator.close_all()
+        window.close()
+        window.deleteLater()
+        _drain_events(app)
+
+        view = None
+        window = None
+        project = None
+        gc.collect()
+        os.environ.pop("CRT_APP_DATA_DIR", None)
 
 
 def _payloads() -> dict[str, dict]:
@@ -163,7 +225,11 @@ def _metrics(count: int) -> dict:
     }
 
 
-def _create_session(project: CrtProject, name: str, arbitration_id: int):
+def _create_session(
+    project: CrtProject,
+    name: str,
+    arbitration_ids: tuple[int, ...],
+):
     path = project.live_sessions_dir / f"{name}.crt.jsonl"
     capture = CaptureSession(
         name=name,
@@ -173,15 +239,16 @@ def _create_session(project: CrtProject, name: str, arbitration_id: int):
     )
     writer = SessionStreamWriter(capture, path)
     writer.open()
-    writer.append(
-        CanFrame(
-            sequence=0,
-            timestamp_ns=0,
-            arbitration_id=arbitration_id,
-            data=b"\x01",
-            channel=0,
+    for sequence, arbitration_id in enumerate(arbitration_ids):
+        writer.append(
+            CanFrame(
+                sequence=sequence,
+                timestamp_ns=sequence * 1_000_000,
+                arbitration_id=arbitration_id,
+                data=bytes((sequence + 1,)),
+                channel=0,
+            )
         )
-    )
     writer.close({"clean_close": True})
     record = project.register_session(
         path,
@@ -191,11 +258,18 @@ def _create_session(project: CrtProject, name: str, arbitration_id: int):
     )
     project.finalize_session(
         path,
-        frame_count=1,
+        frame_count=len(arbitration_ids),
         marker_count=0,
-        duration_s=0.0,
+        duration_s=max(0, len(arbitration_ids) - 1) / 1000.0,
     )
     return project.session_by_path(path) or record
+
+
+def _drain_events(app: QApplication) -> None:
+    app.sendPostedEvents()
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 if __name__ == "__main__":
