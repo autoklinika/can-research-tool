@@ -66,7 +66,7 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         self,
         session_id: str,
         message_key: str,
-        requester: object,
+        requester: object | None = None,
     ) -> None:
         coordinator = getattr(self, "_comparison_evidence_coordinator", None)
         if not isinstance(coordinator, ComparisonEvidenceCoordinator):
@@ -92,8 +92,8 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         coordinator.open_evidence(
             session_id,
             message_key,
-            on_opened=opened,
-            on_failed=failed,
+            on_opened=opened if requester is not None else None,
+            on_failed=failed if requester is not None else None,
         )
 
     def _import_completed(self, source: str, target: str) -> None:
