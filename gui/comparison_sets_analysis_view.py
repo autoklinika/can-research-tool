@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from app.project import CrtProject
@@ -18,6 +18,8 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
 
     def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
         super().__init__(project, parent)
+        self._analysis_dialogs: dict[str, ComparisonVisualizationDialog] = {}
+
         analysis_toolbar = QHBoxLayout()
         self.analyze_button = QPushButton("Analizuj wybrany zestaw…", self)
         self.analyze_button.setObjectName("analyzeComparisonSetButton")
@@ -48,16 +50,37 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         comparison_set = self.selected_comparison_set()
         if comparison_set is None:
             return
+
+        existing = self._analysis_dialogs.get(comparison_set.id)
+        if existing is not None:
+            existing.showNormal()
+            existing.raise_()
+            existing.activateWindow()
+            return
+
         dialog = ComparisonVisualizationDialog(
             self.project,
             comparison_set.id,
             parent=self,
         )
+        dialog.setModal(False)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
         configure_comparison_analysis_window(dialog)
         dialog.output_message.connect(self.output_message.emit)
         dialog.evidence_open_requested.connect(self.evidence_open_requested.emit)
-        dialog.exec()
-        self.refresh(comparison_set.id)
+        dialog.finished.connect(
+            lambda _result, set_id=comparison_set.id: self._analysis_finished(set_id)
+        )
+        self._analysis_dialogs[comparison_set.id] = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _analysis_finished(self, comparison_set_id: str) -> None:
+        dialog = self._analysis_dialogs.pop(comparison_set_id, None)
+        if dialog is not None:
+            dialog.deleteLater()
+        self.refresh(comparison_set_id)
         self.changed.emit()
 
 
