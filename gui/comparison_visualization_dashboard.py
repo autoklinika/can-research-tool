@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -28,6 +29,9 @@ from .comparison_visualization_details import (
     PayloadDiffPreview,
 )
 from .comparison_visualization_model import (
+    SCHEMA_PAYLOAD,
+    SCHEMA_SEQUENCE,
+    SCHEMA_STATISTICS,
     STATUS_CHANGED,
     STATUS_MISSING,
     STATUS_NEW,
@@ -43,11 +47,23 @@ from .comparison_visualization_model import (
 
 DEFAULT_PAGE_SIZE = 100
 PAGE_SIZE_OPTIONS = (50, 100, 250, 500)
+MIN_VISIBLE_FREQUENCY_DELTA = 0.05
 STATUS_COLORS = {
-    STATUS_NEW: QColor("#4CAF50"),
-    STATUS_MISSING: QColor("#E53935"),
-    STATUS_CHANGED: QColor("#F9A825"),
-    "Bez zmian": QColor("#78909C"),
+    STATUS_NEW: QColor("#55d187"),
+    STATUS_MISSING: QColor("#ff6b6b"),
+    STATUS_CHANGED: QColor("#ffbf47"),
+    "Bez zmian": QColor("#91a4b7"),
+}
+STATUS_BACKGROUNDS = {
+    STATUS_NEW: QColor("#173a2a"),
+    STATUS_MISSING: QColor("#432124"),
+    STATUS_CHANGED: QColor("#44351b"),
+    "Bez zmian": QColor("#25303a"),
+}
+_SOURCE_NAMES = {
+    SCHEMA_STATISTICS: "statystyki CAN ID",
+    SCHEMA_PAYLOAD: "różnice payloadów",
+    SCHEMA_SEQUENCE: "sekwencje wiadomości",
 }
 
 
@@ -66,14 +82,18 @@ class ComparisonVisualizationWidget(QWidget):
         self._ordered_rows: list[ComparisonVisualRow] = []
         self._visible_rows: list[ComparisonVisualRow] = []
         self._page_index = 0
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
+
         self.overview_label = QLabel(self)
+        self.overview_label.setObjectName("comparisonOverviewHeader")
         self.overview_label.setWordWrap(True)
         root.addWidget(self.overview_label)
 
         cards = QHBoxLayout()
+        cards.setSpacing(10)
         self.new_card = ComparisonKpiCard("Nowe ID", self)
         self.missing_card = ComparisonKpiCard("Brakujące ID", self)
         self.payload_card = ComparisonKpiCard("Zmienione payloady", self)
@@ -92,19 +112,31 @@ class ComparisonVisualizationWidget(QWidget):
             cards.addWidget(card)
         root.addLayout(cards)
 
-        charts = QSplitter(Qt.Orientation.Horizontal, self)
-        self.heatmap = PresenceHeatmap(charts)
-        self.frequency_panel = FrequencyDeltaPanel(charts)
-        charts.addWidget(self.heatmap)
-        charts.addWidget(self.frequency_panel)
-        charts.setSizes((560, 560))
-        root.addWidget(charts, 1)
+        self.charts_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.charts_splitter.setObjectName("comparisonChartsSplitter")
+        self.charts_splitter.setChildrenCollapsible(False)
+        self.heatmap = PresenceHeatmap(self.charts_splitter)
+        self.frequency_panel = FrequencyDeltaPanel(self.charts_splitter)
+        self.charts_splitter.addWidget(self.heatmap)
+        self.charts_splitter.addWidget(self.frequency_panel)
+        self.charts_splitter.setStretchFactor(0, 1)
+        self.charts_splitter.setStretchFactor(1, 1)
+        self.charts_splitter.setSizes((620, 620))
+        self.charts_splitter.setMinimumHeight(235)
+        root.addWidget(self.charts_splitter, 1)
 
-        details = QSplitter(Qt.Orientation.Horizontal, self)
-        table_panel = QWidget(details)
+        self.details_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.details_splitter.setObjectName("comparisonDetailsSplitter")
+        self.details_splitter.setChildrenCollapsible(False)
+        table_panel = QFrame(self.details_splitter)
+        table_panel.setObjectName("comparisonDiffTablePanel")
         table_layout = QVBoxLayout(table_panel)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.setSpacing(4)
+        table_layout.setContentsMargins(10, 10, 10, 8)
+        table_layout.setSpacing(8)
+        table_title = QLabel("Tabela różnic", table_panel)
+        table_title.setObjectName("comparisonSectionTitle")
+        table_layout.addWidget(table_title)
+
         self.table = QTableWidget(0, 10, table_panel)
         self.table.setObjectName("comparisonVisualizationDiffTable")
         self.table.setHorizontalHeaderLabels(
@@ -130,7 +162,16 @@ class ComparisonVisualizationWidget(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
+        self.table.setShowGrid(False)
+        self.table.setHorizontalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        self.table.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(28)
+        self.table.horizontalHeader().setMinimumHeight(32)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
@@ -139,14 +180,18 @@ class ComparisonVisualizationWidget(QWidget):
             QHeaderView.ResizeMode.Stretch,
         )
         self.table.itemSelectionChanged.connect(self._selection_changed)
+        self.table.itemDoubleClicked.connect(self._request_selected_evidence)
         table_layout.addWidget(self.table, 1)
 
         pagination = QHBoxLayout()
+        pagination.setSpacing(6)
         self.rows_label = QLabel(self)
         self.rows_label.setObjectName("comparisonVisualizationRowsLabel")
         pagination.addWidget(self.rows_label)
         pagination.addStretch(1)
-        pagination.addWidget(QLabel("Wierszy na stronę:", self))
+        page_size_label = QLabel("Wierszy na stronę:", self)
+        page_size_label.setObjectName("comparisonPaginationLabel")
+        pagination.addWidget(page_size_label)
         self.page_size_combo = QComboBox(self)
         self.page_size_combo.setObjectName("comparisonVisualizationPageSize")
         for size in PAGE_SIZE_OPTIONS:
@@ -170,19 +215,97 @@ class ComparisonVisualizationWidget(QWidget):
         pagination.addWidget(self.next_page_button)
         table_layout.addLayout(pagination)
 
-        details.addWidget(table_panel)
-        self.inspector = ComparisonInspector(details)
+        self.details_splitter.addWidget(table_panel)
+        self.inspector = ComparisonInspector(self.details_splitter)
         self.inspector.evidence_requested.connect(self.evidence_requested.emit)
-        details.addWidget(self.inspector)
-        details.setSizes((900, 300))
-        root.addWidget(details, 2)
+        self.details_splitter.addWidget(self.inspector)
+        self.details_splitter.setStretchFactor(0, 1)
+        self.details_splitter.setStretchFactor(1, 0)
+        self.details_splitter.setSizes((980, 330))
+        self.details_splitter.setMinimumHeight(300)
+        root.addWidget(self.details_splitter, 2)
+
         self.payload_preview = PayloadDiffPreview(self)
         root.addWidget(self.payload_preview)
+        self._apply_style()
         self.clear()
 
     @property
     def data(self) -> ComparisonDashboardData:
         return self._data
+
+    def _apply_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QWidget#comparisonVisualizationDashboard {
+                background: #111820;
+                color: #dce6ef;
+            }
+            QLabel#comparisonOverviewHeader {
+                min-height: 34px;
+                padding: 8px 12px;
+                border: 1px solid #2a3a48;
+                border-radius: 7px;
+                background: #17212a;
+                color: #c9d8e5;
+                font-size: 12px;
+            }
+            QLabel#comparisonSectionTitle {
+                color: #f2f7fb;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            QFrame#comparisonKpiCard,
+            QFrame#comparisonPresenceHeatmap,
+            QFrame#comparisonFrequencyDeltaPanel,
+            QFrame#comparisonInspectorPanel,
+            QFrame#comparisonPayloadDiffPreview,
+            QFrame#comparisonDiffTablePanel {
+                background: #171f28;
+                border: 1px solid #2a3743;
+                border-radius: 8px;
+            }
+            QTableWidget {
+                background: #121920;
+                alternate-background-color: #151e27;
+                border: 1px solid #283541;
+                border-radius: 4px;
+                color: #dce6ef;
+                selection-background-color: #235b87;
+                selection-color: white;
+            }
+            QHeaderView::section {
+                background: #202b35;
+                color: #dce6ef;
+                border: 0;
+                border-right: 1px solid #2d3b47;
+                border-bottom: 1px solid #344552;
+                padding: 6px;
+                font-weight: 700;
+            }
+            QComboBox, QPushButton {
+                min-height: 28px;
+                padding: 0 9px;
+                border: 1px solid #344654;
+                border-radius: 4px;
+                background: #1b2630;
+                color: #dce6ef;
+            }
+            QPushButton:hover:enabled {
+                background: #243543;
+                border-color: #4c6578;
+            }
+            QPushButton:disabled {
+                color: #667583;
+                background: #171f26;
+            }
+            QLabel#comparisonVisualizationRowsLabel,
+            QLabel#comparisonVisualizationPageLabel,
+            QLabel#comparisonPaginationLabel {
+                color: #94a7b8;
+            }
+            """
+        )
 
     def clear(self) -> None:
         self._data = ComparisonDashboardData(self._comparison_name)
@@ -190,8 +313,8 @@ class ComparisonVisualizationWidget(QWidget):
         self._visible_rows = []
         self._page_index = 0
         self.overview_label.setText(
-            "Uruchom providery porównawcze. Dashboard korzysta wyłącznie z "
-            "trwałych artefaktów i nie skanuje sesji ponownie w GUI."
+            "Brak gotowych analiz. Użyj przycisku „Uruchom komplet analiz”, "
+            "aby utworzyć pełny dashboard porównania."
         )
         for card in (
             self.new_card,
@@ -220,11 +343,19 @@ class ComparisonVisualizationWidget(QWidget):
         compared = sum(
             1 for session in data.sessions if session.get("role") != "base"
         )
-        schemas = ", ".join(data.artifact_schemas) or "brak"
+        available = set(data.artifact_schemas)
+        ready = [
+            label for schema, label in _SOURCE_NAMES.items() if schema in available
+        ]
+        missing = [
+            label for schema, label in _SOURCE_NAMES.items() if schema not in available
+        ]
+        ready_text = ", ".join(ready) or "brak"
+        missing_text = ", ".join(missing) or "brak"
         self.overview_label.setText(
-            f"Zestaw: {data.comparison_name}. Sesje porównywane: {compared}. "
-            f"Źródła dashboardu: {schemas}. Wszystkie różnice są dostępne "
-            "strona po stronie; GUI nie ucina wyniku analizy."
+            f"Zestaw: {data.comparison_name} · sesje porównywane: {compared} · "
+            f"gotowe: {ready_text} · brakuje: {missing_text}. "
+            "Tabela zawiera pełny wynik strona po stronie."
         )
         self.new_card.set_value(
             str(data.new_count),
@@ -243,20 +374,20 @@ class ComparisonVisualizationWidget(QWidget):
         )
         self.sequence_card.set_value(
             str(data.changed_sequence_count),
-            "ranking zmian sekwencji",
+            "zmiany kolejności wiadomości",
             STATUS_COLORS[STATUS_CHANGED],
         )
-        if data.largest_frequency_delta is None:
+        delta = data.largest_frequency_delta
+        if delta is None or abs(float(delta)) < MIN_VISIBLE_FREQUENCY_DELTA:
             self.frequency_card.set_value(
                 "—",
-                "brak porównywalnej częstotliwości",
+                "brak istotnej zmiany częstotliwości",
             )
         else:
-            delta = data.largest_frequency_delta
             self.frequency_card.set_value(
-                format_percent(delta),
+                _format_delta(delta),
                 data.largest_frequency_key,
-                QColor("#F9A825") if delta >= 0 else QColor("#2F7ED8"),
+                QColor("#ffbf47") if delta >= 0 else QColor("#5da9ff"),
             )
 
     def _populate_table(self) -> None:
@@ -297,7 +428,7 @@ class ComparisonVisualizationWidget(QWidget):
                 format_integer(row.current_frame_count),
                 f"{format_hz(row.baseline_frequency_hz)} → "
                 f"{format_hz(row.current_frequency_hz)}",
-                format_percent(row.frequency_delta_percent),
+                _format_delta(row.frequency_delta_percent),
                 payload_summary(row),
                 str(row.sequence_change_count),
                 str(row.evidence_count),
@@ -312,8 +443,11 @@ class ComparisonVisualizationWidget(QWidget):
                     )
                 if column == 2:
                     color = STATUS_COLORS.get(row.status)
+                    background = STATUS_BACKGROUNDS.get(row.status)
                     if color is not None:
                         item.setForeground(color)
+                    if background is not None:
+                        item.setBackground(background)
                     item_font = item.font()
                     item_font.setBold(True)
                     item.setFont(item_font)
@@ -365,19 +499,37 @@ class ComparisonVisualizationWidget(QWidget):
         self._refresh_page()
 
     def _selection_changed(self) -> None:
-        selected = self.table.selectionModel().selectedRows()
-        if not selected:
+        row = self._selected_row()
+        if row is None:
             self.inspector.clear_selection()
             self.payload_preview.clear_preview()
             return
-        item = self.table.item(selected[0].row(), 0)
-        if item is None:
-            return
-        source_index = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(source_index, int):
-            return
-        if not 0 <= source_index < len(self._visible_rows):
-            return
-        row = self._visible_rows[source_index]
         self.inspector.set_row(row)
         self.payload_preview.set_row(row)
+
+    def _request_selected_evidence(self, *_args) -> None:
+        row = self._selected_row()
+        if row is not None and row.evidence_count > 0:
+            self.evidence_requested.emit(row.session_id, row.message_key)
+
+    def _selected_row(self) -> ComparisonVisualRow | None:
+        selected = self.table.selectionModel().selectedRows()
+        if not selected:
+            return None
+        item = self.table.item(selected[0].row(), 0)
+        if item is None:
+            return None
+        source_index = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(source_index, int):
+            return None
+        if not 0 <= source_index < len(self._visible_rows):
+            return None
+        return self._visible_rows[source_index]
+
+
+def _format_delta(value: float | None) -> str:
+    if value is None:
+        return "—"
+    if abs(float(value)) < MIN_VISIBLE_FREQUENCY_DELTA:
+        return "0,0%"
+    return format_percent(value)
