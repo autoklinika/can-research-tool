@@ -7,7 +7,7 @@ from time import monotonic
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QThreadPool
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QThreadPool, Qt
 from PySide6.QtWidgets import QApplication
 
 from app.comparison_sets import ComparisonSetStore
@@ -15,6 +15,7 @@ from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
 from gui.application_container import ApplicationContainer
+from gui.comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
 from gui.comparison_visualization import (
     ComparisonVisualizationDialog,
     ComparisonVisualizationWidget,
@@ -43,6 +44,7 @@ def main() -> None:
 
     _filter_and_evidence_widget_smoke(app)
     _advanced_dialog_smoke(app)
+    _modeless_view_smoke(app)
     _coordinator_smoke(app)
 
     QSettings().clear()
@@ -141,12 +143,61 @@ def _advanced_dialog_smoke(app: QApplication) -> None:
         dialog._prepare_evidence(after.id, "0:STD:200:data")
         dialog.evidence_navigation_succeeded()
         app.processEvents()
-        assert not dialog.isVisible()
+        assert dialog.isVisible()
+        assert dialog.dashboard.isEnabled()
+        assert dialog.pending_evidence is None
+        assert "pozostaje dostępne" in dialog.status_label.text()
 
+        dialog.close()
         dialog.deleteLater()
         _drain_events(app)
 
         dialog = None
+        project = None
+        gc.collect()
+
+
+def _modeless_view_smoke(app: QApplication) -> None:
+    with TemporaryDirectory() as temporary:
+        project = CrtProject.create(
+            f"{temporary}/project",
+            name="Modeless comparison",
+        )
+        before = _create_session(project, "before", (0x100,))
+        after = _create_session(project, "after", (0x200,))
+        comparison = ComparisonSetStore(project).create(
+            name="Persistent comparison window",
+            session_ids=(before.id, after.id),
+            base_session_id=before.id,
+        )
+
+        view = AnalysisEnabledComparisonSetsView(project)
+        view.show()
+        assert view.select_comparison_set(comparison.id)
+        view._open_analysis()
+        app.processEvents()
+
+        dialog = view._analysis_dialogs.get(comparison.id)
+        assert dialog is not None
+        assert dialog.isVisible()
+        assert not dialog.isModal()
+        assert dialog.windowModality() == Qt.WindowModality.NonModal
+
+        view._open_analysis()
+        app.processEvents()
+        assert view._analysis_dialogs.get(comparison.id) is dialog
+        assert dialog.isVisible()
+
+        dialog.close()
+        _drain_events(app)
+        assert comparison.id not in view._analysis_dialogs
+
+        view.close()
+        view.deleteLater()
+        _drain_events(app)
+
+        dialog = None
+        view = None
         project = None
         gc.collect()
 
