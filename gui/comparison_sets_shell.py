@@ -66,12 +66,35 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         self,
         session_id: str,
         message_key: str,
+        requester: object,
     ) -> None:
         coordinator = getattr(self, "_comparison_evidence_coordinator", None)
         if not isinstance(coordinator, ComparisonEvidenceCoordinator):
             coordinator = ComparisonEvidenceCoordinator(self)
             self._comparison_evidence_coordinator = coordinator
-        coordinator.open_evidence(session_id, message_key)
+
+        def opened(_location) -> None:
+            callback = getattr(requester, "evidence_navigation_succeeded", None)
+            if callable(callback):
+                try:
+                    callback()
+                except RuntimeError:
+                    pass
+
+        def failed(error: str) -> None:
+            callback = getattr(requester, "evidence_navigation_failed", None)
+            if callable(callback):
+                try:
+                    callback(error)
+                except RuntimeError:
+                    pass
+
+        coordinator.open_evidence(
+            session_id,
+            message_key,
+            on_opened=opened,
+            on_failed=failed,
+        )
 
     def _import_completed(self, source: str, target: str) -> None:
         super()._import_completed(source, target)
