@@ -33,6 +33,7 @@ jobs:
           tests/test_payload_difference_provider.py
           tests/test_payload_difference_exact_storage.py
           tests/test_message_sequence_provider.py
+          tests/test_comparison_evidence.py
           tests/test_sqlite_architecture.py
           tests/test_session_filters.py
           tests/test_stored_search_navigation.py
@@ -69,6 +70,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/comparison_visualization_smoke.py
+      - name: Verify comparison filters and evidence handoff
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_visualization_navigation_smoke.py
       - name: Verify project preparation progress
         env:
           QT_QPA_PLATFORM: offscreen
