@@ -80,6 +80,14 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
                     callback()
                 except RuntimeError:
                     pass
+            # The comparison window remains alive for later use, but it must
+            # not cover the source session that has just been opened.
+            minimize = getattr(requester, "showMinimized", None)
+            if callable(minimize):
+                try:
+                    minimize()
+                except RuntimeError:
+                    pass
 
         def failed(error: str) -> None:
             callback = getattr(requester, "evidence_navigation_failed", None)
@@ -88,6 +96,15 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
                     callback(error)
                 except RuntimeError:
                     pass
+            show_normal = getattr(requester, "showNormal", None)
+            raise_window = getattr(requester, "raise_", None)
+            activate = getattr(requester, "activateWindow", None)
+            for action in (show_normal, raise_window, activate):
+                if callable(action):
+                    try:
+                        action()
+                    except RuntimeError:
+                        break
 
         coordinator.open_evidence(
             session_id,
