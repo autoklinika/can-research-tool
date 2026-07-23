@@ -4,7 +4,8 @@ from collections.abc import Callable
 from threading import Event
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtWidgets import QApplication
 
 from app.comparison_evidence import (
     ComparisonEvidenceCancelled,
@@ -131,8 +132,6 @@ class ComparisonEvidenceCoordinator(QObject):
                 navigator = StoredSearchNavigator(view, parent=view)
                 view._comparison_evidence_navigator = navigator
             navigator.navigate_to_source_row(value.source_row)
-            window.raise_()
-            window.activateWindow()
         except Exception as exc:  # pragma: no cover - surfaced through GUI
             self._finish_failed(str(exc))
             return
@@ -149,6 +148,12 @@ class ComparisonEvidenceCoordinator(QObject):
                 callback(value)
             except RuntimeError:
                 pass
+
+        # The requester may minimize itself in the callback. Activate the main
+        # workspace afterwards and repeat once on the next event-loop turn;
+        # this is required for reliable focus transfer on Windows.
+        _activate_main_window(window)
+        QTimer.singleShot(0, lambda target=window: _activate_main_window(target))
 
     @Slot(int, str)
     def _location_failed(self, generation: int, error: str) -> None:
@@ -184,3 +189,16 @@ class ComparisonEvidenceCoordinator(QObject):
             task.cancel()
         self._tasks.clear()
         self._clear_callbacks()
+
+
+def _activate_main_window(window) -> None:
+    try:
+        if window.isMinimized():
+            window.showNormal()
+        else:
+            window.show()
+        window.raise_()
+        window.activateWindow()
+        QApplication.setActiveWindow(window)
+    except RuntimeError:
+        pass
