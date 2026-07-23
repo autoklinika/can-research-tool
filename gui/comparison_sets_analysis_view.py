@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from app.project import CrtProject
@@ -12,6 +13,8 @@ from .window_fullscreen import FullScreenController, enable_full_screen
 
 class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
     """Comparison-set manager extended with registry-driven passive analyses."""
+
+    evidence_open_requested = Signal(str, str)
 
     def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
         super().__init__(project, parent)
@@ -53,8 +56,11 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         configure_comparison_analysis_window(dialog)
         dialog.output_message.connect(self.output_message.emit)
         dialog.exec()
+        pending_evidence = dialog.pending_evidence
         self.refresh(comparison_set.id)
         self.changed.emit()
+        if pending_evidence is not None:
+            self.evidence_open_requested.emit(*pending_evidence)
 
 
 def configure_comparison_analysis_window(
