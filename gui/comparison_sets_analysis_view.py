@@ -6,9 +6,7 @@ from app.project import CrtProject
 
 from .comparison_analysis_dialog import ComparisonAnalysisDialog
 from .comparison_sets_view import ComparisonSetsView
-from .message_sequence_analysis_dialog import (
-    MessageSequenceComparisonAnalysisDialog,
-)
+from .comparison_visualization import ComparisonVisualizationDialog
 from .window_fullscreen import FullScreenController, enable_full_screen
 
 
@@ -47,7 +45,7 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         comparison_set = self.selected_comparison_set()
         if comparison_set is None:
             return
-        dialog = MessageSequenceComparisonAnalysisDialog(
+        dialog = ComparisonVisualizationDialog(
             self.project,
             comparison_set.id,
             parent=self,
