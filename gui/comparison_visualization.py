@@ -202,8 +202,7 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         self._evidence_pending = True
         self._set_evidence_running(True)
         self.status_label.setText(
-            f"Szukam dowodów dla {message_key}. Okno pozostanie otwarte do "
-            "potwierdzenia nawigacji."
+            f"Szukam dowodów dla {message_key}. Okno porównania pozostaje otwarte."
         )
         self.evidence_open_requested.emit(session_id, message_key, self)
 
@@ -211,10 +210,13 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
     def evidence_navigation_succeeded(self) -> None:
         if not self._evidence_pending:
             return
-        self.status_label.setText("Dowód został otwarty w zapisanej sesji.")
+        self.pending_evidence = None
         self._evidence_pending = False
         self._set_evidence_running(False)
-        self.accept()
+        self.status_label.setText(
+            "Dowód został otwarty w zapisanej sesji. "
+            "Okno porównania pozostaje dostępne."
+        )
 
     @Slot(str)
     def evidence_navigation_failed(self, error: str) -> None:
