@@ -33,8 +33,14 @@ class ProjectPropertiesDialog(NewProjectDialog):
 
         self.name_edit.setText(project.manifest.name)
         self.description_edit.setPlainText(project.manifest.description)
-        self._select_combo_data(self.bitrate_combo, int(project.manifest.default_bitrate))
-        self._select_combo_data(self.mode_combo, str(project.manifest.default_receive_mode))
+        self._select_or_add_bitrate(
+            self.bitrate_combo,
+            project.manifest.default_bitrate,
+        )
+        self._select_combo_data(
+            self.mode_combo,
+            str(project.manifest.default_receive_mode),
+        )
 
         self.vehicle_brand_edit.setText(profile.vehicle_brand)
         self.vehicle_model_edit.setText(profile.vehicle_model)
@@ -73,6 +79,18 @@ class ProjectPropertiesDialog(NewProjectDialog):
             QMessageBox.warning(self, "CRT", str(exc))
             return
         self.accept()
+
+    @staticmethod
+    def _select_or_add_bitrate(combo, value: object) -> None:
+        bitrate = int(value)
+        index = combo.findData(bitrate)
+        if index < 0:
+            combo.addItem(
+                f"{bitrate:,}".replace(",", " "),
+                bitrate,
+            )
+            index = combo.findData(bitrate)
+        combo.setCurrentIndex(index)
 
     @staticmethod
     def _select_combo_data(combo, value: object) -> None:
