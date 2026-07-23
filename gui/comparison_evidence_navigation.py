@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Event
 from typing import TYPE_CHECKING
 
@@ -68,18 +69,32 @@ class ComparisonEvidenceCoordinator(QObject):
         self._window = window
         self._generation = 0
         self._tasks: list[_EvidenceTask] = []
+        self._on_opened: Callable[[ComparisonEvidenceLocation], None] | None = None
+        self._on_failed: Callable[[str], None] | None = None
         window.destroyed.connect(self._window_destroyed)
 
-    def open_evidence(self, session_id: str, message_key: str) -> None:
+    def open_evidence(
+        self,
+        session_id: str,
+        message_key: str,
+        *,
+        on_opened: Callable[[ComparisonEvidenceLocation], None] | None = None,
+        on_failed: Callable[[str], None] | None = None,
+    ) -> None:
         project = self._window.project
         if project is None:
-            self._report("Nie można otworzyć dowodów bez aktywnego projektu.")
+            error = "Nie można otworzyć dowodów bez aktywnego projektu."
+            self._report(error)
+            if on_failed is not None:
+                on_failed(error)
             return
         self._generation += 1
         generation = self._generation
         for task in self._tasks:
             task.cancel()
         self._tasks.clear()
+        self._on_opened = on_opened
+        self._on_failed = on_failed
         self._report(f"Szukam dowodów dla {message_key} w zapisanej sesji…")
         task = _EvidenceTask(
             generation,
@@ -97,35 +112,65 @@ class ComparisonEvidenceCoordinator(QObject):
         if generation != self._generation:
             return
         if not isinstance(value, ComparisonEvidenceLocation):
-            self._report("Nie udało się odczytać lokalizacji dowodu.")
+            self._finish_failed("Nie udało się odczytać lokalizacji dowodu.")
             return
         window = self._window
         project = window.project
         if project is None:
+            self._finish_failed("Aktywny projekt został zamknięty.")
             return
-        view = window.navigator.open_session(
-            value.session_path,
-            project=project,
-            inspector_sink=window.inspector.setPlainText,
-            output_sink=window._append_output,
-        )
-        navigator = getattr(view, "_comparison_evidence_navigator", None)
-        if not isinstance(navigator, StoredSearchNavigator):
-            navigator = StoredSearchNavigator(view, parent=view)
-            view._comparison_evidence_navigator = navigator
-        navigator.navigate_to_source_row(value.source_row)
-        window.raise_()
-        window.activateWindow()
+        try:
+            view = window.navigator.open_session(
+                value.session_path,
+                project=project,
+                inspector_sink=window.inspector.setPlainText,
+                output_sink=window._append_output,
+            )
+            navigator = getattr(view, "_comparison_evidence_navigator", None)
+            if not isinstance(navigator, StoredSearchNavigator):
+                navigator = StoredSearchNavigator(view, parent=view)
+                view._comparison_evidence_navigator = navigator
+            navigator.navigate_to_source_row(value.source_row)
+            window.raise_()
+            window.activateWindow()
+        except Exception as exc:  # pragma: no cover - surfaced through GUI
+            self._finish_failed(str(exc))
+            return
+
+        self._tasks.clear()
         self._report(
             f"Otwarto dowód: {value.message_key}, "
             f"ramka źródłowa {value.source_row + 1}."
         )
+        callback = self._on_opened
+        self._clear_callbacks()
+        if callback is not None:
+            try:
+                callback(value)
+            except RuntimeError:
+                pass
 
     @Slot(int, str)
     def _location_failed(self, generation: int, error: str) -> None:
         if generation != self._generation:
             return
-        self._report(f"Nie udało się otworzyć dowodów: {error}")
+        self._finish_failed(error)
+
+    def _finish_failed(self, error: str) -> None:
+        message = f"Nie udało się otworzyć dowodów: {error}"
+        self._tasks.clear()
+        self._report(message)
+        callback = self._on_failed
+        self._clear_callbacks()
+        if callback is not None:
+            try:
+                callback(error)
+            except RuntimeError:
+                pass
+
+    def _clear_callbacks(self) -> None:
+        self._on_opened = None
+        self._on_failed = None
 
     def _report(self, message: str) -> None:
         try:
@@ -138,3 +183,4 @@ class ComparisonEvidenceCoordinator(QObject):
         for task in self._tasks:
             task.cancel()
         self._tasks.clear()
+        self._clear_callbacks()
