@@ -4,7 +4,7 @@ from typing import Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QBoxLayout,
+    QHBoxLayout,
     QLabel,
     QLayout,
     QPushButton,
@@ -13,7 +13,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .comparison_visualization_dashboard import ComparisonVisualizationWidget
+from .comparison_visualization_filtered import (
+    FilteredComparisonVisualizationWidget as ComparisonVisualizationWidget,
+)
 from .comparison_visualization_model import (
     SCHEMA_PAYLOAD,
     SCHEMA_SEQUENCE,
@@ -48,6 +50,7 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         parent: QWidget | None = None,
     ) -> None:
         self.dashboard: ComparisonVisualizationWidget | None = None
+        self.pending_evidence: tuple[str, str] | None = None
         self._batch_provider_ids: list[str] = []
         self._batch_total = 0
         self._batch_completed = 0
@@ -66,15 +69,38 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         if title is not None:
             title.setText(f"Porównanie logów · {self.comparison_set.name}")
 
+        controls = _take_layout_containing_widget(root, self.run_button)
+        if controls is None:
+            raise RuntimeError("comparison controls layout is missing")
+        controls.removeWidget(self.cancel_button)
+        controls.removeWidget(self.refresh_button)
         self.run_button.setText("Uruchom wybraną")
         self.refresh_button.setText("Odśwież")
-        controls = _layout_containing_widget(root, self.run_button)
+
         self.run_all_button = QPushButton("Uruchom komplet analiz", self)
         self.run_all_button.setObjectName("runAllComparisonAnalyses")
         self.run_all_button.clicked.connect(self._start_all_analyses)
-        if isinstance(controls, QBoxLayout):
-            position = controls.indexOf(self.run_button)
-            controls.insertWidget(max(0, position), self.run_all_button)
+        self.advanced_button = QPushButton("Zaawansowane ▸", self)
+        self.advanced_button.setObjectName("comparisonAdvancedToggle")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.toggled.connect(self._toggle_advanced)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        actions.addWidget(self.run_all_button)
+        actions.addWidget(self.advanced_button)
+        actions.addWidget(self.cancel_button)
+        actions.addWidget(self.refresh_button)
+        actions.addStretch(1)
+        root.insertLayout(1, actions)
+
+        self.advanced_panel = QWidget(self)
+        self.advanced_panel.setObjectName("comparisonAdvancedPanel")
+        advanced_layout = QVBoxLayout(self.advanced_panel)
+        advanced_layout.setContentsMargins(8, 6, 8, 6)
+        advanced_layout.addLayout(controls)
+        self.advanced_panel.setVisible(False)
+        root.insertWidget(2, self.advanced_panel)
 
         tabs = QTabWidget(self)
         tabs.setObjectName("comparisonResultTabs")
@@ -82,6 +108,7 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
             self.comparison_set.name,
             tabs,
         )
+        self.dashboard.evidence_requested.connect(self._prepare_evidence)
         tabs.addTab(self.dashboard, "Przegląd graficzny")
 
         data_page = QWidget(tabs)
@@ -132,6 +159,15 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
             QPushButton#runAllComparisonAnalyses:hover {
                 background: #1976d2;
             }
+            QPushButton#comparisonAdvancedToggle {
+                min-height: 30px;
+                padding: 0 12px;
+            }
+            QWidget#comparisonAdvancedPanel {
+                background: #151d25;
+                border: 1px solid #2a3743;
+                border-radius: 5px;
+            }
             QTabWidget#comparisonResultTabs::pane {
                 border: 1px solid #26333f;
                 border-radius: 6px;
@@ -149,6 +185,16 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         super()._load_artifacts(preferred_artifact_id)
         if self.dashboard is not None:
             self._refresh_dashboard()
+
+    def _toggle_advanced(self, checked: bool) -> None:
+        self.advanced_panel.setVisible(checked)
+        self.advanced_button.setText(
+            "Zaawansowane ▾" if checked else "Zaawansowane ▸"
+        )
+
+    def _prepare_evidence(self, session_id: str, message_key: str) -> None:
+        self.pending_evidence = (session_id, message_key)
+        self.accept()
 
     def _start_all_analyses(self) -> None:
         if self._task is not None:
@@ -215,6 +261,8 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
                 and self._batch_total == 0
                 and self.provider_combo.count() > 0
             )
+        if hasattr(self, "advanced_button"):
+            self.advanced_button.setEnabled(not running)
 
     def _clear_batch(self) -> None:
         self._batch_provider_ids.clear()
@@ -246,18 +294,6 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
             self.dashboard.set_payloads(payloads)
         else:
             self.dashboard.clear()
-
-
-def _layout_containing_widget(
-    root: QLayout,
-    widget: QWidget,
-) -> QLayout | None:
-    for index in range(root.count()):
-        child = root.itemAt(index)
-        layout = child.layout()
-        if layout is not None and layout.indexOf(widget) >= 0:
-            return layout
-    return None
 
 
 def _take_layout_containing_widget(
