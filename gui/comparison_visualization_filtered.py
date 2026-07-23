@@ -7,9 +7,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTableWidgetItem,
 )
 
-from .comparison_visualization_dashboard import ComparisonVisualizationWidget
+from .comparison_visualization_dashboard import (
+    STATUS_BACKGROUNDS,
+    STATUS_COLORS,
+    ComparisonVisualizationWidget,
+    _format_delta,
+)
 from .comparison_visualization_model import (
     STATUS_CHANGED,
     STATUS_MISSING,
@@ -17,6 +23,9 @@ from .comparison_visualization_model import (
     STATUS_ORDER,
     STATUS_UNCHANGED,
     ComparisonVisualRow,
+    format_hz,
+    format_integer,
+    payload_summary,
 )
 
 
@@ -160,6 +169,63 @@ class FilteredComparisonVisualizationWidget(ComparisonVisualizationWidget):
         header.setSortIndicator(column, self._sort_order)
         self._page_index = 0
         self._apply_filters_and_sort()
+
+    def _refresh_page(self) -> None:
+        page_size = self._page_size()
+        page_count = self._page_count(page_size)
+        if page_count == 0:
+            self._page_index = 0
+            start = 0
+            end = 0
+        else:
+            self._page_index = min(self._page_index, page_count - 1)
+            start = self._page_index * page_size
+            end = min(start + page_size, len(self._ordered_rows))
+        self._visible_rows = self._ordered_rows[start:end]
+        self.table.setSortingEnabled(False)
+        self.table.blockSignals(True)
+        self.table.clearContents()
+        self.table.setRowCount(len(self._visible_rows))
+        for row_index, row in enumerate(self._visible_rows):
+            values = (
+                row.session_name,
+                row.display_key,
+                row.status,
+                format_integer(row.baseline_frame_count),
+                format_integer(row.current_frame_count),
+                f"{format_hz(row.baseline_frequency_hz)} → "
+                f"{format_hz(row.current_frequency_hz)}",
+                _format_delta(row.frequency_delta_percent),
+                payload_summary(row),
+                str(row.sequence_change_count),
+                str(row.evidence_count),
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setData(Qt.ItemDataRole.UserRole, row_index)
+                if column in {3, 4, 6, 8, 9}:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight
+                        | Qt.AlignmentFlag.AlignVCenter
+                    )
+                if column == 2:
+                    color = STATUS_COLORS.get(row.status)
+                    background = STATUS_BACKGROUNDS.get(row.status)
+                    if color is not None:
+                        item.setForeground(color)
+                    if background is not None:
+                        item.setBackground(background)
+                    item_font = item.font()
+                    item_font.setBold(True)
+                    item.setFont(item_font)
+                self.table.setItem(row_index, column, item)
+        self.table.blockSignals(False)
+        self._update_pagination(start, end)
+        if self._visible_rows:
+            self.table.selectRow(0)
+        else:
+            self.inspector.clear_selection()
+            self.payload_preview.clear_preview()
 
     def _update_pagination(self, start: int = 0, end: int = 0) -> None:
         super()._update_pagination(start, end)
