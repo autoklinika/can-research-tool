@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -43,6 +43,8 @@ _SUPPORTED_SCHEMAS = {
 class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
     """Passive comparison workflow with an artifact-backed visual dashboard."""
 
+    evidence_open_requested = Signal(str, str, object)
+
     def __init__(
         self,
         project,
@@ -51,6 +53,7 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
     ) -> None:
         self.dashboard: ComparisonVisualizationWidget | None = None
         self.pending_evidence: tuple[str, str] | None = None
+        self._evidence_pending = False
         self._batch_provider_ids: list[str] = []
         self._batch_total = 0
         self._batch_completed = 0
@@ -193,11 +196,47 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         )
 
     def _prepare_evidence(self, session_id: str, message_key: str) -> None:
+        if self._evidence_pending:
+            return
         self.pending_evidence = (session_id, message_key)
+        self._evidence_pending = True
+        self._set_evidence_running(True)
+        self.status_label.setText(
+            f"Szukam dowodów dla {message_key}. Okno pozostanie otwarte do "
+            "potwierdzenia nawigacji."
+        )
+        self.evidence_open_requested.emit(session_id, message_key, self)
+
+    @Slot()
+    def evidence_navigation_succeeded(self) -> None:
+        if not self._evidence_pending:
+            return
+        self.status_label.setText("Dowód został otwarty w zapisanej sesji.")
+        self._evidence_pending = False
+        self._set_evidence_running(False)
         self.accept()
 
+    @Slot(str)
+    def evidence_navigation_failed(self, error: str) -> None:
+        self.pending_evidence = None
+        self._evidence_pending = False
+        self._set_evidence_running(False)
+        self.status_label.setText(f"Nie udało się otworzyć dowodów: {error}")
+
+    def _set_evidence_running(self, running: bool) -> None:
+        if self.dashboard is not None:
+            self.dashboard.setEnabled(not running)
+        self.run_all_button.setEnabled(
+            not running and self._task is None and self.provider_combo.count() > 0
+        )
+        self.advanced_button.setEnabled(not running and self._task is None)
+        self.refresh_button.setEnabled(not running and self._task is None)
+        self.run_button.setEnabled(
+            not running and self._task is None and self.provider_combo.count() > 0
+        )
+
     def _start_all_analyses(self) -> None:
-        if self._task is not None:
+        if self._task is not None or self._evidence_pending:
             return
         provider_ids = [
             str(self.provider_combo.itemData(index) or "")
@@ -258,11 +297,12 @@ class ComparisonVisualizationDialog(MessageSequenceComparisonAnalysisDialog):
         if hasattr(self, "run_all_button"):
             self.run_all_button.setEnabled(
                 not running
+                and not self._evidence_pending
                 and self._batch_total == 0
                 and self.provider_combo.count() > 0
             )
         if hasattr(self, "advanced_button"):
-            self.advanced_button.setEnabled(not running)
+            self.advanced_button.setEnabled(not running and not self._evidence_pending)
 
     def _clear_batch(self) -> None:
         self._batch_provider_ids.clear()
