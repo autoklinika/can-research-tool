@@ -26,10 +26,10 @@ from .comparison_visualization_model import (
 
 MAX_PAYLOAD_BYTES = 16
 STATUS_COLORS = {
-    "Nowe": QColor("#4CAF50"),
-    "Brakujące": QColor("#E53935"),
-    "Zmienione": QColor("#F9A825"),
-    "Bez zmian": QColor("#78909C"),
+    "Nowe": QColor("#55d187"),
+    "Brakujące": QColor("#ff6b6b"),
+    "Zmienione": QColor("#ffbf47"),
+    "Bez zmian": QColor("#91a4b7"),
 }
 
 
@@ -39,8 +39,10 @@ class PayloadDiffPreview(QFrame):
         self.setObjectName("comparisonPayloadDiffPreview")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(10, 10, 10, 9)
+        layout.setSpacing(7)
         self.title = QLabel("Podgląd różnicy payloadu", self)
+        self.title.setObjectName("comparisonPanelTitle")
         title_font = self.title.font()
         title_font.setBold(True)
         self.title.setFont(title_font)
@@ -50,33 +52,37 @@ class PayloadDiffPreview(QFrame):
         self.table.setVerticalHeaderLabels(("Baza", "Porównywana", "Różnica"))
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setDefaultSectionSize(27)
+        self.table.horizontalHeader().setMinimumHeight(28)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
-        self.table.setMaximumHeight(145)
+        self.table.setMaximumHeight(138)
         layout.addWidget(self.table)
         self.note = QLabel("Wybierz wiadomość w tabeli różnic.", self)
+        self.note.setObjectName("comparisonPayloadNote")
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
+        self.setVisible(False)
 
     def clear_preview(self) -> None:
         self.title.setText("Podgląd różnicy payloadu")
         self.table.clearContents()
         self.table.setColumnCount(0)
         self.note.setText("Wybierz wiadomość w tabeli różnic.")
+        self.setVisible(False)
 
     def set_row(self, row: ComparisonVisualRow) -> None:
-        self.title.setText(f"Podgląd różnicy payloadu — {row.display_key}")
         baseline = byte_positions(row.baseline_payload_profile)
         current = byte_positions(row.current_payload_profile)
         total = max(len(baseline), len(current))
         count = min(total, MAX_PAYLOAD_BYTES)
         if count == 0:
             self.clear_preview()
-            self.note.setText(
-                "Brak profilu bajtów. Uruchom analizę różnic payloadów."
-            )
             return
+        self.setVisible(True)
+        self.title.setText(f"Podgląd różnicy payloadu — {row.display_key}")
         self.table.setColumnCount(count)
         self.table.setHorizontalHeaderLabels([str(index) for index in range(count)])
         changed = []
@@ -93,8 +99,8 @@ class PayloadDiffPreview(QFrame):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if different:
-                    item.setBackground(QColor("#6D4C1D"))
-                    item.setForeground(QColor("#FFE0B2"))
+                    item.setBackground(QColor("#4a351b"))
+                    item.setForeground(QColor("#ffe0a3"))
                 self.table.setItem(table_row, index, item)
             if different:
                 changed.append(index)
@@ -116,30 +122,37 @@ class ComparisonInspector(QFrame):
         super().__init__(parent)
         self.setObjectName("comparisonInspectorPanel")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(430)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
         heading = QLabel("INSPEKTOR", self)
+        heading.setObjectName("comparisonInspectorHeading")
         heading_font = heading.font()
         heading_font.setBold(True)
-        heading.setFont(heading_font)
-        layout.addWidget(heading)
         self.key_label = QLabel("Brak wyboru", self)
+        self.key_label.setObjectName("comparisonInspectorKey")
         key_font = self.key_label.font()
         key_font.setBold(True)
         key_font.setPointSize(key_font.pointSize() + 2)
         self.key_label.setFont(key_font)
-        layout.addWidget(self.key_label)
         self.status_label = QLabel("—", self)
-        layout.addWidget(self.status_label)
+        self.status_label.setObjectName("comparisonInspectorStatus")
         self.details = QLabel("Wybierz wiersz w tabeli różnic.", self)
+        self.details.setObjectName("comparisonInspectorDetails")
         self.details.setWordWrap(True)
         self.details.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        layout.addWidget(heading)
+        layout.addWidget(self.key_label)
+        layout.addWidget(self.status_label)
         layout.addWidget(self.details)
         layout.addStretch(1)
         self.evidence_button = QPushButton("Otwórz dowody", self)
+        self.evidence_button.setObjectName("comparisonOpenEvidenceButton")
+        self.evidence_button.setMinimumHeight(32)
         self.evidence_button.setEnabled(False)
         self.evidence_button.clicked.connect(self._emit_evidence)
         layout.addWidget(self.evidence_button)
@@ -162,7 +175,7 @@ class ComparisonInspector(QFrame):
         palette = self.status_label.palette()
         palette.setColor(
             QPalette.ColorRole.WindowText,
-            STATUS_COLORS.get(row.status, QColor("#78909C")),
+            STATUS_COLORS.get(row.status, QColor("#91a4b7")),
         )
         self.status_label.setPalette(palette)
         self.details.setText(
@@ -174,7 +187,7 @@ class ComparisonInspector(QFrame):
                     f"Ramki porównywane: {format_integer(row.current_frame_count)}",
                     f"Częstotliwość bazowa: {format_hz(row.baseline_frequency_hz)}",
                     f"Częstotliwość porównywana: {format_hz(row.current_frequency_hz)}",
-                    f"Zmiana: {format_percent(row.frequency_delta_percent)}",
+                    f"Zmiana: {_format_delta(row.frequency_delta_percent)}",
                     f"Zmiany payloadu: {row.payload_change_count}",
                     f"Zmiany sekwencji: {row.sequence_change_count}",
                     f"Dowody: {row.evidence_count}",
@@ -187,3 +200,11 @@ class ComparisonInspector(QFrame):
     def _emit_evidence(self) -> None:
         if self._session_id and self._message_key:
             self.evidence_requested.emit(self._session_id, self._message_key)
+
+
+def _format_delta(value: float | None) -> str:
+    if value is None:
+        return "—"
+    if abs(float(value)) < 0.05:
+        return "0,0%"
+    return format_percent(value)
