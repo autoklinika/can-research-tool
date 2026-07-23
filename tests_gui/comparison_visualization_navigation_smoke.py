@@ -23,6 +23,18 @@ from gui.comparison_visualization_model import STATUS_MISSING
 from gui.project_navigator import ProjectNavigator
 
 
+class _RequestProbe:
+    def __init__(self) -> None:
+        self.opened = False
+        self.error = ""
+
+    def evidence_navigation_succeeded(self) -> None:
+        self.opened = True
+
+    def evidence_navigation_failed(self, error: str) -> None:
+        self.error = error
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("AutoklinikaTests")
@@ -95,6 +107,12 @@ def _advanced_dialog_smoke(app: QApplication) -> None:
             base_session_id=before.id,
         )
         dialog = ComparisonVisualizationDialog(project, comparison.id)
+        requests: list[tuple[str, str, object]] = []
+        dialog.evidence_open_requested.connect(
+            lambda session_id, key, requester: requests.append(
+                (session_id, key, requester)
+            )
+        )
         dialog.show()
         app.processEvents()
 
@@ -107,8 +125,24 @@ def _advanced_dialog_smoke(app: QApplication) -> None:
         assert not dialog.advanced_panel.isVisible()
 
         dialog._prepare_evidence(after.id, "0:STD:200:data")
+        app.processEvents()
+        assert dialog.isVisible()
+        assert not dialog.dashboard.isEnabled()
         assert dialog.pending_evidence == (after.id, "0:STD:200:data")
-        dialog.close()
+        assert requests == [(after.id, "0:STD:200:data", dialog)]
+
+        dialog.evidence_navigation_failed("test failure")
+        app.processEvents()
+        assert dialog.isVisible()
+        assert dialog.dashboard.isEnabled()
+        assert dialog.pending_evidence is None
+        assert "test failure" in dialog.status_label.text()
+
+        dialog._prepare_evidence(after.id, "0:STD:200:data")
+        dialog.evidence_navigation_succeeded()
+        app.processEvents()
+        assert not dialog.isVisible()
+
         dialog.deleteLater()
         _drain_events(app)
 
@@ -131,7 +165,12 @@ def _coordinator_smoke(app: QApplication) -> None:
         window.show()
         window._set_project(project)
         app.processEvents()
-        window._open_comparison_evidence(session.id, "0:STD:200:data")
+        probe = _RequestProbe()
+        window._open_comparison_evidence(
+            session.id,
+            "0:STD:200:data",
+            probe,
+        )
 
         key = ProjectNavigator.session_key(session_path)
         deadline = monotonic() + 15.0
@@ -141,8 +180,14 @@ def _coordinator_smoke(app: QApplication) -> None:
             app.sendPostedEvents()
             app.processEvents()
             view = window.navigator.widget(key)
-            if view is not None and view.frame_table.currentIndex().row() == 1:
+            if (
+                probe.opened
+                and view is not None
+                and view.frame_table.currentIndex().row() == 1
+            ):
                 break
+        assert probe.opened
+        assert not probe.error
         assert view is not None
         assert window.tabs.currentWidget() is view
         assert view.tabs.currentIndex() == view.raw_tab_index
