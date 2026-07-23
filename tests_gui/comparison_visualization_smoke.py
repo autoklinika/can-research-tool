@@ -38,6 +38,30 @@ def main() -> None:
     assert widget.payload_preview.table.columnCount() == 2
     assert widget.payload_preview.table.item(2, 0).text() == "+1"
 
+    widget.set_payloads(_large_payloads(620))
+    app.processEvents()
+    assert len(widget.data.rows) == 620
+    assert widget.table.rowCount() == 100
+    assert widget.rows_label.text() == "Wyświetlanie 1–100 z 620"
+    assert widget.page_label.text() == "Strona 1 z 7"
+
+    page_size_index = widget.page_size_combo.findData(500)
+    assert page_size_index >= 0
+    widget.page_size_combo.setCurrentIndex(page_size_index)
+    app.processEvents()
+    assert widget.table.rowCount() == 500
+    assert widget.rows_label.text() == "Wyświetlanie 1–500 z 620"
+    assert widget.page_label.text() == "Strona 1 z 2"
+    assert widget.next_page_button.isEnabled()
+
+    widget.next_page_button.click()
+    app.processEvents()
+    assert widget.table.rowCount() == 120
+    assert widget.rows_label.text() == "Wyświetlanie 501–620 z 620"
+    assert widget.page_label.text() == "Strona 2 z 2"
+    assert not widget.next_page_button.isEnabled()
+    assert widget.previous_page_button.isEnabled()
+
     widget.close()
     widget.deleteLater()
     app.sendPostedEvents()
@@ -142,6 +166,28 @@ def _payloads() -> dict[str, dict]:
         payload["schema"]: payload,
         sequence["schema"]: sequence,
     }
+
+
+def _large_payloads(count: int) -> dict[str, dict]:
+    statistics = {
+        "schema": "crt.comparison_statistics",
+        "sessions": [
+            {"id": "before", "name": "Przed naprawą", "role": "base"},
+            {"id": "after", "name": "Po naprawie", "role": "compared"},
+        ],
+        "message_keys": [
+            _statistics_key(
+                f"0:STD:{index:03X}:data",
+                f"{index:03X}",
+                baseline=_metrics(index + 1, 10.0),
+                current=_metrics(index + 2, 10.0),
+                reasons=[],
+                delta=0.0,
+            )
+            for index in range(count)
+        ],
+    }
+    return {statistics["schema"]: statistics}
 
 
 def _statistics_key(
