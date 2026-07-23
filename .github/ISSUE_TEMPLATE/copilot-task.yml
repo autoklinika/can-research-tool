@@ -1,0 +1,109 @@
+name: Zadanie dla Copilot CRT
+description: Małe, wydzielone zadanie implementacyjne dla agenta CRT Engineer.
+title: "[Copilot] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Używaj tego formularza tylko dla małych zadań o jednoznacznym zakresie. Po utworzeniu issue przypisz je do Copilota, wybierz właściwą gałąź startową i profil **CRT Engineer**.
+
+  - type: input
+    id: start-branch
+    attributes:
+      label: Gałąź startowa
+      description: Dokładna gałąź, od której Copilot ma rozpocząć pracę. Przy stacked PR nie używaj automatycznie main.
+      placeholder: agent/project-properties-stage1
+    validations:
+      required: true
+
+  - type: input
+    id: base-head
+    attributes:
+      label: Oczekiwany HEAD bazowy
+      description: Commit, który Copilot ma zweryfikować przed zmianami.
+      placeholder: 096492304042139d35088501c30c537c72188069
+    validations:
+      required: true
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Cel zadania
+      description: Jeden konkretny rezultat widoczny dla użytkownika lub testowalny technicznie.
+      placeholder: Dodaj możliwość ... bez zmiany ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Dokumenty i kontekst
+      description: Wskaż Master Plan, raport handoff, powiązany PR i pliki, które należy najpierw przeczytać.
+      value: |
+        - docs/CRT_RESEARCH_PLATFORM_MASTER_PLAN_PL.md
+        - docs/reports/...
+        - PR bazowy: #...
+    validations:
+      required: true
+
+  - type: textarea
+    id: allowed
+    attributes:
+      label: Dozwolony zakres i pliki
+      description: Wymień moduły lub pliki, które mogą być zmienione. Każdy dodatkowy plik musi być uzasadniony w PR.
+      placeholder: |
+        - gui/...
+        - tests_gui/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: Obszary zakazane
+      description: Wymień kontrakty, których zadanie nie może naruszyć.
+      value: |
+        - CaptureService
+        - backend Kvaser i lifecycle CANlib
+        - format sesji
+        - kolejność i kompletność zapisu surowych ramek
+        - zakończone analizy zapisanej sesji
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Kryteria akceptacji
+      description: Każdy punkt powinien dać się jednoznacznie sprawdzić.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+        - [ ] Surowa sesja zachowuje identyczny SHA-256
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Wymagane testy i CI
+      description: Wskaż testy domenowe, smoke testy i workflow. Zaznacz, czy potrzebny jest runner sprzętowy.
+      value: |
+        - pytest: ...
+        - GUI smoke: ...
+        - GitHub Actions: Tests, GUI Regressions, Windows GitHub-Hosted CI
+        - Runner sprzętowy: nie / tak, ponieważ ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Potwierdzenie zakresu
+      options:
+        - label: Zadanie jest wystarczająco małe na jeden draft PR.
+          required: true
+        - label: Gałąź startowa i chronione obszary zostały wskazane jawnie.
+          required: true
+        - label: Copilot nie może samodzielnie wykonać merge ani rozszerzyć zakresu.
+          required: true
