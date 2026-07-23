@@ -18,8 +18,89 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libegl1
-      - name: Install GUI
-        run: python -m pip install -q -e ".[gui]"
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Python sources
+        run: python -m compileall -q app gui tests tests_gui
+      - name: Verify search and SQLite core
+        run: >-
+          python -m pytest
+          tests/test_search_engine.py
+          tests/test_project_search_index.py
+          tests/test_project_catalog.py
+          tests/test_comparison_sets.py
+          tests/test_comparison_statistics_provider.py
+          tests/test_payload_difference_provider.py
+          tests/test_payload_difference_exact_storage.py
+          tests/test_message_sequence_provider.py
+          tests/test_sqlite_architecture.py
+          tests/test_session_filters.py
+          tests/test_stored_search_navigation.py
+          -q
+      - name: Verify engineering IDE shell
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/engineering_shell_smoke.py
+      - name: Verify project properties editing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/project_properties_smoke.py
+      - name: Verify project catalog and expanded creation form
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/project_catalog_smoke.py
+      - name: Verify comparison set management
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_sets_smoke.py
+      - name: Verify comparison statistics workflow
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_statistics_smoke.py
+      - name: Verify payload difference workflow
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/payload_difference_smoke.py
+      - name: Verify message sequence comparison workflow
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/message_sequence_comparison_smoke.py
+      - name: Verify project preparation progress
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/project_preparation_progress_smoke.py
+      - name: Verify persistent project search index
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/persistent_search_index_smoke.py
+      - name: Verify stored search cross-page navigation
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/stored_search_navigation_smoke.py
+      - name: Verify direct logical-cache search
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/logical_search_cache_smoke.py
+      - name: Verify project overview session details
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/project_overview_session_details_smoke.py
+      - name: Verify deferred Live logical analysis
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/deferred_live_logical_smoke.py
+      - name: Verify deferred Live project save
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/deferred_log_save_smoke.py
+      - name: Verify deliberate second Start after unsaved Live log
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_unsaved_second_start_smoke.py
+      - name: Verify Live temp cleanup
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/live_temp_cleanup_smoke.py
       - name: Verify DBC activation controls
         env:
           QT_QPA_PLATFORM: offscreen
@@ -28,6 +109,38 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/session_management_smoke.py tree
+      - name: Verify stored logical target workspace
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/stored_logical_workspace_smoke.py
+      - name: Verify stored session analysis workflow
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_analysis_workflow_smoke.py
+      - name: Verify CAN ID statistics artifact view
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_statistics_table_smoke.py
+      - name: Verify lightweight statistics visual summary
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_statistics_visual_summary_smoke.py
+      - name: Verify compact artifact selector
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/session_artifact_selector_smoke.py
+      - name: Verify minimal analysis chrome
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/minimal_analysis_chrome_smoke.py
+      - name: Verify protocol-aware logical details
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/logical_message_details_smoke.py
+      - name: Verify decoded UDS data presentation
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/uds_data_display_smoke.py
       - name: Verify Live session actions
         env:
           QT_QPA_PLATFORM: offscreen
@@ -60,6 +173,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests_gui/live_buffer_performance_smoke.py
+      - name: Verify raw frame list and grouped ID views
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/raw_frame_grouping_smoke.py
       - name: Verify fast pastel table cell hover
         env:
           QT_QPA_PLATFORM: offscreen

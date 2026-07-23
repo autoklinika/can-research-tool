@@ -100,7 +100,7 @@ def _scan_filtered_range(
     end = start + max_rows
 
     for frame in reader.iter_frames():
-        record = _frame_record_for_filter_set(frame, filter_set)
+        record = frame_record_for_filter_set(frame, filter_set)
         if not filter_set.decide(record).visible:
             continue
         if start <= visible_count < end:
@@ -110,11 +110,11 @@ def _scan_filtered_range(
     return selected, visible_count
 
 
-def _frame_record_for_filter_set(
+def frame_record_for_filter_set(
     frame: CanFrame,
     filter_set: FrameFilterSet,
 ) -> CanFrameRecord | object:
-    """Preserve the v1 evaluator boundary while enabling Stage 6A raw fields."""
+    """Build the evaluator input shared by pagination and search navigation."""
 
     if isinstance(filter_set, ActiveFilterSet):
         return CanFrameRecord(

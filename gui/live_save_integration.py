@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
-from PySide6.QtWidgets import QCheckBox, QGroupBox, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
+from app.capture_service import CapturePaths, CaptureStatus
 from app.dbc import DbcDecoder
 from app.live_capture_controller import CaptureMode, StartCaptureRequest
+from app.logical_cache import logical_cache_path_for_session
 from app.project_dbc import active_project_dbc_paths
 
 if TYPE_CHECKING:
-    from app.capture_service import CaptureStatus
-
     from .live_capture import LiveCaptureWidget
 
 
@@ -39,53 +40,46 @@ class _DbcLoadTask(QRunnable):
 
 
 class LiveSaveIntegration(QObject):
-    """Explicit Live persistence and asynchronous DBC composition."""
+    """Always capture to temp and explicitly promote the finished log to project.
+
+    Live never writes directly into ``sessions/live``. A completed capture remains
+    pending in ``.crt/temp/live`` until the operator chooses ``Plik -> Zapisz log``.
+    Starting another capture, closing Live, changing project or exiting must first
+    resolve that pending log by saving, discarding or cancelling the operation.
+    """
 
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
         self.widget = widget
-        self._current_capture_persistent = False
-        self._save_reset_pending = False
+        self._pending_paths: CapturePaths | None = None
+        self._pending_status: CaptureStatus | None = None
+        self._pending_name = ""
         self._transient_finalized = False
         self._dbc_load_generation = 0
         self._dbc_loaded_paths: tuple[Path, ...] = ()
         self._dbc_loading_paths: tuple[Path, ...] = ()
         self._dbc_load_tasks: list[_DbcLoadTask] = []
-
-        self.save_checkbox = QCheckBox("Zapisz")
-        self.save_checkbox.setObjectName("armSessionSaveButton")
-        self.save_checkbox.setChecked(False)
-        self.save_checkbox.setToolTip(
-            "Zaznacz przed Start, aby zapisać pełną sesję na dysku."
-        )
-        self.save_checkbox.toggled.connect(lambda _checked: self.update_ui())
-        widget.save_session_button = self.save_checkbox
-
-        connection_group = next(
-            (
-                group
-                for group in widget.findChildren(QGroupBox)
-                if group.title() == "Połączenie i sesja"
-            ),
-            None,
-        )
-        if connection_group is not None and connection_group.layout() is not None:
-            session_item = connection_group.layout().itemAt(1)
-            session_layout = session_item.layout() if session_item is not None else None
-            if session_layout is not None:
-                session_layout.insertWidget(
-                    max(0, session_layout.count() - 2),
-                    self.save_checkbox,
-                )
-            else:
-                connection_group.layout().addWidget(self.save_checkbox)
-        else:
-            widget.layout().insertWidget(0, self.save_checkbox)
-
-        self.update_ui()
         self._schedule_dbc_load(active_project_dbc_paths(widget.project))
 
+    @property
+    def has_unsaved_log(self) -> bool:
+        paths = self._pending_paths
+        return bool(
+            paths is not None
+            and self._pending_status is not None
+            and paths.session.is_file()
+        )
+
+    @property
+    def pending_session_path(self) -> Path | None:
+        paths = self._pending_paths
+        return None if paths is None else paths.session
+
     def start_capture(self) -> None:
+        if self.has_unsaved_log and not self.confirm_pending_log(reason="new_capture"):
+            self._restore_pending_ui()
+            return
+
         widget = self.widget
         channel_number = widget.channel_combo.currentData()
         if channel_number is None:
@@ -96,13 +90,10 @@ class LiveSaveIntegration(QObject):
             )
             return
 
-        persist = self.save_checkbox.isChecked()
         name = widget.session_name.text().strip()
-        if persist and not name:
+        if not name:
             name = datetime.now().strftime("capture_%Y%m%d_%H%M%S")
             widget.session_name.setText(name)
-        if not name:
-            name = datetime.now().strftime("live_preview_%Y%m%d_%H%M%S")
 
         presets = widget.project.list_marker_presets()
         active = [preset for preset in presets if preset.enabled]
@@ -118,7 +109,9 @@ class LiveSaveIntegration(QObject):
         dbc_paths = active_project_dbc_paths(widget.project)
         self._schedule_dbc_load(dbc_paths)
 
-        paths = None
+        output_dir = Path(widget.project.root) / ".crt" / "temp" / "live"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         try:
             paths = widget._controller.start(
                 StartCaptureRequest(
@@ -126,22 +119,15 @@ class LiveSaveIntegration(QObject):
                     bitrate=int(widget.bitrate_combo.currentData()),
                     mode=CaptureMode(str(widget.mode_combo.currentData())),
                     session_name=name,
-                    output_dir=widget.project.live_sessions_dir,
-                    persist_to_disk=persist,
+                    output_dir=output_dir,
+                    persist_to_disk=True,
                     live_buffer_capacity=widget.LIVE_CAPACITY,
                     live_message_capacity=widget.LIVE_MESSAGE_CAPACITY,
                     marker_presets=tuple(active),
                 )
             )
-            if persist:
-                if paths is None:
-                    raise RuntimeError("tryb zapisu nie utworzył ścieżek sesji")
-                widget.project.register_session(
-                    paths.session,
-                    name=name,
-                    source="kvaser-live-stream",
-                    status="recording",
-                )
+            if paths is None:
+                raise RuntimeError("rejestracja nie utworzyła ścieżek sesji")
         except Exception as exc:
             if widget._controller.is_active:
                 widget._controller.stop()
@@ -153,10 +139,12 @@ class LiveSaveIntegration(QObject):
             )
             return
 
-        self._current_capture_persistent = persist
-        self._save_reset_pending = True
+        self._pending_paths = paths
+        self._pending_status = None
+        self._pending_name = name
         self._transient_finalized = False
-        widget._current_session_path = paths.session if paths is not None else None
+        widget._analysis_session_path = paths.session
+        widget._current_session_path = None
         widget._finalized_session_path = None
         widget._last_sequence = None
         widget._last_message_sequence = None
@@ -165,53 +153,287 @@ class LiveSaveIntegration(QObject):
         widget.message_model.clear()
         widget.marker_history.clear()
         widget.pause_view.setChecked(False)
-        widget.path_label.setText(
-            f"Zapis: {paths.session}" if paths is not None else "Live bez zapisu"
-        )
+        widget.path_label.setText(f"Rejestracja tymczasowa: {paths.session}")
         widget._install_marker_controls(active)
         widget._set_capture_controls(True)
-
-        if persist:
-            assert paths is not None
-            widget.output_message.emit(f"Start z zapisem: {paths.session}")
-            widget.project_changed.emit()
-        else:
-            widget.output_message.emit("Start Live bez zapisu")
-        self.update_ui()
+        widget.output_message.emit(
+            f"Start Live do pliku tymczasowego: {paths.session}"
+        )
 
     def update_controls(self, active: bool) -> None:
-        self.save_checkbox.setEnabled(not active)
-        self.widget.session_name.setEnabled(
-            not active and self.save_checkbox.isChecked()
-        )
+        self.widget.session_name.setEnabled(not active)
 
     def finalize(self, status: CaptureStatus) -> None:
-        if self.widget._current_session_path is not None:
-            self.widget._finalize_persistent_session(status)
-        elif not self._transient_finalized:
-            self._transient_finalized = True
-            self.widget.output_message.emit(
-                f"Live bez zapisu zakończony | ramki={status.frame_count} | "
-                f"wiadomości={status.logical_message_count}"
-            )
+        if self._transient_finalized:
+            return
+        paths = self._pending_paths
+        if paths is None:
+            return
 
-        if self._save_reset_pending:
-            self._save_reset_pending = False
-            self._current_capture_persistent = False
-            self.save_checkbox.setChecked(False)
-            self.update_ui()
+        self._transient_finalized = True
+        self._pending_status = status
+        self.widget.path_label.setText(
+            f"Niezapisany log: {paths.session} | Plik → Zapisz log"
+        )
+        self.widget.output_message.emit(
+            f"Live zakończony — log oczekuje na zapis | "
+            f"ramki={status.frame_count} | znaczniki={status.marker_count} | "
+            f"plik={paths.session}"
+        )
+
+    def save_pending_log(self) -> bool:
+        if not self.has_unsaved_log:
+            return False
+        paths = self._pending_paths
+        status = self._pending_status
+        assert paths is not None
+        assert status is not None
+
+        was_open = self._close_open_session(paths.session)
+        try:
+            destination = self._destination_paths(paths)
+            self._move_capture_artifacts(paths, destination)
+            self.widget.project.register_session(
+                destination.session,
+                name=self._pending_name or destination.session.stem,
+                source="kvaser-live-stream",
+                status="ready",
+            )
+            self.widget.project.finalize_session(
+                destination.session,
+                frame_count=status.frame_count,
+                marker_count=status.marker_count,
+                duration_s=status.elapsed_s,
+                status="error" if status.state.value == "error" else "ready",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self.widget,
+                "Nie można zapisać logu",
+                str(exc),
+            )
+            self._restore_pending_ui()
+            return False
+
+        old_session = paths.session
+        self._pending_paths = None
+        self._pending_status = None
+        self._pending_name = ""
+        self._transient_finalized = False
+        self.widget._analysis_session_path = destination.session
+        self.widget._current_session_path = destination.session
+        self.widget._finalized_session_path = destination.session
+        self.widget.path_label.setText(f"Log zapisany w projekcie: {destination.session}")
+        self.widget.output_message.emit(
+            f"Zapisano log w projekcie: {old_session} → {destination.session}"
+        )
+        self.widget.project_changed.emit()
+
+        main_window = self.widget.window()
+        opener = getattr(main_window, "_open_session", None)
+        if was_open and callable(opener):
+            opener(str(destination.session))
+        return True
+
+    def discard_pending_log(self) -> bool:
+        paths = self._pending_paths
+        if paths is None:
+            return True
+        self._close_open_session(paths.session)
+        errors: list[str] = []
+        for path in self._artifact_paths(paths):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                errors.append(f"{path.name}: {exc}")
+        if errors:
+            QMessageBox.critical(
+                self.widget,
+                "Nie można odrzucić logu",
+                "\n".join(errors),
+            )
+            return False
+
+        self._pending_paths = None
+        self._pending_status = None
+        self._pending_name = ""
+        self._transient_finalized = False
+        self.widget._analysis_session_path = None
+        self.widget._current_session_path = None
+        self.widget._finalized_session_path = None
+        self.widget.path_label.setText(f"Projekt: {self.widget.project.root}")
+        load_button = getattr(self.widget, "load_deferred_logical_button", None)
+        if load_button is not None:
+            load_button.setEnabled(False)
+        status_label = getattr(self.widget, "deferred_logical_status", None)
+        if status_label is not None:
+            status_label.setText(
+                "Brak zakończonego logu. Uruchom rejestrację, a po STOP możesz go przeanalizować lub zapisać."
+            )
+        self.widget.output_message.emit("Odrzucono niezapisany log tymczasowy.")
+        return True
+
+    def confirm_pending_log(self, *, reason: str) -> bool:
+        if not self.has_unsaved_log:
+            return True
+
+        if reason == "new_capture":
+            informative = (
+                "Rozpoczęcie nowej rejestracji zastąpi bieżący log tymczasowy."
+            )
+        elif reason == "project_change":
+            informative = "Zmiana projektu odrzuci bieżący log tymczasowy."
+        elif reason == "close_tab":
+            informative = "Zamknięcie zakładki Live odrzuci bieżący log tymczasowy."
+        else:
+            informative = "Zamknięcie programu odrzuci bieżący log tymczasowy."
+
+        dialog = QMessageBox(self.widget)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Niezapisany log")
+        dialog.setText("Zarejestrowany log nie został zapisany w projekcie.")
+        dialog.setInformativeText(informative)
+        save_button = dialog.addButton(
+            "Zapisz log",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        discard_button = dialog.addButton(
+            "Nie zapisuj",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_button = dialog.addButton(
+            "Anuluj",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(save_button)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is save_button:
+            return self.save_pending_log()
+        if clicked is discard_button:
+            return self.discard_pending_log()
+        if clicked is cancel_button:
+            self._restore_pending_ui()
+            return False
+        self._restore_pending_ui()
+        return False
 
     def update_ui(self) -> None:
-        active = self.widget._controller.is_active
-        self.save_checkbox.setText("Zapisz")
-        self.save_checkbox.setToolTip(
-            "Pełna sesja jest zapisywana na dysku."
-            if active and self._current_capture_persistent
-            else "Zaznacz przed Start, aby zapisać pełną sesję na dysku."
+        """Compatibility hook retained for the Live widget control integration."""
+
+        self.widget.session_name.setEnabled(not self.widget._controller.is_active)
+
+    def _restore_pending_ui(self) -> None:
+        paths = self._pending_paths
+        if paths is None:
+            return
+        self.widget._analysis_session_path = paths.session
+        load_button = getattr(self.widget, "load_deferred_logical_button", None)
+        if load_button is not None:
+            load_button.setEnabled(paths.session.is_file())
+        status_label = getattr(self.widget, "deferred_logical_status", None)
+        if status_label is not None:
+            status_label.setText(
+                "Rejestracja zakończona. Kliknij Załaduj, aby otworzyć analizę, "
+                "albo wybierz Plik → Zapisz log."
+            )
+        self.widget.path_label.setText(
+            f"Niezapisany log: {paths.session} | Plik → Zapisz log"
         )
-        self.widget.session_name.setEnabled(
-            not active and self.save_checkbox.isChecked()
+
+    def _destination_paths(self, source: CapturePaths) -> CapturePaths:
+        directory = self.widget.project.live_sessions_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        original = source.session.name.removesuffix(".crt.jsonl")
+        base = original
+        suffix = 2
+        while self._destination_base_exists(directory, base):
+            base = f"{original}_{suffix:02d}"
+            suffix += 1
+        return CapturePaths(
+            session=directory / f"{base}.crt.jsonl",
+            raw_frames_csv=directory / f"{base}.frames.csv",
+            logical_messages_csv=directory / f"{base}.messages.csv",
+            markers=directory / f"{base}.markers.jsonl",
         )
+
+    @staticmethod
+    def _destination_base_exists(directory: Path, base: str) -> bool:
+        names = (
+            f"{base}.crt.jsonl",
+            f"{base}.frames.csv",
+            f"{base}.messages.csv",
+            f"{base}.markers.jsonl",
+            f"{base}.logical.sqlite",
+        )
+        return any((directory / name).exists() for name in names)
+
+    def _move_capture_artifacts(
+        self,
+        source: CapturePaths,
+        destination: CapturePaths,
+    ) -> None:
+        pairs = [
+            (source.session, destination.session),
+            (source.raw_frames_csv, destination.raw_frames_csv),
+            (source.logical_messages_csv, destination.logical_messages_csv),
+            (source.markers, destination.markers),
+        ]
+        source_cache = logical_cache_path_for_session(source.session)
+        destination_cache = logical_cache_path_for_session(destination.session)
+        pairs.extend(
+            (
+                (source_cache, destination_cache),
+                (Path(str(source_cache) + "-wal"), Path(str(destination_cache) + "-wal")),
+                (Path(str(source_cache) + "-shm"), Path(str(destination_cache) + "-shm")),
+                (
+                    Path(str(source_cache) + "-journal"),
+                    Path(str(destination_cache) + "-journal"),
+                ),
+            )
+        )
+        destination.session.parent.mkdir(parents=True, exist_ok=True)
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for old, new in pairs:
+                if not old.exists():
+                    continue
+                shutil.move(str(old), str(new))
+                moved.append((old, new))
+        except Exception:
+            for old, new in reversed(moved):
+                if new.exists() and not old.exists():
+                    shutil.move(str(new), str(old))
+            raise
+
+    def _artifact_paths(self, paths: CapturePaths) -> tuple[Path, ...]:
+        cache = logical_cache_path_for_session(paths.session)
+        return (
+            paths.session,
+            paths.raw_frames_csv,
+            paths.logical_messages_csv,
+            paths.markers,
+            cache,
+            Path(str(cache) + "-wal"),
+            Path(str(cache) + "-shm"),
+            Path(str(cache) + "-journal"),
+        )
+
+    def _close_open_session(self, path: Path) -> bool:
+        main_window = self.widget.window()
+        navigator = getattr(main_window, "navigator", None)
+        if navigator is None:
+            return False
+        key_fn = getattr(navigator, "session_key", None)
+        widget_fn = getattr(navigator, "widget", None)
+        close_fn = getattr(navigator, "close_session", None)
+        if not callable(key_fn) or not callable(widget_fn) or not callable(close_fn):
+            return False
+        was_open = widget_fn(key_fn(path)) is not None
+        if was_open:
+            close_fn(path)
+        return was_open
 
     def _schedule_dbc_load(self, paths: tuple[Path, ...]) -> None:
         normalized = tuple(Path(path) for path in paths)

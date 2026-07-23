@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import gc
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings
 from PySide6.QtWidgets import QApplication
 
 from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferences
@@ -27,6 +28,15 @@ def _preset(name: str, shortcut: str, *, enabled: bool) -> FilterPreset:
     return preset
 
 
+def _drain_deferred_deletes(app: QApplication) -> None:
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    gc.collect()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("AutoklinikaTests")
@@ -45,8 +55,11 @@ def main() -> None:
         window._set_project(project)
 
         assert window.filters_action.shortcut().toString() == "Ctrl+D"
-        actions = window.activity_bar.actions()
-        assert actions.index(window.filters_action) < actions.index(window.settings_action)
+        assert window.activity_bar.isHidden()
+        primary_actions = window.primary_toolbar.actions()
+        assert primary_actions.index(window.decoders_action) < primary_actions.index(
+            window.filters_action
+        )
         registered = {shortcut.key().toString() for shortcut in window._preset_shortcuts}
         assert registered == {"F8", "F9"}
 
@@ -58,6 +71,13 @@ def main() -> None:
         assert isinstance(filter_window, FilterManagerWindow)
         assert filter_window.isWindow()
         assert filter_window.isVisible()
+        assert filter_window.full_screen_action.shortcut().toString() == "F11"
+        filter_window.full_screen_action.trigger()
+        app.processEvents()
+        assert filter_window.isFullScreen()
+        filter_window.full_screen_action.trigger()
+        app.processEvents()
+        assert not filter_window.isFullScreen()
         assert window.tabs.count() == tab_count
         assert "global-filters" not in window.navigator.widgets
         assert window.tabs.indexOf(filter_window.manager) == -1
@@ -96,6 +116,7 @@ def main() -> None:
         assert "CAN 0x100" in live.active_live_filter_label.text()
         assert "Include: OR" in live.active_live_filter_label.text()
         live.close()
+        live.deleteLater()
 
         # Application shortcuts are reserved and block filter preset saves.
         manager.reload_from_repository()
@@ -105,7 +126,7 @@ def main() -> None:
         manager.presets[0].shortcut = "F8"
         assert manager._save(silent=True) is True
 
-        # Reopening by the left action/shortcut path activates the same top-level window.
+        # Reopening from the primary action/shortcut activates the same top-level window.
         window.filters_action.trigger()
         app.processEvents()
         assert window._filter_window is filter_window
@@ -119,7 +140,16 @@ def main() -> None:
         assert filter_window.isVisible()
 
         window.close()
-        app.processEvents()
+        window.deleteLater()
+        _drain_deferred_deletes(app)
+
+        del manager
+        del filter_window
+        del live
+        del window
+        del repository
+        del project
+        _drain_deferred_deletes(app)
 
     QSettings().clear()
 

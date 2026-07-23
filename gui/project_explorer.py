@@ -4,15 +4,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QHBoxLayout,
-    QPushButton,
-    QTreeView,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QAbstractItemView, QTreeView, QVBoxLayout, QWidget
 
+from app.comparison_sets import ComparisonSetStore
 from app.project import CrtProject, SessionRecord
 from app.project_dbc import list_project_dbc
 
@@ -26,37 +20,30 @@ class ProjectExplorer(QWidget):
     open_live_capture = Signal()
     open_session = Signal(str)
     open_area = Signal(str)
+    open_comparison_sets = Signal(str)
     open_decoders = Signal()
-    import_requested = Signal()
-    add_area_requested = Signal()
+    open_filters = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._project: CrtProject | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
-        root.setSpacing(4)
-
-        toolbar = QHBoxLayout()
-        self.add_area_button = QPushButton("+ Obszar")
-        self.add_area_button.setToolTip("Dodaj obszar badań, np. EGR lub VGT")
-        self.add_area_button.clicked.connect(self.add_area_requested)
-        toolbar.addWidget(self.add_area_button)
-
-        self.import_button = QPushButton("Importuj log")
-        self.import_button.clicked.connect(self.import_requested)
-        toolbar.addWidget(self.import_button)
-        root.addLayout(toolbar)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         self.model = QStandardItemModel(self)
-        self.model.setHorizontalHeaderLabels(["EXPLORER CRT"])
-        self.tree = QTreeView()
+        self.model.setHorizontalHeaderLabels(["Projekt"])
+        self.tree = QTreeView(self)
+        self.tree.setObjectName("projectTree")
         self.tree.setModel(self.model)
-        self.tree.setHeaderHidden(False)
-        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tree.setHeaderHidden(True)
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(14)
+        self.tree.setAnimated(False)
         self.tree.doubleClicked.connect(self._activate_index)
         root.addWidget(self.tree, 1)
 
@@ -65,15 +52,14 @@ class ProjectExplorer(QWidget):
     def set_project(self, project: CrtProject | None) -> None:
         self._project = project
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["EXPLORER CRT"])
-        enabled = project is not None
-        self.add_area_button.setEnabled(enabled)
-        self.import_button.setEnabled(enabled)
+        self.model.setHorizontalHeaderLabels(["Projekt"])
+
         if project is None:
-            item = QStandardItem("Brak otwartego projektu")
+            item = QStandardItem("Otwórz lub utwórz projekt CRT")
             item.setEnabled(False)
             self.model.appendRow(item)
             return
+
         self._build_tree(project)
         self.tree.expandToDepth(1)
 
@@ -82,34 +68,11 @@ class ProjectExplorer(QWidget):
 
     def _build_tree(self, project: CrtProject) -> None:
         root = self._item(project.manifest.name, "project", str(project.root))
+        font = root.font()
+        font.setBold(True)
+        root.setFont(font)
         root.setToolTip(str(project.root))
         self.model.appendRow(root)
-
-        root.appendRow(self._item("Przegląd projektu", "overview", ""))
-        root.appendRow(self._item("Live Capture", "live", ""))
-
-        areas_root = self._item("Obszary badań", "section", "areas")
-        for area in project.list_study_areas():
-            area_item = self._item(area.name, "area", area.id)
-            linked = project.area_session_ids(area.id)
-            if linked:
-                sessions_by_id = {
-                    session.id: session for session in project.list_sessions()
-                }
-                linked_root = self._item(
-                    "Powiązane sesje", "section", "area-sessions"
-                )
-                for session_id in sorted(linked):
-                    session = sessions_by_id.get(session_id)
-                    if session is not None:
-                        linked_root.appendRow(self._session_item(project, session))
-                area_item.appendRow(linked_root)
-            areas_root.appendRow(area_item)
-        root.appendRow(areas_root)
-
-        experiments = self._item("Eksperymenty", "section", "experiments")
-        experiments.appendRow(self._placeholder("Brak eksperymentów"))
-        root.appendRow(experiments)
 
         sessions_root = self._item("Sesje CAN", "section", "sessions")
         live_root = self._item("Live", "section", "sessions-live")
@@ -125,19 +88,63 @@ class ProjectExplorer(QWidget):
         sessions_root.appendRow(imported_root)
         root.appendRow(sessions_root)
 
-        root.appendRow(self._build_decoders(project))
+        areas_root = self._item("Obszary badań", "section", "areas")
+        sessions_by_id = {
+            session.id: session for session in project.list_sessions()
+        }
+        for area in project.list_study_areas():
+            area_item = self._item(area.name, "area", area.id)
+            linked = project.area_session_ids(area.id)
+            if linked:
+                linked_root = self._item(
+                    "Powiązane sesje",
+                    "section",
+                    "area-sessions",
+                )
+                for session_id in sorted(linked):
+                    session = sessions_by_id.get(session_id)
+                    if session is not None:
+                        linked_root.appendRow(self._session_item(project, session))
+                area_item.appendRow(linked_root)
+            areas_root.appendRow(area_item)
+        if areas_root.rowCount() == 0:
+            areas_root.appendRow(self._placeholder("Brak obszarów"))
+        root.appendRow(areas_root)
 
-        for name, key in (
-            ("Porównania", "comparisons"),
-            ("Sygnały", "signals"),
-            ("Hipotezy", "hypotheses"),
-            ("Notatki", "notes"),
-            ("Załączniki", "attachments"),
-            ("Raporty", "reports"),
-        ):
-            section = self._item(name, "section", key)
-            section.appendRow(self._placeholder("W przygotowaniu"))
-            root.appendRow(section)
+        root.appendRow(self._build_comparison_sets(project))
+        root.appendRow(self._build_decoders(project))
+        root.appendRow(self._item("Filtry globalne", "filters", ""))
+
+    def _build_comparison_sets(self, project: CrtProject) -> QStandardItem:
+        comparison_root = self._item(
+            "Zestawy porównawcze",
+            "comparison_sets",
+            "",
+        )
+        sessions_by_id = {
+            session.id: session for session in project.list_sessions()
+        }
+        for comparison_set in ComparisonSetStore(project).list():
+            item = self._item(
+                f"{comparison_set.name} ({len(comparison_set.session_ids)})",
+                "comparison_set",
+                comparison_set.id,
+            )
+            base = sessions_by_id.get(comparison_set.base_session_id or "")
+            session_names = [
+                sessions_by_id[session_id].name
+                for session_id in comparison_set.session_ids
+                if session_id in sessions_by_id
+            ]
+            item.setToolTip(
+                f"Sesja bazowa: {'—' if base is None else base.name}\n"
+                f"Sesje: {', '.join(session_names)}\n"
+                f"Synchronizacja: {comparison_set.synchronization_mode}"
+            )
+            comparison_root.appendRow(item)
+        if comparison_root.rowCount() == 0:
+            comparison_root.appendRow(self._placeholder("Brak zestawów"))
+        return comparison_root
 
     def _build_decoders(self, project: CrtProject) -> QStandardItem:
         records = list_project_dbc(project)
@@ -179,7 +186,8 @@ class ProjectExplorer(QWidget):
         item.setToolTip(
             f"{session.relative_path}\nRamki: {session.frame_count:,}\n"
             f"Znaczniki: {session.marker_count:,}\nStatus: {session.status}".replace(
-                ",", " "
+                ",",
+                " ",
             )
         )
         return item
@@ -211,5 +219,9 @@ class ProjectExplorer(QWidget):
             self.open_session.emit(str(Path(value)))
         elif node_type == "area" and value:
             self.open_area.emit(str(value))
+        elif node_type in {"comparison_sets", "comparison_set"}:
+            self.open_comparison_sets.emit(str(value or ""))
         elif node_type in {"decoders", "dbc"}:
             self.open_decoders.emit()
+        elif node_type == "filters":
+            self.open_filters.emit()

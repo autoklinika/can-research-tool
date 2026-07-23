@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum, auto
+from inspect import Parameter, signature
 from pathlib import Path
 from typing import Callable
 
@@ -84,7 +85,10 @@ class ProjectNavigator:
             return existing
 
         dbc_paths = active_project_dbc_paths(project) if project is not None else ()
-        widget = self._session_widget_factory(session_path, dbc_paths=dbc_paths)
+        factory_kwargs = {"dbc_paths": dbc_paths}
+        if _factory_accepts_project(self._session_widget_factory):
+            factory_kwargs["project"] = project
+        widget = self._session_widget_factory(session_path, **factory_kwargs)
         widget.inspector_text.connect(inspector_sink)
         widget.output_message.connect(output_sink)
         self.add_tab(
@@ -150,3 +154,14 @@ class ProjectNavigator:
     def _shutdown_widget(widget: QWidget) -> None:
         if isinstance(widget, (LiveCaptureWidget, SessionViewWidget)):
             widget.shutdown()
+
+
+def _factory_accepts_project(factory: Callable[..., object]) -> bool:
+    try:
+        parameters = signature(factory).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == "project" or parameter.kind is Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )

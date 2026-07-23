@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from tempfile import TemporaryDirectory
 from time import monotonic
 
@@ -93,6 +94,7 @@ def main() -> None:
         ):
             assert manager.condition_field.findData(field) >= 0
         manager.close()
+        manager.deleteLater()
 
         widget = LiveCaptureWidget(project)
         widget.frame_model.append_frames(
@@ -149,6 +151,14 @@ def main() -> None:
         app.processEvents()
         assert widget.live_message_filter_proxy.rowCount() == 4
         widget.close()
+        widget.deleteLater()
+        QThreadPool.globalInstance().waitForDone()
+        app.processEvents()
+        del widget
+        del manager
+        del project
+        gc.collect()
+        app.processEvents()
 
     app.processEvents()
 

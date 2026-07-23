@@ -7,6 +7,9 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from app.logical_records import load_recent_logical_messages
 
 
+INTERACTIVE_MESSAGE_ROWS = 1_000
+
+
 class LogicalMessageLoadSignals(QObject):
     loaded = Signal(str, object, int, str)
     failed = Signal(str, str)
@@ -24,7 +27,10 @@ class LogicalMessageLoadTask(QRunnable):
     ) -> None:
         super().__init__()
         self.session_path = Path(session_path)
-        self.max_rows = max_rows
+        # A QTableView with 14 columns becomes expensive under Fusion when tens
+        # of thousands of Python-backed rows are exposed at once. Keep the file
+        # and total count intact, but render one bounded interactive page.
+        self.max_rows = min(max_rows, INTERACTIVE_MESSAGE_ROWS)
         self.dbc_paths = tuple(Path(path) for path in dbc_paths)
         self.signals = LogicalMessageLoadSignals()
 

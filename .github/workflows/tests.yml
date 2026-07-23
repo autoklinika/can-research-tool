@@ -53,12 +53,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python - <<'PY'
+          import gc
           from pathlib import Path
           from tempfile import TemporaryDirectory
+          from time import monotonic, sleep
           from unittest.mock import patch
 
-          from PySide6.QtCore import Qt
-          from PySide6.QtWidgets import QApplication, QDialog
+          from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool, Qt
+          from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QLabel
 
           from app.markers import MarkerPreset
           from app.project_dbc import import_project_dbc
@@ -101,7 +103,6 @@ jobs:
           BS_:
 
           BU_: ECU
-
           BO_ 291 EGR_Status: 8 ECU
            SG_ EGR_Position : 0|8@1+ (0.4,0) [0|100] "%" Vector__XXX
           '''
@@ -152,22 +153,21 @@ jobs:
               live = window._tab_keys["live-capture"]
               live._update_marker_tile()
               assert live._live_filter_integration.proxy is live.live_filter_proxy
-              assert live._live_save_integration.save_checkbox is live.save_session_button
+              assert live.findChild(QCheckBox, "armSessionSaveButton") is None
               assert live.findChild(type(live.path_label), "protocolMessageSummary") is not None
-              assert "1 aktywnych / 1" in live.marker_setup_button.text()
+              assert live.marker_setup_button.text() == "Znaczniki: 1/1"
               assert live.message_table.model() is live.message_model
               assert live.live_message_filter_proxy.sourceModel() is live.message_model
               assert live.frame_table.model() is live.frame_model
               assert live.live_filter_proxy.sourceModel() is live.frame_model
               assert not hasattr(live, "live_filter_label")
-              assert live.save_session_button.isChecked() is False
-              assert live.save_session_button.text() == "Zapisz"
-              assert live.session_name.isEnabled() is False
-
-              live.save_session_button.click()
-              assert live.save_session_button.isChecked() is True
-              assert live.save_session_button.text() == "Zapisz"
-              assert live.session_name.isEnabled() is True
+              assert live.session_name.isHidden()
+              assert not live.session_name.isEnabled()
+              assert not any(
+                  label.isVisible() and label.text().strip() == "Nazwa sesji:"
+                  for label in live.findChildren(QLabel)
+              )
+              assert not window.save_log_action.isEnabled()
 
               filter_tab_count = window.tabs.count()
               window.filters_action.trigger()
@@ -187,30 +187,56 @@ jobs:
               marker_dialog = MarkerManagerDialog(window.project)
               assert marker_dialog.model.rowCount() == 1
               marker_dialog.close()
+              marker_dialog.deleteLater()
 
               dbc_source = Path(temporary) / "egr.dbc"
               dbc_source.write_text(DBC_TEXT, encoding="utf-8")
               import_project_dbc(window.project, dbc_source)
               window._open_decoders()
               decoders = window._tab_keys["decoders"]
-              decoders.model.refresh()
-              assert decoders.model.rowCount() == 1
-              assert decoders.model.active_count == 1
-              assert decoders.model.setData(
-                  decoders.model.index(0, 0),
+              deadline = monotonic() + 5.0
+              while decoders.manager is None and monotonic() < deadline:
+                  app.processEvents()
+                  sleep(0.01)
+              assert decoders.manager is not None
+              manager = decoders.manager
+              manager.model.refresh()
+              assert manager.model.rowCount() == 1
+              assert manager.model.active_count == 1
+              assert manager.model.setData(
+                  manager.model.index(0, 0),
                   Qt.Unchecked,
                   Qt.CheckStateRole,
               )
-              assert decoders.model.active_count == 0
-              assert decoders.model.setData(
-                  decoders.model.index(0, 0),
+              assert manager.model.active_count == 0
+              assert manager.model.setData(
+                  manager.model.index(0, 0),
                   Qt.Checked,
                   Qt.CheckStateRole,
               )
-              assert decoders.model.active_count == 1
+              assert manager.model.active_count == 1
 
               assert window.tabs.count() >= 3
               assert window.explorer.tree.model().rowCount() == 1
+
+              QThreadPool.globalInstance().waitForDone(5_000)
+              if window._filter_window is not None:
+                  window._filter_window.close()
+              window.navigator.close_all()
               window.close()
+              # Drain queued callbacks while the window hierarchy still exists.
+              app.processEvents()
+              if window._filter_window is not None:
+                  window._filter_window.deleteLater()
+              window.deleteLater()
+              QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+              del manager
+              del decoders
+              del marker_dialog
+              del filters
+              del live
+              del window
+              gc.collect()
           app.quit()
           PY

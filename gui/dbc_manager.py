@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Iterable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
@@ -30,11 +31,20 @@ class DbcTableModel(QAbstractTableModel):
     operation_failed = Signal(str)
     _HEADERS = ("Aktywny", "Nazwa", "Plik projektu", "Wiadomości", "SHA-256")
 
-    def __init__(self, project: CrtProject, parent=None) -> None:
+    def __init__(
+        self,
+        project: CrtProject,
+        parent=None,
+        *,
+        records: Iterable[DbcFileRecord] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.project = project
         self._records: list[DbcFileRecord] = []
-        self.refresh()
+        if records is None:
+            self.refresh()
+        else:
+            self._records = list(records)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._records)
@@ -152,10 +162,16 @@ class DbcManagerWidget(QWidget):
     output_message = Signal(str)
     inspector_text = Signal(str)
 
-    def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        project: CrtProject,
+        parent: QWidget | None = None,
+        *,
+        records: Iterable[DbcFileRecord] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.project = project
-        self.model = DbcTableModel(project, self)
+        self.model = DbcTableModel(project, self, records=records)
         self.model.project_changed.connect(self._project_changed)
         self.model.operation_failed.connect(self._operation_failed)
 

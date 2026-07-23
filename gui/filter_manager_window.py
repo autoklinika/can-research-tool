@@ -11,6 +11,7 @@ from app.filters import FilterCompiler, ProjectFilterRepository
 from .filter_manager import FilterManagerWidget
 from .filter_shortcut_support import check_filter_shortcuts
 from .main_window import MainWindow
+from .window_fullscreen import enable_full_screen
 
 
 class FilterManagerWindow(QMainWindow):
@@ -32,6 +33,11 @@ class FilterManagerWindow(QMainWindow):
         self.setCentralWidget(manager)
         self.setMinimumSize(1050, 650)
         self.resize(1450, 820)
+        self.full_screen_controller = enable_full_screen(
+            self,
+            action_object_name="filterManagerFullScreenAction",
+        )
+        self.full_screen_action = self.full_screen_controller.action
 
         geometry = QSettings().value("windows/filterManagerGeometry")
         if geometry is not None:
