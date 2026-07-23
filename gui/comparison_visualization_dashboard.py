@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from math import ceil
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -37,7 +41,8 @@ from .comparison_visualization_model import (
     payload_summary,
 )
 
-MAX_TABLE_ROWS = 500
+DEFAULT_PAGE_SIZE = 100
+PAGE_SIZE_OPTIONS = (50, 100, 250, 500)
 STATUS_COLORS = {
     STATUS_NEW: QColor("#4CAF50"),
     STATUS_MISSING: QColor("#E53935"),
@@ -58,7 +63,9 @@ class ComparisonVisualizationWidget(QWidget):
         self.setObjectName("comparisonVisualizationDashboard")
         self._comparison_name = comparison_name
         self._data = ComparisonDashboardData(comparison_name)
+        self._ordered_rows: list[ComparisonVisualRow] = []
         self._visible_rows: list[ComparisonVisualRow] = []
+        self._page_index = 0
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
@@ -94,7 +101,11 @@ class ComparisonVisualizationWidget(QWidget):
         root.addWidget(charts, 1)
 
         details = QSplitter(Qt.Orientation.Horizontal, self)
-        self.table = QTableWidget(0, 10, details)
+        table_panel = QWidget(details)
+        table_layout = QVBoxLayout(table_panel)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(4)
+        self.table = QTableWidget(0, 10, table_panel)
         self.table.setObjectName("comparisonVisualizationDiffTable")
         self.table.setHorizontalHeaderLabels(
             (
@@ -128,7 +139,38 @@ class ComparisonVisualizationWidget(QWidget):
             QHeaderView.ResizeMode.Stretch,
         )
         self.table.itemSelectionChanged.connect(self._selection_changed)
-        details.addWidget(self.table)
+        table_layout.addWidget(self.table, 1)
+
+        pagination = QHBoxLayout()
+        self.rows_label = QLabel(self)
+        self.rows_label.setObjectName("comparisonVisualizationRowsLabel")
+        pagination.addWidget(self.rows_label)
+        pagination.addStretch(1)
+        pagination.addWidget(QLabel("Wierszy na stronę:", self))
+        self.page_size_combo = QComboBox(self)
+        self.page_size_combo.setObjectName("comparisonVisualizationPageSize")
+        for size in PAGE_SIZE_OPTIONS:
+            self.page_size_combo.addItem(str(size), size)
+        default_index = self.page_size_combo.findData(DEFAULT_PAGE_SIZE)
+        self.page_size_combo.setCurrentIndex(max(0, default_index))
+        self.page_size_combo.currentIndexChanged.connect(self._page_size_changed)
+        pagination.addWidget(self.page_size_combo)
+        self.previous_page_button = QPushButton("Poprzednia", self)
+        self.previous_page_button.setObjectName(
+            "comparisonVisualizationPreviousPage"
+        )
+        self.previous_page_button.clicked.connect(self._previous_page)
+        pagination.addWidget(self.previous_page_button)
+        self.page_label = QLabel(self)
+        self.page_label.setObjectName("comparisonVisualizationPageLabel")
+        pagination.addWidget(self.page_label)
+        self.next_page_button = QPushButton("Następna", self)
+        self.next_page_button.setObjectName("comparisonVisualizationNextPage")
+        self.next_page_button.clicked.connect(self._next_page)
+        pagination.addWidget(self.next_page_button)
+        table_layout.addLayout(pagination)
+
+        details.addWidget(table_panel)
         self.inspector = ComparisonInspector(details)
         self.inspector.evidence_requested.connect(self.evidence_requested.emit)
         details.addWidget(self.inspector)
@@ -144,7 +186,9 @@ class ComparisonVisualizationWidget(QWidget):
 
     def clear(self) -> None:
         self._data = ComparisonDashboardData(self._comparison_name)
+        self._ordered_rows = []
         self._visible_rows = []
+        self._page_index = 0
         self.overview_label.setText(
             "Uruchom providery porównawcze. Dashboard korzysta wyłącznie z "
             "trwałych artefaktów i nie skanuje sesji ponownie w GUI."
@@ -160,6 +204,7 @@ class ComparisonVisualizationWidget(QWidget):
         self.heatmap.set_data([], [])
         self.frequency_panel.set_rows([])
         self.table.setRowCount(0)
+        self._update_pagination()
         self.inspector.clear_selection()
         self.payload_preview.clear_preview()
 
@@ -178,8 +223,8 @@ class ComparisonVisualizationWidget(QWidget):
         schemas = ", ".join(data.artifact_schemas) or "brak"
         self.overview_label.setText(
             f"Zestaw: {data.comparison_name}. Sesje porównywane: {compared}. "
-            f"Źródła dashboardu: {schemas}. Tabela pokazuje maksymalnie "
-            f"{MAX_TABLE_ROWS} najwyżej sklasyfikowanych różnic."
+            f"Źródła dashboardu: {schemas}. Wszystkie różnice są dostępne "
+            "strona po stronie; GUI nie ucina wyniku analizy."
         )
         self.new_card.set_value(
             str(data.new_count),
@@ -202,7 +247,10 @@ class ComparisonVisualizationWidget(QWidget):
             STATUS_COLORS[STATUS_CHANGED],
         )
         if data.largest_frequency_delta is None:
-            self.frequency_card.set_value("—", "brak porównywalnej częstotliwości")
+            self.frequency_card.set_value(
+                "—",
+                "brak porównywalnej częstotliwości",
+            )
         else:
             delta = data.largest_frequency_delta
             self.frequency_card.set_value(
@@ -212,7 +260,7 @@ class ComparisonVisualizationWidget(QWidget):
             )
 
     def _populate_table(self) -> None:
-        ordered = sorted(
+        self._ordered_rows = sorted(
             self._data.rows,
             key=lambda row: (
                 STATUS_ORDER.get(row.status, 99),
@@ -221,7 +269,21 @@ class ComparisonVisualizationWidget(QWidget):
                 row.message_key,
             ),
         )
-        self._visible_rows = ordered[:MAX_TABLE_ROWS]
+        self._page_index = 0
+        self._refresh_page()
+
+    def _refresh_page(self) -> None:
+        page_size = self._page_size()
+        page_count = self._page_count(page_size)
+        if page_count == 0:
+            self._page_index = 0
+            start = 0
+            end = 0
+        else:
+            self._page_index = min(self._page_index, page_count - 1)
+            start = self._page_index * page_size
+            end = min(start + page_size, len(self._ordered_rows))
+        self._visible_rows = self._ordered_rows[start:end]
         self.table.setSortingEnabled(False)
         self.table.blockSignals(True)
         self.table.clearContents()
@@ -258,11 +320,49 @@ class ComparisonVisualizationWidget(QWidget):
                 self.table.setItem(row_index, column, item)
         self.table.blockSignals(False)
         self.table.setSortingEnabled(True)
+        self._update_pagination(start, end)
         if self._visible_rows:
             self.table.selectRow(0)
         else:
             self.inspector.clear_selection()
             self.payload_preview.clear_preview()
+
+    def _update_pagination(self, start: int = 0, end: int = 0) -> None:
+        total = len(self._ordered_rows)
+        page_count = self._page_count(self._page_size())
+        shown_start = start + 1 if end > start else 0
+        self.rows_label.setText(f"Wyświetlanie {shown_start}–{end} z {total}")
+        current_page = self._page_index + 1 if page_count else 0
+        self.page_label.setText(f"Strona {current_page} z {page_count}")
+        self.previous_page_button.setEnabled(self._page_index > 0)
+        self.next_page_button.setEnabled(
+            page_count > 0 and self._page_index + 1 < page_count
+        )
+
+    def _page_size(self) -> int:
+        value = self.page_size_combo.currentData()
+        return value if isinstance(value, int) and value > 0 else DEFAULT_PAGE_SIZE
+
+    def _page_count(self, page_size: int) -> int:
+        if not self._ordered_rows:
+            return 0
+        return ceil(len(self._ordered_rows) / page_size)
+
+    def _page_size_changed(self) -> None:
+        self._page_index = 0
+        self._refresh_page()
+
+    def _previous_page(self) -> None:
+        if self._page_index <= 0:
+            return
+        self._page_index -= 1
+        self._refresh_page()
+
+    def _next_page(self) -> None:
+        if self._page_index + 1 >= self._page_count(self._page_size()):
+            return
+        self._page_index += 1
+        self._refresh_page()
 
     def _selection_changed(self) -> None:
         selected = self.table.selectionModel().selectedRows()
