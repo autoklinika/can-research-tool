@@ -174,12 +174,19 @@ def _locate_in_session(
             frame.channel == key.channel
             and frame.arbitration_id == key.arbitration_id
             and frame.is_extended_id == key.is_extended_id
-            and frame.is_remote_frame == key.is_remote_frame
-            and frame.is_error_frame == key.is_error_frame
+            and _frame_kind_matches(frame, key)
         ):
             return source_row
     _raise_if_cancelled(should_cancel)
     return None
+
+
+def _frame_kind_matches(frame, key: ParsedMessageKey) -> bool:
+    if key.is_error_frame:
+        return bool(frame.is_error_frame)
+    if key.is_remote_frame:
+        return bool(frame.is_remote_frame) and not frame.is_error_frame
+    return not frame.is_remote_frame and not frame.is_error_frame
 
 
 def _raise_if_cancelled(
