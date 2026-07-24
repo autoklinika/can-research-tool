@@ -30,11 +30,11 @@ Dodano graficzny przegląd zestawu porównawczego obejmujący:
 - podgląd różnic payloadu,
 - oddzielną kartę z technicznymi danymi artefaktów.
 
-Dashboard agreguje najnowsze trwałe artefakty providerów:
+Dashboard agreguje najnowsze trwałe artefakty według schematów:
 
-- `crt.comparison.statistics`,
-- `crt.comparison.payload_differences`,
-- `crt.comparison.message_sequences`.
+- `crt.comparison_statistics`,
+- `crt.payload_differences`,
+- `crt.message_sequence_differences`.
 
 Zwykłe renderowanie dashboardu nie wykonuje ponownego skanowania źródłowych sesji.
 
