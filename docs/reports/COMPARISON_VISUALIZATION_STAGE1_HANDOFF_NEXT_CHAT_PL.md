@@ -42,11 +42,21 @@ Końcowy przepływ został ręcznie potwierdzony przez właściciela projektu:
 
 Okno porównania jest niezależne i niemodalne. Po sukcesie minimalizuje się, a główne CRT przejmuje fokus.
 
-## Ostatni funkcjonalny checkpoint przed raportami
+## Checkpointy
+
+Ostatni funkcjonalny checkpoint przed raportami:
 
 `6564446915d1a27ffe73ac4d2c23a5cf9969a995`
 
-Po dodaniu raportów HEAD gałęzi będzie nowszy. Na początku kolejnej rozmowy zawsze sprawdź rzeczywisty HEAD PR #49.
+Commit raportu końcowego:
+
+`45e0dbaf2e43edb5ec06408bfbf4fc2c03fd701a`
+
+Commit pierwszej wersji handoffu:
+
+`29e4e2e3bdb9ab6be28ada70dc44d86f30040f83`
+
+Na początku kolejnej rozmowy zawsze sprawdź rzeczywisty HEAD PR #49, ponieważ niniejsza aktualizacja handoffu tworzy kolejny commit.
 
 ## Pierwsze zadania w kolejnej rozmowie
 
