@@ -15,6 +15,10 @@ from PySide6.QtWidgets import (
 )
 
 from .comparison_visualization_model import (
+    STATUS_CHANGED,
+    STATUS_MISSING,
+    STATUS_NEW,
+    STATUS_UNCHANGED,
     ComparisonVisualRow,
     byte_delta,
     byte_positions,
@@ -26,10 +30,10 @@ from .comparison_visualization_model import (
 
 MAX_PAYLOAD_BYTES = 16
 STATUS_COLORS = {
-    "Nowe": QColor("#55d187"),
-    "Brakujące": QColor("#ff6b6b"),
-    "Zmienione": QColor("#ffbf47"),
-    "Bez zmian": QColor("#91a4b7"),
+    STATUS_NEW: QColor("#55d187"),
+    STATUS_MISSING: QColor("#ff6b6b"),
+    STATUS_CHANGED: QColor("#ffbf47"),
+    STATUS_UNCHANGED: QColor("#91a4b7"),
 }
 
 

@@ -166,13 +166,9 @@ def build_dashboard_data(
             len(sequence_changes),
         )
     )
+    sequence_change_counts = _sequence_change_counts(sequence_changes)
     for row in rows.values():
-        row.sequence_change_count = sum(
-            1
-            for change in sequence_changes
-            if row.message_key
-            and row.message_key in str(change.get("sequence_text") or "")
-        )
+        row.sequence_change_count = sequence_change_counts.get(row.message_key, 0)
         row.evidence_count = (
             int(row.status != STATUS_UNCHANGED)
             + row.payload_change_count
@@ -302,6 +298,18 @@ def optional_int(value: object) -> int | None:
         return None
 
 
+def optional_hex_int(value: object) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "—":
+        return None
+    try:
+        return int(text, 16)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def optional_float(value: object) -> float | None:
     if value is None:
         return None
@@ -310,6 +318,22 @@ def optional_float(value: object) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return result if isfinite(result) else None
+
+
+def _sequence_change_counts(
+    changes: list[dict[str, Any]],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for change in changes:
+        sequence_text = str(change.get("sequence_text") or "")
+        message_keys = {
+            token.strip()
+            for token in sequence_text.split("→")
+            if token.strip()
+        }
+        for message_key in message_keys:
+            counts[message_key] = counts.get(message_key, 0) + 1
+    return counts
 
 
 def _merge_sessions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:

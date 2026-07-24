@@ -25,6 +25,7 @@ from .comparison_visualization_model import (
     ComparisonVisualRow,
     format_hz,
     format_integer,
+    optional_hex_int,
     payload_summary,
 )
 
@@ -38,6 +39,20 @@ class FilteredComparisonVisualizationWidget(ComparisonVisualizationWidget):
         super().__init__(comparison_name, parent)
         self._install_filter_toolbar()
         self._install_global_sorting()
+        self.table.setHorizontalHeaderLabels(
+            (
+                "Sesja",
+                "CAN ID / Klucz",
+                "Status",
+                "Ramki bazowe",
+                "Ramki porównywane",
+                "Częstotliwość",
+                "Δ [%]",
+                "Payload",
+                "Sekwencje",
+                "Dowody",
+            )
+        )
         try:
             self.inspector.evidence_requested.disconnect()
         except (RuntimeError, TypeError):
@@ -285,11 +300,13 @@ def _column_sort_key(row: ComparisonVisualRow, column: int):
     if column == 0:
         return row.session_name.casefold()
     if column == 1:
+        arbitration_id = optional_hex_int(row.arbitration_id_hex)
         return (
             row.channel,
             row.is_extended_id,
-            int(row.arbitration_id_hex, 16),
+            -1 if arbitration_id is None else arbitration_id,
             row.frame_kind,
+            row.message_key,
         )
     if column == 2:
         return STATUS_ORDER.get(row.status, 99)

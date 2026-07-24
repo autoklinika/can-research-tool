@@ -12,6 +12,12 @@ from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.project_search_index import ProjectSearchIndex
 from app.session_stream import SessionStreamWriter
+from gui.comparison_visualization_model import (
+    SCHEMA_SEQUENCE,
+    SCHEMA_STATISTICS,
+    build_dashboard_data,
+    optional_hex_int,
+)
 
 
 def test_locates_evidence_with_fallback_and_persistent_index(tmp_path: Path) -> None:
@@ -41,12 +47,80 @@ def test_rejects_invalid_or_missing_evidence(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         parse_message_key("not-a-message-key")
-    with pytest.raises(LookupError):
+    with pytest.raises(ValueError):
+        parse_message_key("0:STD:800:data")
+    parsed = parse_message_key("0:EXT:1FFFFFFF:data")
+    assert parsed.arbitration_id == 0x1FFFFFFF
+    assert parsed.is_extended_id
+
+    with pytest.raises(LookupError, match="Nie znaleziono klucza wiadomości"):
         locate_comparison_evidence(
             project,
             session.id,
             "0:STD:555:data",
         )
+
+
+def test_dashboard_sequence_matching_is_exact_and_hex_sort_values_are_safe() -> None:
+    sessions = [
+        {"id": "before", "name": "Przed", "role": "base"},
+        {"id": "after", "name": "Po", "role": "compared"},
+    ]
+    statistics = {
+        "schema": SCHEMA_STATISTICS,
+        "sessions": sessions,
+        "message_keys": [
+            _statistics_key("0:STD:10:data", "10"),
+            _statistics_key("0:STD:100:data", "100"),
+        ],
+    }
+    sequence = {
+        "schema": SCHEMA_SEQUENCE,
+        "sessions": sessions,
+        "summary": {"notable_change_count": 1},
+        "ranked_changes": [
+            {"sequence_text": "0:STD:100:data → 0:STD:200:data"}
+        ],
+    }
+
+    data = build_dashboard_data(
+        "Exact sequence matching",
+        {SCHEMA_STATISTICS: statistics, SCHEMA_SEQUENCE: sequence},
+    )
+    counts = {row.message_key: row.sequence_change_count for row in data.rows}
+    assert counts["0:STD:10:data"] == 0
+    assert counts["0:STD:100:data"] == 1
+    assert optional_hex_int("—") is None
+    assert optional_hex_int("not-hex") is None
+    assert optional_hex_int("18DAF900") == 0x18DAF900
+
+
+def _statistics_key(message_key: str, arbitration_id_hex: str) -> dict:
+    metrics = {"frame_count": 1, "mean_positive_frequency_hz": 1.0}
+    return {
+        "message_key": message_key,
+        "channel": 0,
+        "arbitration_id_hex": arbitration_id_hex,
+        "is_extended_id": False,
+        "frame_kind": "data",
+        "baseline": metrics,
+        "sessions": [
+            {
+                "session_id": "before",
+                "session_name": "Przed",
+                "role": "base",
+                "statistics": metrics,
+                "change": {"reasons": []},
+            },
+            {
+                "session_id": "after",
+                "session_name": "Po",
+                "role": "compared",
+                "statistics": metrics,
+                "change": {"reasons": []},
+            },
+        ],
+    }
 
 
 def _create_session(project: CrtProject):

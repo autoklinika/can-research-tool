@@ -104,7 +104,7 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
                     try:
                         action()
                     except RuntimeError:
-                        break
+                        continue
 
         coordinator.open_evidence(
             session_id,

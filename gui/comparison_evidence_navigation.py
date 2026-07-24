@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 class _EvidenceSignals(QObject):
     completed = Signal(int, object)
     failed = Signal(int, str)
+    finished = Signal(int)
 
 
 class _EvidenceTask(QRunnable):
@@ -31,35 +32,37 @@ class _EvidenceTask(QRunnable):
         project,
         session_id: str,
         message_key: str,
+        cancel_event: Event,
     ) -> None:
         super().__init__()
+        self.setAutoDelete(False)
         self.generation = generation
         self.project = project
         self.session_id = session_id
         self.message_key = message_key
-        self.cancel_event = Event()
+        self.cancel_event = cancel_event
         self.signals = _EvidenceSignals()
-
-    def cancel(self) -> None:
-        self.cancel_event.set()
 
     @Slot()
     def run(self) -> None:
         try:
-            location = locate_comparison_evidence(
-                self.project,
-                self.session_id,
-                self.message_key,
-                should_cancel=self.cancel_event.is_set,
-            )
-        except ComparisonEvidenceCancelled:
-            return
-        except Exception as exc:  # pragma: no cover - surfaced through GUI
+            try:
+                location = locate_comparison_evidence(
+                    self.project,
+                    self.session_id,
+                    self.message_key,
+                    should_cancel=self.cancel_event.is_set,
+                )
+            except ComparisonEvidenceCancelled:
+                return
+            except Exception as exc:  # pragma: no cover - surfaced through GUI
+                if not self.cancel_event.is_set():
+                    self.signals.failed.emit(self.generation, str(exc))
+                return
             if not self.cancel_event.is_set():
-                self.signals.failed.emit(self.generation, str(exc))
-            return
-        if not self.cancel_event.is_set():
-            self.signals.completed.emit(self.generation, location)
+                self.signals.completed.emit(self.generation, location)
+        finally:
+            self.signals.finished.emit(self.generation)
 
 
 class ComparisonEvidenceCoordinator(QObject):
@@ -69,7 +72,7 @@ class ComparisonEvidenceCoordinator(QObject):
         super().__init__(window)
         self._window = window
         self._generation = 0
-        self._tasks: list[_EvidenceTask] = []
+        self._tasks: dict[int, _EvidenceTask] = {}
         self._on_opened: Callable[[ComparisonEvidenceLocation], None] | None = None
         self._on_failed: Callable[[str], None] | None = None
         window.destroyed.connect(self._window_destroyed)
@@ -91,21 +94,22 @@ class ComparisonEvidenceCoordinator(QObject):
             return
         self._generation += 1
         generation = self._generation
-        for task in self._tasks:
-            task.cancel()
-        self._tasks.clear()
+        self._cancel_pending_tasks()
         self._on_opened = on_opened
         self._on_failed = on_failed
         self._report(f"Szukam dowodów dla {message_key} w zapisanej sesji…")
+        cancel_event = Event()
         task = _EvidenceTask(
             generation,
             project,
             session_id,
             message_key,
+            cancel_event,
         )
         task.signals.completed.connect(self._location_ready)
         task.signals.failed.connect(self._location_failed)
-        self._tasks.append(task)
+        task.signals.finished.connect(self._task_finished)
+        self._tasks[generation] = task
         QThreadPool.globalInstance().start(task)
 
     @Slot(int, object)
@@ -136,7 +140,6 @@ class ComparisonEvidenceCoordinator(QObject):
             self._finish_failed(str(exc))
             return
 
-        self._tasks.clear()
         self._report(
             f"Otwarto dowód: {value.message_key}, "
             f"ramka źródłowa {value.source_row + 1}."
@@ -163,7 +166,6 @@ class ComparisonEvidenceCoordinator(QObject):
 
     def _finish_failed(self, error: str) -> None:
         message = f"Nie udało się otworzyć dowodów: {error}"
-        self._tasks.clear()
         self._report(message)
         callback = self._on_failed
         self._clear_callbacks()
@@ -172,6 +174,14 @@ class ComparisonEvidenceCoordinator(QObject):
                 callback(error)
             except RuntimeError:
                 pass
+
+    @Slot(int)
+    def _task_finished(self, generation: int) -> None:
+        self._tasks.pop(generation, None)
+
+    def _cancel_pending_tasks(self) -> None:
+        for task in tuple(self._tasks.values()):
+            task.cancel_event.set()
 
     def _clear_callbacks(self) -> None:
         self._on_opened = None
@@ -185,9 +195,7 @@ class ComparisonEvidenceCoordinator(QObject):
 
     def _window_destroyed(self, *_args: object) -> None:
         self._generation += 1
-        for task in self._tasks:
-            task.cancel()
-        self._tasks.clear()
+        self._cancel_pending_tasks()
         self._clear_callbacks()
 
 

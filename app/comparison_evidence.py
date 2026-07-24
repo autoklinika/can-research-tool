@@ -34,23 +34,30 @@ class ComparisonEvidenceLocation:
 def parse_message_key(value: str) -> ParsedMessageKey:
     parts = str(value).strip().split(":")
     if len(parts) != 4:
-        raise ValueError(f"invalid comparison message key: {value!r}")
+        raise ValueError(f"Niepoprawny klucz wiadomości porównania: {value!r}")
     channel_text, format_text, arbitration_text, kind_text = parts
     try:
         channel = int(channel_text, 10)
         arbitration_id = int(arbitration_text, 16)
     except ValueError as exc:
-        raise ValueError(f"invalid comparison message key: {value!r}") from exc
-    if channel < 0 or not 0 <= arbitration_id <= 0x1FFFFFFF:
-        raise ValueError(f"invalid comparison message key: {value!r}")
+        raise ValueError(
+            f"Niepoprawny klucz wiadomości porównania: {value!r}"
+        ) from exc
+
     normalized_format = format_text.upper()
     if normalized_format not in {"STD", "EXT"}:
         raise ValueError(
-            f"invalid comparison message key format: {format_text!r}"
+            f"Niepoprawny format klucza wiadomości: {format_text!r}"
         )
+    maximum_arbitration_id = (
+        0x1FFFFFFF if normalized_format == "EXT" else 0x7FF
+    )
+    if channel < 0 or not 0 <= arbitration_id <= maximum_arbitration_id:
+        raise ValueError(f"Niepoprawny klucz wiadomości porównania: {value!r}")
+
     normalized_kind = kind_text.casefold()
     if normalized_kind not in {"data", "remote", "error"}:
-        raise ValueError(f"invalid comparison message key kind: {kind_text!r}")
+        raise ValueError(f"Niepoprawny typ ramki w kluczu: {kind_text!r}")
     return ParsedMessageKey(
         channel=channel,
         arbitration_id=arbitration_id,
@@ -87,7 +94,8 @@ def locate_comparison_evidence(
         )
     if source_row is None:
         raise LookupError(
-            f"message key {message_key} was not found in session {session.name}"
+            f"Nie znaleziono klucza wiadomości {message_key!r} "
+            f"w sesji {session.name!r}."
         )
     return ComparisonEvidenceLocation(
         session_id=session.id,
@@ -103,7 +111,7 @@ def _session(project: CrtProject, session_id: str) -> SessionRecord:
         None,
     )
     if record is None:
-        raise LookupError(f"comparison session not found: {session_id}")
+        raise LookupError(f"Nie znaleziono sesji porównawczej: {session_id!r}.")
     return record
 
 
