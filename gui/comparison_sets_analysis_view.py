@@ -81,9 +81,7 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         dialog.activateWindow()
 
     def _analysis_finished(self, comparison_set_id: str) -> None:
-        dialog = self._analysis_dialogs.pop(comparison_set_id, None)
-        if dialog is not None:
-            dialog.deleteLater()
+        self._analysis_dialogs.pop(comparison_set_id, None)
         self.refresh(comparison_set_id)
         self.changed.emit()
 

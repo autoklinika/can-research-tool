@@ -135,6 +135,7 @@ class ComparisonInspector(QFrame):
         heading.setObjectName("comparisonInspectorHeading")
         heading_font = heading.font()
         heading_font.setBold(True)
+        heading.setFont(heading_font)
         self.key_label = QLabel("Brak wyboru", self)
         self.key_label.setObjectName("comparisonInspectorKey")
         key_font = self.key_label.font()
