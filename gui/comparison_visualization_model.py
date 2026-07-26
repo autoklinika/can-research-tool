@@ -20,6 +20,8 @@ SCHEMA_STATISTICS = "crt.comparison_statistics"
 SCHEMA_PAYLOAD = "crt.payload_differences"
 SCHEMA_SEQUENCE = "crt.message_sequence_differences"
 
+_FREQUENCY_REASONS = frozenset({"frequency_increase", "frequency_decrease"})
+
 
 @dataclass(slots=True)
 class ComparisonVisualRow:
@@ -36,6 +38,7 @@ class ComparisonVisualRow:
     baseline_frequency_hz: float | None = None
     current_frequency_hz: float | None = None
     frequency_delta_percent: float | None = None
+    change_reasons: tuple[str, ...] = ()
     payload_change_count: int = 0
     payload_byte_indices: tuple[int, ...] = ()
     sequence_change_count: int = 0
@@ -54,6 +57,15 @@ class ComparisonVisualRow:
             abs(self.frequency_delta_percent or 0.0),
             float(self.payload_change_count),
             float(self.sequence_change_count),
+        )
+
+    @property
+    def has_significant_frequency_change(self) -> bool:
+        value = self.frequency_delta_percent
+        return (
+            value is not None
+            and isfinite(float(value))
+            and bool(_FREQUENCY_REASONS.intersection(self.change_reasons))
         )
 
 
@@ -91,7 +103,7 @@ def build_dashboard_data(
                 continue
             current = dict_or_none(session_row.get("statistics"))
             change = dict_value(session_row.get("change"))
-            reasons = [str(value) for value in list_value(change.get("reasons"))]
+            reasons = tuple(str(value) for value in list_value(change.get("reasons")))
             row = ComparisonVisualRow(
                 session_id=str(session_row.get("session_id") or ""),
                 session_name=str(session_row.get("session_name") or "—"),
@@ -100,7 +112,7 @@ def build_dashboard_data(
                 arbitration_id_hex=str(item.get("arbitration_id_hex") or "—"),
                 is_extended_id=bool(item.get("is_extended_id")),
                 frame_kind=str(item.get("frame_kind") or "data"),
-                status=_status(baseline, current, reasons),
+                status=_status(baseline, current, list(reasons)),
                 baseline_frame_count=optional_int(get_value(baseline, "frame_count")),
                 current_frame_count=optional_int(get_value(current, "frame_count")),
                 baseline_frequency_hz=optional_float(
@@ -112,6 +124,7 @@ def build_dashboard_data(
                 frequency_delta_percent=optional_float(
                     change.get("frequency_delta_percent")
                 ),
+                change_reasons=reasons,
             )
             rows[(row.session_id, row.message_key)] = row
 
@@ -166,9 +179,14 @@ def build_dashboard_data(
             len(sequence_changes),
         )
     )
-    sequence_change_counts = _sequence_change_counts(sequence_changes)
+    sequence_change_counts = _sequence_change_counts(sequence)
     for row in rows.values():
-        row.sequence_change_count = sequence_change_counts.get(row.message_key, 0)
+        row.sequence_change_count = sequence_change_counts.get(
+            (row.session_id, row.message_key),
+            0,
+        )
+        if row.sequence_change_count and row.status == STATUS_UNCHANGED:
+            row.status = STATUS_CHANGED
         row.evidence_count = (
             int(row.status != STATUS_UNCHANGED)
             + row.payload_change_count
@@ -184,10 +202,7 @@ def build_dashboard_data(
         1 for row in data.rows if row.payload_change_count > 0
     )
     frequency_rows = [
-        row
-        for row in data.rows
-        if row.frequency_delta_percent is not None
-        and isfinite(float(row.frequency_delta_percent))
+        row for row in data.rows if row.has_significant_frequency_change
     ]
     if frequency_rows:
         largest = max(
@@ -321,24 +336,64 @@ def optional_float(value: object) -> float | None:
 
 
 def _sequence_change_counts(
-    changes: list[dict[str, Any]],
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for change in changes:
-        sequence_text = str(change.get("sequence_text") or "")
-        message_keys = {
-            token.strip()
-            for token in sequence_text.split("→")
-            if token.strip()
-        }
-        for message_key in message_keys:
-            counts[message_key] = counts.get(message_key, 0) + 1
+    payload: dict[str, Any],
+) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    matrix = dict_list(payload.get("sequences"))
+    if matrix:
+        for sequence in matrix:
+            message_keys = _sequence_message_keys(sequence)
+            if not message_keys:
+                continue
+            for session_row in dict_list(sequence.get("sessions")):
+                if session_row.get("role") == "base":
+                    continue
+                reasons = list_value(
+                    dict_value(session_row.get("change")).get("reasons")
+                )
+                if not reasons:
+                    continue
+                session_id = str(session_row.get("session_id") or "")
+                for message_key in message_keys:
+                    key = (session_id, message_key)
+                    counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    compared_session_ids = [
+        str(session.get("id") or "")
+        for session in dict_list(payload.get("sessions"))
+        if session.get("role") != "base"
+    ]
+    for change in dict_list(payload.get("ranked_changes")):
+        message_keys = _sequence_message_keys(change)
+        session_id = str(change.get("session_id") or "")
+        session_ids = [session_id] if session_id else compared_session_ids
+        for compared_id in session_ids:
+            for message_key in message_keys:
+                key = (compared_id, message_key)
+                counts[key] = counts.get(key, 0) + 1
     return counts
 
 
+def _sequence_message_keys(value: dict[str, Any]) -> set[str]:
+    structured = {
+        str(item.get("message_key") or "").strip()
+        for item in dict_list(value.get("sequence"))
+        if str(item.get("message_key") or "").strip()
+    }
+    if structured:
+        return structured
+    sequence_text = str(value.get("sequence_text") or "")
+    return {
+        token.strip()
+        for token in sequence_text.split("→")
+        if token.strip()
+    }
+
+
 def _merge_sessions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
-    merged = {}
-    order = []
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
     for payload in payloads:
         for session in dict_list(payload.get("sessions")):
             session_id = str(session.get("id") or "")

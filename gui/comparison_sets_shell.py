@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox
 
+from app.project import CrtProject
+
 from .comparison_evidence_navigation import ComparisonEvidenceCoordinator
 from .comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
 from .comparison_sets_view import ComparisonSetsView
@@ -27,6 +29,14 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
     def _build_docks(self) -> None:
         super()._build_docks()
         self.explorer.open_comparison_sets.connect(self._open_comparison_sets)
+
+    def _set_project(self, project: CrtProject) -> None:
+        coordinator = getattr(self, "_comparison_evidence_coordinator", None)
+        if isinstance(coordinator, ComparisonEvidenceCoordinator):
+            coordinator.cancel_all(
+                "Aktywny projekt został zmieniony podczas nawigacji do dowodu."
+            )
+        super()._set_project(project)
 
     def _open_comparison_sets(self, comparison_set_id: str = "") -> None:
         project = self.project
@@ -80,8 +90,6 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
                     callback()
                 except RuntimeError:
                     pass
-            # The comparison window remains alive for later use, but it must
-            # not cover the source session that has just been opened.
             minimize = getattr(requester, "showMinimized", None)
             if callable(minimize):
                 try:

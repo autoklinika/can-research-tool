@@ -15,6 +15,7 @@ from app.session_stream import SessionStreamWriter
 from gui.comparison_visualization_model import (
     SCHEMA_SEQUENCE,
     SCHEMA_STATISTICS,
+    STATUS_CHANGED,
     build_dashboard_data,
     optional_hex_int,
 )
@@ -32,6 +33,13 @@ def test_locates_evidence_with_fallback_and_persistent_index(tmp_path: Path) -> 
     assert fallback.source_row == 0
     assert fallback.session_path == project.absolute_path(session.relative_path)
 
+    fallback_error = locate_comparison_evidence(
+        project,
+        session.id,
+        "0:STD:321:error",
+    )
+    assert fallback_error.source_row == 3
+
     ProjectSearchIndex(project).rebuild_session(project, session)
     indexed = locate_comparison_evidence(
         project,
@@ -39,6 +47,13 @@ def test_locates_evidence_with_fallback_and_persistent_index(tmp_path: Path) -> 
         "1:EXT:18DAF900:remote",
     )
     assert indexed.source_row == 2
+
+    indexed_error = locate_comparison_evidence(
+        project,
+        session.id,
+        "0:STD:321:error",
+    )
+    assert indexed_error.source_row == 3
 
 
 def test_rejects_invalid_or_missing_evidence(tmp_path: Path) -> None:
@@ -70,8 +85,8 @@ def test_dashboard_sequence_matching_is_exact_and_hex_sort_values_are_safe() -> 
         "schema": SCHEMA_STATISTICS,
         "sessions": sessions,
         "message_keys": [
-            _statistics_key("0:STD:10:data", "10"),
-            _statistics_key("0:STD:100:data", "100"),
+            _statistics_key("0:STD:10:data", "10", ("after",)),
+            _statistics_key("0:STD:100:data", "100", ("after",)),
         ],
     }
     sequence = {
@@ -79,7 +94,10 @@ def test_dashboard_sequence_matching_is_exact_and_hex_sort_values_are_safe() -> 
         "sessions": sessions,
         "summary": {"notable_change_count": 1},
         "ranked_changes": [
-            {"sequence_text": "0:STD:100:data → 0:STD:200:data"}
+            {
+                "session_id": "after",
+                "sequence_text": "0:STD:100:data → 0:STD:200:data",
+            }
         ],
     }
 
@@ -95,8 +113,89 @@ def test_dashboard_sequence_matching_is_exact_and_hex_sort_values_are_safe() -> 
     assert optional_hex_int("18DAF900") == 0x18DAF900
 
 
-def _statistics_key(message_key: str, arbitration_id_hex: str) -> dict:
+def test_dashboard_uses_complete_sequence_matrix_per_compared_session() -> None:
+    sessions = [
+        {"id": "before", "name": "Przed", "role": "base"},
+        {"id": "after-a", "name": "Po A", "role": "compared"},
+        {"id": "after-b", "name": "Po B", "role": "compared"},
+    ]
+    compared_ids = ("after-a", "after-b")
+    statistics = {
+        "schema": SCHEMA_STATISTICS,
+        "sessions": sessions,
+        "message_keys": [
+            _statistics_key("0:STD:100:data", "100", compared_ids),
+            _statistics_key("0:STD:200:data", "200", compared_ids),
+            _statistics_key("0:STD:300:data", "300", compared_ids),
+        ],
+    }
+    sequence = {
+        "schema": SCHEMA_SEQUENCE,
+        "sessions": sessions,
+        "summary": {
+            "notable_change_count": 2,
+            "returned_notable_change_count": 1,
+            "notable_changes_truncated": True,
+            "matrix_complete": True,
+        },
+        "sequences": [
+            _sequence_matrix_row(
+                ("0:STD:100:data", "0:STD:200:data"),
+                changed_session_id="after-a",
+                sessions=sessions,
+            ),
+            _sequence_matrix_row(
+                ("0:STD:200:data", "0:STD:300:data"),
+                changed_session_id="after-b",
+                sessions=sessions,
+            ),
+        ],
+        "ranked_changes": [
+            {
+                "session_id": "after-a",
+                "sequence_text": "0:STD:100:data → 0:STD:200:data",
+            }
+        ],
+    }
+
+    data = build_dashboard_data(
+        "Complete sequence matrix",
+        {SCHEMA_STATISTICS: statistics, SCHEMA_SEQUENCE: sequence},
+    )
+    rows = {(row.session_id, row.message_key): row for row in data.rows}
+    assert rows[("after-a", "0:STD:100:data")].sequence_change_count == 1
+    assert rows[("after-a", "0:STD:300:data")].sequence_change_count == 0
+    assert rows[("after-b", "0:STD:100:data")].sequence_change_count == 0
+    assert rows[("after-b", "0:STD:300:data")].sequence_change_count == 1
+    assert rows[("after-a", "0:STD:100:data")].status == STATUS_CHANGED
+    assert rows[("after-b", "0:STD:300:data")].status == STATUS_CHANGED
+
+
+def _statistics_key(
+    message_key: str,
+    arbitration_id_hex: str,
+    compared_ids: tuple[str, ...],
+) -> dict:
     metrics = {"frame_count": 1, "mean_positive_frequency_hz": 1.0}
+    sessions = [
+        {
+            "session_id": "before",
+            "session_name": "Przed",
+            "role": "base",
+            "statistics": metrics,
+            "change": {"reasons": []},
+        }
+    ]
+    sessions.extend(
+        {
+            "session_id": session_id,
+            "session_name": session_id,
+            "role": "compared",
+            "statistics": metrics,
+            "change": {"reasons": []},
+        }
+        for session_id in compared_ids
+    )
     return {
         "message_key": message_key,
         "channel": 0,
@@ -104,21 +203,33 @@ def _statistics_key(message_key: str, arbitration_id_hex: str) -> dict:
         "is_extended_id": False,
         "frame_kind": "data",
         "baseline": metrics,
+        "sessions": sessions,
+    }
+
+
+def _sequence_matrix_row(
+    message_keys: tuple[str, ...],
+    *,
+    changed_session_id: str,
+    sessions: list[dict],
+) -> dict:
+    return {
+        "sequence_text": " → ".join(message_keys),
+        "sequence": [{"message_key": key} for key in message_keys],
         "sessions": [
             {
-                "session_id": "before",
-                "session_name": "Przed",
-                "role": "base",
-                "statistics": metrics,
-                "change": {"reasons": []},
-            },
-            {
-                "session_id": "after",
-                "session_name": "Po",
-                "role": "compared",
-                "statistics": metrics,
-                "change": {"reasons": []},
-            },
+                "session_id": session["id"],
+                "session_name": session["name"],
+                "role": session["role"],
+                "change": {
+                    "reasons": (
+                        ["occurrence_increase"]
+                        if session["id"] == changed_session_id
+                        else []
+                    )
+                },
+            }
+            for session in sessions
         ],
     }
 
@@ -136,6 +247,14 @@ def _create_session(project: CrtProject):
             channel=1,
             is_extended_id=True,
             is_remote_frame=True,
+        ),
+        CanFrame(
+            3,
+            3_000_000,
+            0x321,
+            b"",
+            channel=0,
+            is_error_frame=True,
         ),
     )
     capture = CaptureSession(
@@ -159,6 +278,6 @@ def _create_session(project: CrtProject):
         path,
         frame_count=len(frames),
         marker_count=0,
-        duration_s=0.002,
+        duration_s=0.003,
     )
     return project.session_by_path(path) or record

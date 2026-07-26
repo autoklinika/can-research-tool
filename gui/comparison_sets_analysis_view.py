@@ -19,6 +19,7 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
     def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
         super().__init__(project, parent)
         self._analysis_dialogs: dict[str, ComparisonVisualizationDialog] = {}
+        self._closing = False
 
         analysis_toolbar = QHBoxLayout()
         self.analyze_button = QPushButton("Analizuj wybrany zestaw…", self)
@@ -43,12 +44,12 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
 
     def _analysis_selection_changed(self) -> None:
         self.analyze_button.setEnabled(
-            self.selected_comparison_set() is not None
+            not self._closing and self.selected_comparison_set() is not None
         )
 
     def _open_analysis(self) -> None:
         comparison_set = self.selected_comparison_set()
-        if comparison_set is None:
+        if comparison_set is None or self._closing:
             return
 
         existing = self._analysis_dialogs.get(comparison_set.id)
@@ -82,8 +83,24 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
 
     def _analysis_finished(self, comparison_set_id: str) -> None:
         self._analysis_dialogs.pop(comparison_set_id, None)
+        if self._closing:
+            return
         self.refresh(comparison_set_id)
         self.changed.emit()
+
+    def _close_analysis_dialogs(self) -> None:
+        dialogs = tuple(self._analysis_dialogs.values())
+        self._analysis_dialogs.clear()
+        for dialog in dialogs:
+            try:
+                dialog.close_for_project_change()
+            except RuntimeError:
+                pass
+
+    def closeEvent(self, event) -> None:
+        self._closing = True
+        self._close_analysis_dialogs()
+        super().closeEvent(event)
 
 
 def configure_comparison_analysis_window(

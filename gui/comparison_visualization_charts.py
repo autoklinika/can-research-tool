@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from math import isfinite
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
@@ -30,7 +29,6 @@ from .comparison_visualization_model import (
 MAX_HEATMAP_KEYS = 24
 MAX_HEATMAP_SESSIONS = 6
 MAX_FREQUENCY_BARS = 12
-MIN_VISIBLE_FREQUENCY_DELTA = 0.05
 
 
 class ComparisonKpiCard(QFrame):
@@ -117,12 +115,16 @@ class PresenceHeatmap(QFrame):
         )
         layout.addWidget(self.table)
         self.legend = QLabel(
-            "<span style='color:#55d187'>●</span> obecne &nbsp;&nbsp; "
-            "<span style='color:#ffbf47'>●</span> zmienione &nbsp;&nbsp; "
-            "<span style='color:#ff6b6b'>●</span> brakujące",
+            "<span style='color:#55d187'>✓</span> obecne &nbsp;&nbsp; "
+            "<span style='color:#ffbf47'>△</span> zmienione &nbsp;&nbsp; "
+            "<span style='color:#ff6b6b'>×</span> brakujące",
             self,
         )
         self.legend.setObjectName("comparisonChartLegend")
+        self.legend.setAccessibleName(
+            "Legenda: znak wyboru oznacza obecne, trójkąt zmienione, "
+            "krzyżyk brakujące."
+        )
         layout.addWidget(self.legend)
         self.session_count = 0
 
@@ -161,6 +163,16 @@ class PresenceHeatmap(QFrame):
             "changed": QColor("#49391d"),
             "missing": QColor("#452124"),
         }
+        symbols = {
+            "present": "✓",
+            "changed": "△",
+            "missing": "×",
+        }
+        labels = {
+            "present": "obecne",
+            "changed": "zmienione",
+            "missing": "brakujące",
+        }
         for row_index, key in enumerate(keys):
             key_rows = grouped[key]
             baseline_present = bool(
@@ -184,11 +196,15 @@ class PresenceHeatmap(QFrame):
                         state = "missing"
                     elif current.status == STATUS_CHANGED:
                         state = "changed"
-                item = QTableWidgetItem("●")
+                item = QTableWidgetItem(symbols[state])
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setForeground(foregrounds[state])
                 item.setBackground(backgrounds[state])
-                item.setToolTip(state)
+                item.setToolTip(labels[state])
+                item.setData(
+                    Qt.ItemDataRole.AccessibleTextRole,
+                    f"{short_key(key)}: {labels[state]}",
+                )
                 self.table.setItem(row_index, column, item)
 
 
@@ -235,12 +251,7 @@ class FrequencyDeltaPanel(QFrame):
 
     def set_rows(self, rows: list[ComparisonVisualRow]) -> None:
         candidates = [
-            row
-            for row in rows
-            if row.frequency_delta_percent is not None
-            and isfinite(float(row.frequency_delta_percent))
-            and abs(float(row.frequency_delta_percent))
-            >= MIN_VISIBLE_FREQUENCY_DELTA
+            row for row in rows if row.has_significant_frequency_change
         ]
         self.rows = sorted(
             candidates,
