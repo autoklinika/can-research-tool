@@ -150,29 +150,40 @@ def build_uds_timeline(
         uds_result,
         source_artifact_id=stored_uds.artifact.id,
     )
-    records_by_session: dict[str, list[UdsTransactionRecord]] = defaultdict(list)
-    for record in explorer.visible_transactions:
-        if _matches_non_session_filter(record, filter_specification):
-            records_by_session[record.transaction.session_id].append(record)
-    for records in records_by_session.values():
-        records.sort(
-            key=lambda item: (
-                item.transaction.request.first_timestamp_ns,
-                item.transaction.request.first_source_row,
-            )
-        )
 
-    baseline_records = records_by_session.get(uds_result.baseline_session_id, [])
-    classifications: dict[str, tuple[str, ...]] = {
-        uds_result.baseline_session_id: tuple("baseline" for _ in baseline_records)
+    # Sequence comparison is an invariant of the saved evidence and must not
+    # change when the operator narrows the presentation with filters.
+    all_records_by_session: dict[str, list[UdsTransactionRecord]] = defaultdict(list)
+    for record in explorer.visible_transactions:
+        all_records_by_session[record.transaction.session_id].append(record)
+    for records in all_records_by_session.values():
+        records.sort(key=_record_sort_key)
+
+    visible_records_by_session: dict[str, list[UdsTransactionRecord]] = defaultdict(list)
+    for session_id, records in all_records_by_session.items():
+        visible_records_by_session[session_id] = [
+            record
+            for record in records
+            if _matches_non_session_filter(record, filter_specification)
+        ]
+
+    baseline_records = all_records_by_session.get(uds_result.baseline_session_id, [])
+    classifications: dict[str, dict[int, str]] = {
+        uds_result.baseline_session_id: {
+            item.transaction.request.first_source_row: "baseline"
+            for item in baseline_records
+        }
     }
     differences: list[UdsTimelineSequenceDifference] = []
     for session in uds_result.sessions:
         if session.session_id == uds_result.baseline_session_id:
             continue
-        current = records_by_session.get(session.session_id, [])
+        current = all_records_by_session.get(session.session_id, [])
         labels, missing_labels = _compare_sequences(baseline_records, current)
-        classifications[session.session_id] = labels
+        classifications[session.session_id] = {
+            item.transaction.request.first_source_row: label
+            for item, label in zip(current, labels, strict=False)
+        }
         differences.append(
             UdsTimelineSequenceDifference(
                 session_id=session.session_id,
@@ -199,14 +210,18 @@ def build_uds_timeline(
                 f"Sesja {alignment_lane.session_name} nie ma zgodnej kotwicy Stage 2B."
             )
             continue
-        records = records_by_session.get(alignment_lane.session_id, [])
-        labels = classifications.get(
-            alignment_lane.session_id,
-            tuple("matched" for _ in records),
-        )
+        records = visible_records_by_session.get(alignment_lane.session_id, [])
+        lane_classifications = classifications.get(alignment_lane.session_id, {})
         projected = tuple(
-            _project_transaction(record, alignment_lane.anchor_timestamp_ns, label)
-            for record, label in zip(records, labels, strict=False)
+            _project_transaction(
+                record,
+                alignment_lane.anchor_timestamp_ns,
+                lane_classifications.get(
+                    record.transaction.request.first_source_row,
+                    "additional",
+                ),
+            )
+            for record in records
         )
         visible_count += len(projected)
         stats = stats_by_session.get(alignment_lane.session_id)
@@ -242,6 +257,14 @@ def build_uds_timeline(
         source_transaction_count=explorer.source_transaction_count,
         visible_transaction_count=visible_count,
         warnings=tuple(dict.fromkeys(value for value in warnings if value)),
+    )
+
+
+def _record_sort_key(record: UdsTransactionRecord) -> tuple[int, int]:
+    transaction = record.transaction
+    return (
+        transaction.request.first_timestamp_ns,
+        transaction.request.first_source_row,
     )
 
 
@@ -343,8 +366,12 @@ def _matches_non_session_filter(
                 transaction.status,
                 record.automatic_correlation_label,
                 transaction.request.payload_hex,
-                "" if transaction.first_response is None else transaction.first_response.payload_hex,
-                "" if transaction.final_response is None else transaction.final_response.payload_hex,
+                ""
+                if transaction.first_response is None
+                else transaction.first_response.payload_hex,
+                ""
+                if transaction.final_response is None
+                else transaction.final_response.payload_hex,
             )
         ).casefold()
         if query not in haystack:
@@ -354,12 +381,20 @@ def _matches_non_session_filter(
 
 def _normalize_filter(specification: UdsTimelineFilter) -> UdsTimelineFilter:
     return UdsTimelineFilter(
-        session_ids=tuple(dict.fromkeys(str(value) for value in specification.session_ids)),
-        service_ids=tuple(dict.fromkeys(int(value) for value in specification.service_ids)),
-        statuses=tuple(dict.fromkeys(str(value) for value in specification.statuses)),
+        session_ids=tuple(
+            dict.fromkeys(str(value) for value in specification.session_ids)
+        ),
+        service_ids=tuple(
+            dict.fromkeys(int(value) for value in specification.service_ids)
+        ),
+        statuses=tuple(
+            dict.fromkeys(str(value) for value in specification.statuses)
+        ),
         dids=tuple(dict.fromkeys(int(value) for value in specification.dids)),
         negative_response_codes=tuple(
-            dict.fromkeys(int(value) for value in specification.negative_response_codes)
+            dict.fromkeys(
+                int(value) for value in specification.negative_response_codes
+            )
         ),
         text_query=str(specification.text_query).strip(),
     )
