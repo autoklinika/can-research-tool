@@ -15,6 +15,7 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
     """Comparison-set manager extended with registry-driven passive analyses."""
 
     evidence_open_requested = Signal(str, str, object)
+    evidence_source_row_requested = Signal(str, int, str, object)
 
     def __init__(self, project: CrtProject, parent: QWidget | None = None) -> None:
         super().__init__(project, parent)
@@ -73,6 +74,9 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         configure_comparison_analysis_window(dialog)
         dialog.output_message.connect(self.output_message.emit)
         dialog.evidence_open_requested.connect(self.evidence_open_requested.emit)
+        dialog.source_row_open_requested.connect(
+            self.evidence_source_row_requested.emit
+        )
         dialog.finished.connect(
             lambda _result, set_id=comparison_set.id: self._analysis_finished(set_id)
         )
