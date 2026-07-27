@@ -68,6 +68,65 @@ class _EvidenceTask(QRunnable):
             self.signals.finished.emit(self.generation)
 
 
+class _SourceRowTask(QRunnable):
+    def __init__(
+        self,
+        generation: int,
+        project,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+        cancel_event: Event,
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(False)
+        self.generation = generation
+        self.project = project
+        self.session_id = session_id
+        self.source_row = source_row
+        self.message_key = message_key
+        self.cancel_event = cancel_event
+        self.signals = _EvidenceSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            try:
+                if self.cancel_event.is_set():
+                    return
+                session = next(
+                    (
+                        item
+                        for item in self.project.list_sessions()
+                        if item.id == self.session_id
+                    ),
+                    None,
+                )
+                if session is None:
+                    raise LookupError(
+                        f"Nie znaleziono sesji porównawczej: {self.session_id!r}."
+                    )
+                if self.source_row >= session.frame_count:
+                    raise LookupError(
+                        f"Ramka źródłowa {self.source_row + 1} wykracza poza sesję "
+                        f"{session.name!r}."
+                    )
+                location = ComparisonEvidenceLocation(
+                    session_id=session.id,
+                    session_path=self.project.absolute_path(session.relative_path),
+                    source_row=self.source_row,
+                    message_key=self.message_key,
+                )
+            except Exception as exc:  # pragma: no cover - surfaced through GUI
+                if not self.cancel_event.is_set():
+                    self.signals.failed.emit(self.generation, str(exc))
+                return
+            if not self.cancel_event.is_set():
+                self.signals.completed.emit(self.generation, location)
+        finally:
+            self.signals.finished.emit(self.generation)
+
+
 @dataclass(slots=True)
 class _EvidenceRequest:
     project: Any
@@ -83,7 +142,7 @@ class ComparisonEvidenceCoordinator(QObject):
         super().__init__(window)
         self._window = window
         self._generation = 0
-        self._tasks: dict[int, _EvidenceTask] = {}
+        self._tasks: dict[int, _EvidenceTask | _SourceRowTask] = {}
         self._requests: dict[int, _EvidenceRequest] = {}
         window.destroyed.connect(self._window_destroyed)
 
@@ -133,30 +192,24 @@ class ComparisonEvidenceCoordinator(QObject):
         request_data = self._begin_request(on_opened=on_opened, on_failed=on_failed)
         if request_data is None:
             return
-        generation, project, _cancel_event = request_data
-        session = next(
-            (item for item in project.list_sessions() if item.id == session_id),
-            None,
-        )
-        if session is None:
-            self._finish_failed(
-                generation,
-                f"Nie znaleziono sesji porównawczej: {session_id!r}.",
-            )
-            return
-        location = ComparisonEvidenceLocation(
-            session_id=session.id,
-            session_path=project.absolute_path(session.relative_path),
-            source_row=int(source_row),
-            message_key=message_key,
-        )
+        generation, project, cancel_event = request_data
         self._report(
-            f"Otwieram ramkę {source_row + 1} wskazaną na osi czasu: {message_key}."
+            f"Otwieram ramkę {source_row + 1} wskazaną na osi czasu: "
+            f"{message_key}."
         )
-        QTimer.singleShot(
-            0,
-            lambda g=generation, value=location: self._open_location(g, value),
+        task = _SourceRowTask(
+            generation,
+            project,
+            session_id,
+            int(source_row),
+            message_key,
+            cancel_event,
         )
+        task.signals.completed.connect(self._location_ready)
+        task.signals.failed.connect(self._location_failed)
+        task.signals.finished.connect(self._task_finished)
+        self._tasks[generation] = task
+        QThreadPool.globalInstance().start(task)
 
     def _begin_request(
         self,
