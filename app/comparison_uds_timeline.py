@@ -167,7 +167,6 @@ def build_uds_timeline(
         uds_result.baseline_session_id: tuple("baseline" for _ in baseline_records)
     }
     differences: list[UdsTimelineSequenceDifference] = []
-    session_names = {item.session_id: item.session_name for item in uds_result.sessions}
     for session in uds_result.sessions:
         if session.session_id == uds_result.baseline_session_id:
             continue
@@ -279,44 +278,43 @@ def _compare_sequences(
     baseline: Sequence[UdsTransactionRecord],
     current: Sequence[UdsTransactionRecord],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Classify preserved order, movement and additions with duplicate-safe pairing."""
+
     base_keys = [item.automatic_correlation_key for item in baseline]
     current_keys = [item.automatic_correlation_key for item in current]
-    labels = ["matched"] * len(current)
-    missing: list[str] = []
+    labels = ["additional"] * len(current)
+    matched_base: set[int] = set()
+    matched_current: set[int] = set()
+
     matcher = SequenceMatcher(a=base_keys, b=current_keys, autojunk=False)
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            base_index = block.a + offset
+            current_index = block.b + offset
+            matched_base.add(base_index)
+            matched_current.add(current_index)
+            labels[current_index] = "matched"
 
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        if tag == "insert":
-            for index in range(j1, j2):
-                labels[index] = "additional"
-            continue
-        if tag == "delete":
-            missing.extend(
-                item.automatic_correlation_label for item in baseline[i1:i2]
-            )
-            continue
+    remaining_by_key: dict[str, deque[int]] = defaultdict(deque)
+    for base_index, key in enumerate(base_keys):
+        if base_index not in matched_base:
+            remaining_by_key[key].append(base_index)
 
-        remaining: dict[str, deque[int]] = defaultdict(deque)
-        for index in range(i1, i2):
-            remaining[base_keys[index]].append(index)
-        consumed: set[int] = set()
-        for index in range(j1, j2):
-            queue = remaining.get(current_keys[index])
-            if queue:
-                consumed_index = queue.popleft()
-                consumed.add(consumed_index)
-                labels[index] = "shifted"
-            else:
-                labels[index] = "additional"
-        missing.extend(
-            baseline[index].automatic_correlation_label
-            for index in range(i1, i2)
-            if index not in consumed
-        )
+    for current_index, key in enumerate(current_keys):
+        if current_index in matched_current:
+            continue
+        queue = remaining_by_key.get(key)
+        if queue:
+            base_index = queue.popleft()
+            matched_base.add(base_index)
+            labels[current_index] = "shifted"
 
-    return tuple(labels), tuple(missing)
+    missing = tuple(
+        baseline[index].automatic_correlation_label
+        for index in range(len(baseline))
+        if index not in matched_base
+    )
+    return tuple(labels), missing
 
 
 def _matches_non_session_filter(
