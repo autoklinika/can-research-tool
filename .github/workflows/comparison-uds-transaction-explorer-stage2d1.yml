@@ -38,6 +38,7 @@ jobs:
           tests/test_comparison_uds_transaction_explorer.py
           tests/test_comparison_uds_explorer_source.py
           tests_gui/comparison_uds_transaction_explorer_smoke.py
+          tests_gui/comparison_uds_explorer_source_smoke.py
       - name: Verify UDS transaction explorer core and artifact selection
         run: >-
           python -m pytest
@@ -50,7 +51,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set +e
-          python tests_gui/comparison_uds_transaction_explorer_smoke.py > stage2d1-gui.log 2>&1
+          {
+            python tests_gui/comparison_uds_transaction_explorer_smoke.py
+            first_status=$?
+            python tests_gui/comparison_uds_explorer_source_smoke.py
+            second_status=$?
+            if [ $first_status -ne 0 ]; then exit $first_status; fi
+            exit $second_status
+          } > stage2d1-gui.log 2>&1
           status=$?
           cat stage2d1-gui.log
           exit $status
