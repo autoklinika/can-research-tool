@@ -15,7 +15,10 @@ from app.comparison_timeline import SYNC_MESSAGE_KEY
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
+from gui.application_container import ApplicationContainer
+from gui.comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
 from gui.comparison_visualization_hardened import ComparisonVisualizationDialog
+from gui.project_navigator import ProjectNavigator
 
 
 def main() -> None:
@@ -36,9 +39,19 @@ def main() -> None:
             base_session_id=before.id,
         )
 
-        dialog = ComparisonVisualizationDialog(project, comparison.id)
-        dialog.show()
+        window = ApplicationContainer().create_main_window()
+        window.show()
+        window._set_project(project)
+        window._open_comparison_sets(comparison.id)
         app.processEvents()
+
+        comparison_view = window.navigator.widget("comparison-sets")
+        assert isinstance(comparison_view, AnalysisEnabledComparisonSetsView)
+        assert comparison_view.select_comparison_set(comparison.id)
+        comparison_view._open_analysis()
+        app.processEvents()
+        dialog = comparison_view._analysis_dialogs.get(comparison.id)
+        assert isinstance(dialog, ComparisonVisualizationDialog)
 
         timeline_index = dialog.result_tabs.indexOf(dialog.timeline)
         assert timeline_index >= 0
@@ -62,27 +75,43 @@ def main() -> None:
         assert result is not None
         assert [lane.anchor_source_row for lane in result.lanes] == [1, 1]
 
-        emitted: list[tuple] = []
-        dialog.source_row_open_requested.connect(
-            lambda *args: emitted.append(tuple(args))
-        )
-        event = result.lanes[0].events[0]
+        event = result.lanes[0].events[-1]
+        assert event.source_row == 2
         dialog.timeline._event_selected(event)
         dialog.timeline.open_button.click()
-        app.processEvents()
-        assert emitted
-        assert emitted[0][0] == before.id
-        assert emitted[0][1] == event.source_row
-        assert emitted[0][2] == event.message_key
-        assert emitted[0][3] is dialog
 
-        dialog.close()
-        dialog.deleteLater()
+        session_path = project.absolute_path(before.relative_path)
+        session_key = ProjectNavigator.session_key(session_path)
+        deadline = monotonic() + 20.0
+        session_view = None
+        while monotonic() < deadline:
+            QThreadPool.globalInstance().waitForDone(50)
+            app.sendPostedEvents()
+            app.processEvents()
+            session_view = window.navigator.widget(session_key)
+            if (
+                session_view is not None
+                and session_view.frame_table.currentIndex().row() == event.source_row
+            ):
+                break
+        assert session_view is not None
+        assert window.tabs.currentWidget() is session_view
+        assert session_view.frame_table.currentIndex().row() == event.source_row
+        assert "0x300" in session_view.frame_table.model().data(
+            session_view.frame_table.model().index(event.source_row, 2)
+        )
+
         assert QThreadPool.globalInstance().waitForDone(5_000)
+        window.navigator.close_all()
+        window.close()
+        window.deleteLater()
         app.sendPostedEvents()
         app.processEvents()
 
+        session_view = None
         dialog = None
+        comparison_view = None
+        window = None
         project = None
         gc.collect()
 
