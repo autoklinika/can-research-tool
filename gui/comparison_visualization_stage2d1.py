@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Slot
 
-from .comparison_uds_transaction_explorer_view import (
-    ComparisonUdsTransactionExplorerView,
+from .comparison_uds_transaction_explorer_source_view import (
+    PreferredSourceUdsTransactionExplorerView,
 )
 from .comparison_visualization_stage2c2 import (
     ComparisonVisualizationDialog as _BaseComparisonVisualizationDialog,
@@ -11,7 +11,7 @@ from .comparison_visualization_stage2c2 import (
 
 
 class _SelectionSafeUdsTransactionExplorerView(
-    ComparisonUdsTransactionExplorerView
+    PreferredSourceUdsTransactionExplorerView
 ):
     """Clear Qt selection before replacing the filtered transaction model."""
 
