@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from app.artifact_catalog import ArtifactIntegrityError
 from app.extensions import ExtensionCancelled
 
+from .comparison_timeline_view import ComparisonTimelineView
 from .comparison_visualization import (
     _ARTIFACT_TYPES,
     _SUPPORTED_SCHEMAS,
@@ -89,13 +90,23 @@ class _DashboardLoadTask(QRunnable):
 
 
 class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
-    """Comparison dialog with cancellable background artifact loading."""
+    """Comparison dialog with cancellable dashboard and timeline loading."""
+
+    source_row_open_requested = Signal(str, int, str, object)
 
     def __init__(self, *args, **kwargs) -> None:
         self._dashboard_generation = 0
         self._dashboard_tasks: dict[int, _DashboardLoadTask] = {}
         self._close_when_idle = False
         super().__init__(*args, **kwargs)
+
+        self.timeline = ComparisonTimelineView(
+            self.project,
+            self.comparison_set,
+            self.result_tabs,
+        )
+        self.timeline.source_row_requested.connect(self._prepare_timeline_evidence)
+        self.result_tabs.insertTab(1, self.timeline, "Oś czasu")
 
     def _refresh_dashboard(self) -> None:
         if self.dashboard is None:
@@ -157,11 +168,11 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         dashboard.frequency_panel.set_rows(value.rows)
         dashboard._populate_table()
 
-        errors = [
-            str(item)
-            for item in errors_value
-            if str(item)
-        ] if isinstance(errors_value, list) else []
+        errors = (
+            [str(item) for item in errors_value if str(item)]
+            if isinstance(errors_value, list)
+            else []
+        )
         if errors:
             self.status_label.setText(
                 "Nie udało się odczytać części artefaktów porównania: "
@@ -189,8 +200,43 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         for task in self._dashboard_tasks.values():
             task.cancel_event.set()
 
+    @Slot(str, int, str)
+    def _prepare_timeline_evidence(
+        self,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+    ) -> None:
+        if self._evidence_pending:
+            return
+        self.pending_evidence = (session_id, message_key)
+        self._evidence_pending = True
+        self.timeline.setEnabled(False)
+        self._set_evidence_running(True)
+        self.status_label.setText(
+            f"Otwieram ramkę {source_row + 1} z osi czasu. "
+            "Okno porównania pozostaje otwarte."
+        )
+        self.source_row_open_requested.emit(
+            session_id,
+            int(source_row),
+            message_key,
+            self,
+        )
+
+    @Slot()
+    def evidence_navigation_succeeded(self) -> None:
+        super().evidence_navigation_succeeded()
+        self.timeline.setEnabled(True)
+
+    @Slot(str)
+    def evidence_navigation_failed(self, error: str) -> None:
+        super().evidence_navigation_failed(error)
+        self.timeline.setEnabled(True)
+
     def close_for_project_change(self) -> None:
         self._close_when_idle = True
+        self.timeline.cancel_all()
         self._cancel_dashboard_loads()
         if self._task is not None:
             self._cancel_analysis()
@@ -215,8 +261,6 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
             self.close()
 
     def closeEvent(self, event) -> None:
+        self.timeline.cancel_all()
         self._cancel_dashboard_loads()
         super().closeEvent(event)
-
-
-__all__ = ["ComparisonVisualizationDialog"]
