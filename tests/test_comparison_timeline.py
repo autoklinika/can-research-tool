@@ -103,6 +103,47 @@ def test_message_key_timeline_aligns_each_session_to_exact_first_anchor(
     assert result.maximum_relative_time_ns == 15_000_000
 
 
+def test_message_key_anchor_is_retained_when_sampling_would_skip_it(
+    tmp_path: Path,
+) -> None:
+    project = CrtProject.create(tmp_path / "project", name="Timeline")
+    before = _create_session(
+        project,
+        "before",
+        [
+            _frame(0, 0, 0x100),
+            _frame(1, 10_000_000, 0x200),
+            _frame(2, 20_000_000, 0x300),
+            _frame(3, 30_000_000, 0x400),
+        ],
+    )
+    after = _create_session(
+        project,
+        "after",
+        [
+            _frame(0, 100_000_000, 0x100),
+            _frame(1, 110_000_000, 0x200),
+            _frame(2, 120_000_000, 0x300),
+            _frame(3, 130_000_000, 0x400),
+        ],
+    )
+
+    result = build_comparison_timeline(
+        project,
+        _comparison(before.id, after.id),
+        synchronization_mode=SYNC_MESSAGE_KEY,
+        anchor_message_key="0:STD:200:data",
+        max_events_per_session=2,
+    )
+
+    for lane in result.lanes:
+        assert lane.sampled_frame_count == 2
+        assert lane.anchor_source_row == 1
+        assert 1 in [event.source_row for event in lane.events]
+        anchor_event = next(event for event in lane.events if event.source_row == 1)
+        assert anchor_event.relative_time_ns == 0
+
+
 def test_missing_message_anchor_is_explicit_and_does_not_fake_alignment(
     tmp_path: Path,
 ) -> None:
