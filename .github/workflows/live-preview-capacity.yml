@@ -20,8 +20,28 @@ jobs:
       - name: Verify bounded Live preview without extra GUI
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_preview_capacity_smoke.py
+        shell: pwsh
+        run: |
+          python tests_gui/live_preview_capacity_smoke.py *> live-preview-capacity.log
+          $result = $LASTEXITCODE
+          Get-Content live-preview-capacity.log
+          exit $result
       - name: Verify Live filtering during active Capture
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_filter_display_binding_smoke.py
+        shell: pwsh
+        run: |
+          python tests_gui/live_filter_display_binding_smoke.py *> live-filter-display-binding.log
+          $result = $LASTEXITCODE
+          Get-Content live-filter-display-binding.log
+          exit $result
+      - name: Upload Windows Live preview diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-preview-windows
+          path: |
+            live-preview-capacity.log
+            live-filter-display-binding.log
+          if-no-files-found: ignore
+          retention-days: 3
