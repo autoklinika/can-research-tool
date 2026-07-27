@@ -358,7 +358,7 @@ def _artifact_source(
 ) -> ArtifactSource:
     return ArtifactSource(
         session_id=record.id,
-        source_kind="comparison_timeline_alignment",
+        source_kind="session",
         source_reference={
             "comparison_set_id": comparison_set.id,
             "role": (
