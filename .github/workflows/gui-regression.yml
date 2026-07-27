@@ -6,7 +6,8 @@ on:
 
 jobs:
   filter-regressions:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,10 +15,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Qt runtime
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libegl1
       - name: Install GUI and test tooling
         run: python -m pip install -q -e ".[gui,dev]"
       - name: Compile Python sources
@@ -38,159 +35,56 @@ jobs:
           tests/test_session_filters.py
           tests/test_stored_search_navigation.py
           -q
-      - name: Verify engineering IDE shell
+      - name: Verify Windows GUI regressions
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/engineering_shell_smoke.py
-      - name: Verify project properties editing
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/project_properties_smoke.py
-      - name: Verify project catalog and expanded creation form
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/project_catalog_smoke.py
-      - name: Verify comparison set management
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_sets_smoke.py
-      - name: Verify comparison statistics workflow
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_statistics_smoke.py
-      - name: Verify payload difference workflow
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/payload_difference_smoke.py
-      - name: Verify message sequence comparison workflow
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/message_sequence_comparison_smoke.py
-      - name: Verify graphical comparison dashboard
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_visualization_smoke.py
-      - name: Verify comparison filters and evidence handoff
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_visualization_navigation_smoke.py
-      - name: Verify project preparation progress
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/project_preparation_progress_smoke.py
-      - name: Verify persistent project search index
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/persistent_search_index_smoke.py
-      - name: Verify stored search cross-page navigation
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/stored_search_navigation_smoke.py
-      - name: Verify direct logical-cache search
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/logical_search_cache_smoke.py
-      - name: Verify project overview session details
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/project_overview_session_details_smoke.py
-      - name: Verify deferred Live logical analysis
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/deferred_live_logical_smoke.py
-      - name: Verify deferred Live project save
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/deferred_log_save_smoke.py
-      - name: Verify deliberate second Start after unsaved Live log
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_unsaved_second_start_smoke.py
-      - name: Verify Live temp cleanup
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_temp_cleanup_smoke.py
-      - name: Verify DBC activation controls
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/dbc_activation_smoke.py
-      - name: Verify CAN session tree integration
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_management_smoke.py tree
-      - name: Verify stored logical target workspace
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/stored_logical_workspace_smoke.py
-      - name: Verify stored session analysis workflow
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_analysis_workflow_smoke.py
-      - name: Verify CAN ID statistics artifact view
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_statistics_table_smoke.py
-      - name: Verify lightweight statistics visual summary
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_statistics_visual_summary_smoke.py
-      - name: Verify compact artifact selector
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_artifact_selector_smoke.py
-      - name: Verify minimal analysis chrome
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/minimal_analysis_chrome_smoke.py
-      - name: Verify protocol-aware logical details
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/logical_message_details_smoke.py
-      - name: Verify decoded UDS data presentation
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/uds_data_display_smoke.py
-      - name: Verify Live session actions
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_management_smoke.py live
-      - name: Verify imported session actions
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/session_management_smoke.py imported
-      - name: Verify stored-session filters are explicit opt-in
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/stored_session_filter_optin_smoke.py
-      - name: Verify global filters use a separate non-modal window
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/filter_manager_window_smoke.py
-      - name: Verify static filter fields and operators in editor
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/static_filter_editor_smoke.py
-      - name: Verify static filters in Live and stored sessions
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/static_filter_live_stored_smoke.py
-      - name: Verify Live filters use the background worker
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_filter_worker_smoke.py
-      - name: Verify bounded Live models avoid per-refresh full-buffer work
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_buffer_performance_smoke.py
-      - name: Verify raw frame list and grouped ID views
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/raw_frame_grouping_smoke.py
-      - name: Verify fast pastel table cell hover
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/table_hover_smoke.py
-      - name: Verify protocol filters in GUI and logical Live view
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/protocol_filter_gui_smoke.py
+        shell: pwsh
+        run: |
+          $commands = @(
+            "python tests_gui/engineering_shell_smoke.py",
+            "python tests_gui/project_properties_smoke.py",
+            "python tests_gui/project_catalog_smoke.py",
+            "python tests_gui/comparison_sets_smoke.py",
+            "python tests_gui/comparison_statistics_smoke.py",
+            "python tests_gui/payload_difference_smoke.py",
+            "python tests_gui/message_sequence_comparison_smoke.py",
+            "python tests_gui/comparison_visualization_smoke.py",
+            "python tests_gui/comparison_visualization_navigation_smoke.py",
+            "python tests_gui/project_preparation_progress_smoke.py",
+            "python tests_gui/persistent_search_index_smoke.py",
+            "python tests_gui/stored_search_navigation_smoke.py",
+            "python tests_gui/logical_search_cache_smoke.py",
+            "python tests_gui/project_overview_session_details_smoke.py",
+            "python tests_gui/deferred_live_logical_smoke.py",
+            "python tests_gui/deferred_log_save_smoke.py",
+            "python tests_gui/live_unsaved_second_start_smoke.py",
+            "python tests_gui/live_temp_cleanup_smoke.py",
+            "python tests_gui/dbc_activation_smoke.py",
+            "python tests_gui/session_management_smoke.py tree",
+            "python tests_gui/stored_logical_workspace_smoke.py",
+            "python tests_gui/session_analysis_workflow_smoke.py",
+            "python tests_gui/session_statistics_table_smoke.py",
+            "python tests_gui/session_statistics_visual_summary_smoke.py",
+            "python tests_gui/session_artifact_selector_smoke.py",
+            "python tests_gui/minimal_analysis_chrome_smoke.py",
+            "python tests_gui/logical_message_details_smoke.py",
+            "python tests_gui/uds_data_display_smoke.py",
+            "python tests_gui/session_management_smoke.py live",
+            "python tests_gui/session_management_smoke.py imported",
+            "python tests_gui/stored_session_filter_optin_smoke.py",
+            "python tests_gui/filter_manager_window_smoke.py",
+            "python tests_gui/static_filter_editor_smoke.py",
+            "python tests_gui/static_filter_live_stored_smoke.py",
+            "python tests_gui/live_filter_worker_smoke.py",
+            "python tests_gui/live_buffer_performance_smoke.py",
+            "python tests_gui/raw_frame_grouping_smoke.py",
+            "python tests_gui/table_hover_smoke.py",
+            "python tests_gui/protocol_filter_gui_smoke.py"
+          )
+          foreach ($command in $commands) {
+            Write-Host "::group::$command"
+            Invoke-Expression $command
+            $result = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            if ($result -ne 0) { exit $result }
+          }
