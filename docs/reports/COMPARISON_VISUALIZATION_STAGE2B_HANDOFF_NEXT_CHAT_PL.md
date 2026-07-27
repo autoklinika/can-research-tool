@@ -4,7 +4,8 @@
 
 - repozytorium: `autoklinika/can-research-tool`,
 - gałąź: `agent/comparison-visualization-stage2b-persistent-alignment`,
-- baza stacked: `agent/comparison-visualization-stage2a-timeline`, PR #50.
+- baza stacked: `agent/comparison-visualization-stage2a-timeline`, PR #50,
+- powiązany draft PR: #51.
 
 Nie wykonywać merge ani nie oznaczać PR jako ready bez wyraźnego polecenia
 właściciela.
@@ -18,6 +19,21 @@ skanowania sesji oraz kotwice:
 - N-tego dokładnego klucza wiadomości,
 - N-tego znacznika operatora,
 - ręcznie wybranego dokładnego zdarzenia per sesja.
+
+## Ręczne potwierdzenie działania
+
+Dnia 2026-07-27 właściciel projektu potwierdził na Windows pełny przepływ:
+
+`budowa osi → ustawienie dokładnych kotwic → zapis wyrównania → zamknięcie okna → ponowne otwarcie → automatyczne odtworzenie bez skanowania → przejście do dokładnej ramki źródłowej`
+
+Potwierdzono więc trwałość artefaktu, odtwarzanie bez ponownego skanowania oraz
+zachowanie dokładnego `source_row` do nawigacji dowodowej.
+
+Zwalidowany commit funkcjonalny:
+
+`ff19e22025372b6e5a3f32f510baf6ebaf890e5f`
+
+Późniejsze commity dokumentacyjne nie zmieniają kodu produkcyjnego.
 
 ## Najważniejsze pliki
 
@@ -42,6 +58,9 @@ skanowania sesji oraz kotwice:
 8. Potwierdź automatyczne wczytanie osi bez skanowania sesji.
 9. Wybierz tryb znacznika operatora, podaj dokładną nazwę i sprawdź `t = 0`.
 10. Otwórz punkt osi i potwierdź właściwą sesję oraz dokładny `source_row`.
+
+Punkty 1–8 oraz nawigacja do dokładnej ramki zostały ręcznie potwierdzone jako
+działające.
 
 ## Następny rekomendowany etap
 
