@@ -4,7 +4,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMessageBox
 
 from .comparison_sets_shell import ComparisonSetsMainWindow
-from .help_center_view import HelpCenterWidget
+from .help_center_view_stage2d2 import HelpCenterWidget
 
 
 class HelpCenterMainWindow(ComparisonSetsMainWindow):
