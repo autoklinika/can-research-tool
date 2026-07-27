@@ -10,12 +10,16 @@
 - [ ] Nie zmieniono nieświadomie schematu indeksów, bounded modelu ani `.crt/project.sqlite`.
 - [ ] Każda świadoma zmiana architektoniczna została opisana i zatwierdzona osobno.
 
-## Walidacja
+## Walidacja Windows
+
+CAN Research Tool jest aplikacją docelową dla Windows. Testy aplikacji, GUI i integracji wykonujemy wyłącznie na Windows.
 
 - [ ] Dodano lub zaktualizowano testy rdzenia.
 - [ ] Dodano lub zaktualizowano wymagane smoki GUI.
-- [ ] Wykonano właściwe workflowy GitHub-hosted.
-- [ ] Wykonano test ręczny, jeżeli zmiana dotyczy zachowania użytkowego.
+- [ ] Wykonano właściwe workflowy na `windows-latest`.
+- [ ] Nie użyto Ubuntu ani innego systemu jako platformy walidacyjnej CRT.
+- [ ] Self-hosted Windows wykorzystano wyłącznie wtedy, gdy test wymaga fizycznego Kvasera, CANlib lub sprzętu CAN.
+- [ ] Wykonano test ręczny na Windows, jeżeli zmiana dotyczy zachowania użytkowego.
 - [ ] Zapisano funkcjonalny checkpoint SHA.
 
 ## Aktualizacja Help Center
@@ -27,7 +31,7 @@ Każda nowa albo zmieniona funkcja zatwierdzona jako gotowa musi zostać opisana
 - [ ] Dodano lub zaktualizowano słowa kluczowe wyszukiwarki.
 - [ ] Sprawdzono linki do powiązanych tematów.
 - [ ] Zaktualizowano `tests/test_help_catalog.py`, jeżeli dodano nowy temat lub wymagany zakres.
-- [ ] Testy Help Center zakończyły się sukcesem.
+- [ ] Testy Help Center zakończyły się sukcesem na Windows.
 - [ ] Ręcznie sprawdzono treść i nawigację dla nowej funkcji.
 
 ### Zmienione tematy Help
@@ -46,6 +50,7 @@ Każda nowa albo zmieniona funkcja zatwierdzona jako gotowa musi zostać opisana
 - [ ] PR pozostaje draftem lub został oznaczony jako ready zgodnie z wyraźną decyzją właściciela.
 - [ ] Nie wykonano merge bez wyraźnego polecenia właściciela.
 
-Polityka obowiązkowej aktualizacji Pomocy:
+Obowiązujące polityki:
 
-`docs/CRT_HELP_MAINTENANCE_POLICY_PL.md`
+- `docs/CRT_WINDOWS_VALIDATION_POLICY_PL.md`
+- `docs/CRT_HELP_MAINTENANCE_POLICY_PL.md`
