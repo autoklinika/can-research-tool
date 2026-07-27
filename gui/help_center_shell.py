@@ -20,7 +20,7 @@ class HelpCenterMainWindow(ComparisonSetsMainWindow):
             "Otwórz przeszukiwalny opis funkcji CAN Research Tool"
         )
         self.help_action.triggered.connect(
-            lambda _checked=False: self._open_help("start")
+            lambda _checked=False: self._open_help()
         )
 
         self.help_quick_start_action = QAction("Szybki start", self)
@@ -63,17 +63,21 @@ class HelpCenterMainWindow(ComparisonSetsMainWindow):
         self.activity_bar.addSeparator()
         self.activity_bar.addAction(self.help_action)
 
-    def _open_help(self, topic_id: str = "start") -> None:
+    def _open_help(self, topic_id: str = "") -> None:
         key = "help-center"
         existing = self.navigator.widget(key)
         if isinstance(existing, HelpCenterWidget):
-            existing.open_topic(topic_id)
+            if topic_id:
+                existing.open_topic(topic_id)
+            else:
+                existing.show_home()
             self._activate_tab(key)
             existing.setFocus()
             return
 
         widget = HelpCenterWidget(self.tabs)
-        widget.open_topic(topic_id)
+        if topic_id:
+            widget.open_topic(topic_id)
         self._add_tab(key, widget, "Pomoc")
         widget.setFocus()
 
