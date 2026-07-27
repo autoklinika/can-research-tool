@@ -43,10 +43,31 @@ jobs:
           tests/test_comparison_uds_timeline.py
           tests/test_help_catalog.py
           -q
+          --junitxml=stage2d2-junit.xml
+      - name: Upload Stage 2D2 core diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2d2-core-${{ runner.os }}
+          path: stage2d2-junit.xml
+          retention-days: 3
       - name: Verify production synchronized UDS timeline GUI
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_uds_timeline_smoke.py
+        run: |
+          set +e
+          python tests_gui/comparison_uds_timeline_smoke.py > stage2d2-gui.log 2>&1
+          status=$?
+          cat stage2d2-gui.log
+          exit $status
+      - name: Upload Stage 2D2 GUI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2d2-gui-${{ runner.os }}
+          path: stage2d2-gui.log
+          retention-days: 3
       - name: Verify production Help Center GUI
         env:
           QT_QPA_PLATFORM: offscreen
