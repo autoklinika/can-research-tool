@@ -15,6 +15,7 @@ formatu sesji, surowych ramek ani trwałych indeksów CRT.
 - dokładny klucz obejmujący kanał, STD/EXT, CAN ID i typ ramki,
 - jawne ostrzeżenie, gdy sesja nie zawiera kotwicy,
 - bounded, równomierne próbkowanie maksymalnie 2000 punktów na sesję,
+- zachowanie pierwszego i ostatniego punktu oraz dokładnej kotwicy `t = 0`,
 - zachowanie rzeczywistego `source_row` każdego prezentowanego punktu,
 - przejście z punktu osi czasu do dokładnej ramki zapisanej sesji,
 - anulowalne budowanie osi czasu w `QThreadPool`,
@@ -51,14 +52,15 @@ Każdy punkt osi czasu zachowuje:
 
 Dwukrotne kliknięcie punktu albo przycisk `Otwórz ramkę źródłową` przekazuje
 bezpośredni `source_row` do istniejącego bounded navigatora zapisanych sesji.
-Sukces jest zgłaszany dopiero po potwierdzeniu rzeczywistego zaznaczenia wiersza.
+Rozpoznanie ścieżki sesji i odczyt SQLite odbywa się poza wątkiem GUI. Sukces
+jest zgłaszany dopiero po potwierdzeniu rzeczywistego zaznaczenia wiersza.
 
 ## Wydajność
 
 Źródłowa sesja jest skanowana sekwencyjnie w zadaniu tła. GUI nie materializuje
-pełnej liczby ramek. Dla każdej sesji wyznaczany jest deterministyczny krok
-próbkowania tak, aby prezentacja była ograniczona do 2000 punktów i obejmowała
-cały czas trwania sesji.
+pełnej liczby ramek. Dla każdej sesji wyznaczana jest deterministyczna próbka
+ograniczona do 2000 punktów. Próbka zawsze zachowuje początek i koniec sesji,
+a w trybie klucza wiadomości także dokładny punkt kotwicy `t = 0`.
 
 ## Testy
 
@@ -73,11 +75,25 @@ Testy obejmują:
 - wyrównanie do początku sesji,
 - wyrównanie do dokładnego klucza wiadomości,
 - brak kotwicy bez fałszywej synchronizacji,
-- bounded sampling,
+- bounded sampling z zachowaniem początku, końca i kotwicy,
 - zachowanie `source_row`,
-- anulowanie,
+- anulowanie i odrzucanie spóźnionych wyników,
+- czyszczenie starego zaznaczenia po błędzie,
 - obecność karty w produkcyjnym dialogu,
-- handoff dokładnego wiersza do nawigacji dowodowej.
+- pełny handoff dokładnego wiersza do produkcyjnej nawigacji zapisanej sesji.
+
+## Potwierdzenie ręczne właściciela
+
+Dnia 2026-07-27 właściciel projektu uruchomił Stage 2A na Windows i potwierdził,
+że funkcja działa w produkcyjnym GUI.
+
+Ręcznie potwierdzony przepływ:
+
+`Porównanie logów → Oś czasu → Zbuduj oś czasu → wybór punktu → Otwórz ramkę źródłową → właściwa sesja → dokładna ramka źródłowa`
+
+Potwierdzenie obejmuje widoczność karty w GUI, poprawne zbudowanie osi czasu oraz
+przejście z punktu osi do odpowiadającej mu ramki. Jest to funkcjonalny checkpoint
+Stage 2A. Nie stanowi automatycznej zgody na oznaczenie PR jako ready ani na merge.
 
 ## Zachowane kontrakty
 
