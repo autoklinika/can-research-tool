@@ -62,6 +62,16 @@ która obsługuje:
 12. Opcjonalnie zmień mnożnik progu i uruchom analizę ponownie, aby sprawdzić
     wpływ progu na liczbę przerw.
 
+## Potwierdzenie ręczne
+
+Dnia 2026-07-27 właściciel projektu wykonał test na Windows i potwierdził działanie
+pełnego przepływu:
+
+`analiza klucza → statystyki i jitter → wykryte przerwy → nawigacja do obu ramek → zapis artefaktu → ponowne otwarcie bez skanowania`
+
+Stage 2C1 jest zatem potwierdzony zarówno automatycznie, jak i ręcznie. Dokładne
+wiersze źródłowe obu ramek przerwy są zachowywane i poprawnie otwierane.
+
 ## Interpretacja wyników
 
 - wzrost mediany oznacza spadek typowej częstotliwości wiadomości,
