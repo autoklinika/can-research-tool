@@ -610,11 +610,11 @@ def _analyze_session(
         )
 
     reader = SessionPagedReader(project.absolute_path(record.relative_path))
-    if consumed < reader.frame_count:
-        consumed = reader.frame_count
-    if reader.frame_count and last_capture_timestamp_ns == 0:
-        for frame in reader.iter_frames():
-            last_capture_timestamp_ns = int(frame.timestamp_ns)
+    consumed = reader.frame_count
+    if reader.frame_count:
+        final_page = reader.read_page(reader.frame_count - 1, 1)
+        if final_page:
+            last_capture_timestamp_ns = int(final_page[0].timestamp_ns)
 
     for current in open_requests:
         if current.suppress_positive_response and current.first_response is None:
