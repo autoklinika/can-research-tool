@@ -11,7 +11,13 @@ from PySide6.QtCore import QSettings, QThreadPool
 from PySide6.QtWidgets import QApplication
 
 from app.comparison_sets import ComparisonSetStore
-from app.comparison_timeline import SYNC_MESSAGE_KEY
+from app.comparison_timeline import (
+    SYNC_EXPLICIT_EVENT,
+    SYNC_MESSAGE_KEY,
+    SYNC_OPERATOR_MARKER,
+)
+from app.marker_stream import MarkerStreamWriter, marker_path_for_session
+from app.markers import CaptureMarker, MarkerPreset
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
@@ -24,15 +30,28 @@ from gui.project_navigator import ProjectNavigator
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("AutoklinikaTests")
-    app.setApplicationName("CRTComparisonTimelineSmoke")
+    app.setApplicationName("CRTComparisonTimelineStage2BSmoke")
     settings = QSettings()
     settings.clear()
 
     with TemporaryDirectory() as temporary:
         os.environ["CRT_APP_DATA_DIR"] = f"{temporary}/app-data"
-        project = CrtProject.create(f"{temporary}/project", name="Timeline smoke")
-        before = _create_session(project, "before", 0)
-        after = _create_session(project, "after", 100_000_000)
+        project = CrtProject.create(
+            f"{temporary}/project",
+            name="Timeline smoke",
+        )
+        before = _create_session(
+            project,
+            "before",
+            0,
+            marker_timestamp_ns=12_000_000,
+        )
+        after = _create_session(
+            project,
+            "after",
+            100_000_000,
+            marker_timestamp_ns=115_000_000,
+        )
         comparison = ComparisonSetStore(project).create(
             name="Before versus after",
             session_ids=(before.id, after.id),
@@ -46,12 +65,16 @@ def main() -> None:
         app.processEvents()
 
         comparison_view = window.navigator.widget("comparison-sets")
-        assert isinstance(comparison_view, AnalysisEnabledComparisonSetsView)
+        assert isinstance(
+            comparison_view,
+            AnalysisEnabledComparisonSetsView,
+        )
         assert comparison_view.select_comparison_set(comparison.id)
         comparison_view._open_analysis()
         app.processEvents()
         dialog = comparison_view._analysis_dialogs.get(comparison.id)
         assert isinstance(dialog, ComparisonVisualizationDialog)
+        _wait_for_storage(app, dialog)
 
         timeline_index = dialog.result_tabs.indexOf(dialog.timeline)
         assert timeline_index >= 0
@@ -70,6 +93,65 @@ def main() -> None:
         dialog.timeline.cancel()
         dialog.timeline._timeline_ready(stale_generation, result)
         assert dialog.timeline.canvas._result is None
+        dialog.timeline._apply_result(result)
+
+        before_anchor = result.lanes[0].events[1]
+        after_anchor = result.lanes[1].events[2]
+        dialog.timeline._event_selected(before_anchor)
+        dialog.timeline.set_anchor_button.click()
+        dialog.timeline._event_selected(after_anchor)
+        dialog.timeline.set_anchor_button.click()
+        assert dialog.timeline._explicit_anchor_rows == {
+            before.id: before_anchor.source_row,
+            after.id: after_anchor.source_row,
+        }
+
+        dialog.timeline.mode_combo.setCurrentIndex(
+            dialog.timeline.mode_combo.findData(SYNC_EXPLICIT_EVENT)
+        )
+        dialog.timeline.build_button.click()
+        _wait_for_timeline(app, dialog)
+        explicit_result = dialog.timeline.canvas._result
+        assert explicit_result is not None
+        assert [
+            lane.anchor_source_row for lane in explicit_result.lanes
+        ] == [1, 2]
+
+        dialog.timeline.save_button.click()
+        _wait_for_storage(app, dialog)
+        saved_artifact_id = dialog.timeline._loaded_artifact_id
+        assert saved_artifact_id
+
+        dialog.close()
+        _drain(app)
+        assert comparison.id not in comparison_view._analysis_dialogs
+        comparison_view._open_analysis()
+        app.processEvents()
+        dialog = comparison_view._analysis_dialogs.get(comparison.id)
+        assert isinstance(dialog, ComparisonVisualizationDialog)
+        _wait_for_storage(app, dialog)
+        assert dialog.timeline._loaded_artifact_id == saved_artifact_id
+        restored = dialog.timeline.canvas._result
+        assert restored is not None
+        assert restored.explicit_anchor_rows == explicit_result.explicit_anchor_rows
+        assert [lane.anchor_source_row for lane in restored.lanes] == [1, 2]
+        assert "bez skanowania" in dialog.timeline.status_label.text()
+
+        dialog.timeline.mode_combo.setCurrentIndex(
+            dialog.timeline.mode_combo.findData(SYNC_OPERATOR_MARKER)
+        )
+        dialog.timeline.anchor_edit.setText("EGR odłączony")
+        dialog.timeline.occurrence_spin.setValue(1)
+        dialog.timeline.build_button.click()
+        _wait_for_timeline(app, dialog)
+        marker_result = dialog.timeline.canvas._result
+        assert marker_result is not None
+        assert [
+            lane.anchor_source_row for lane in marker_result.lanes
+        ] == [1, 1]
+        assert [
+            lane.anchor_timestamp_ns for lane in marker_result.lanes
+        ] == [12_000_000, 115_000_000]
 
         dialog.timeline.mode_combo.setCurrentIndex(
             dialog.timeline.mode_combo.findData(SYNC_MESSAGE_KEY)
@@ -97,7 +179,8 @@ def main() -> None:
             session_view = window.navigator.widget(session_key)
             if (
                 session_view is not None
-                and session_view.frame_table.currentIndex().row() == event.source_row
+                and session_view.frame_table.currentIndex().row()
+                == event.source_row
             ):
                 break
         assert session_view is not None
@@ -109,7 +192,10 @@ def main() -> None:
 
         dialog.timeline._event_selected(event)
         assert dialog.timeline.open_button.isEnabled()
-        dialog.timeline._timeline_failed(dialog.timeline._generation, "test failure")
+        dialog.timeline._timeline_failed(
+            dialog.timeline._generation,
+            "test failure",
+        )
         assert dialog.timeline._selected_event is None
         assert not dialog.timeline.open_button.isEnabled()
 
@@ -117,8 +203,7 @@ def main() -> None:
         window.navigator.close_all()
         window.close()
         window.deleteLater()
-        app.sendPostedEvents()
-        app.processEvents()
+        _drain(app)
 
         session_view = None
         dialog = None
@@ -129,7 +214,7 @@ def main() -> None:
 
     settings.clear()
     os.environ.pop("CRT_APP_DATA_DIR", None)
-    print("Comparison timeline smoke: OK")
+    print("Comparison timeline Stage 2B smoke: OK")
 
 
 def _wait_for_timeline(
@@ -139,13 +224,30 @@ def _wait_for_timeline(
     deadline = monotonic() + 30.0
     while dialog.timeline._tasks:
         QThreadPool.globalInstance().waitForDone(50)
-        app.sendPostedEvents()
-        app.processEvents()
+        _drain(app)
         if monotonic() > deadline:
             raise TimeoutError("comparison timeline did not become idle")
 
 
-def _create_session(project: CrtProject, name: str, offset_ns: int):
+def _wait_for_storage(
+    app: QApplication,
+    dialog: ComparisonVisualizationDialog,
+) -> None:
+    deadline = monotonic() + 30.0
+    while dialog.timeline._storage_tasks:
+        QThreadPool.globalInstance().waitForDone(50)
+        _drain(app)
+        if monotonic() > deadline:
+            raise TimeoutError("comparison timeline storage did not become idle")
+
+
+def _create_session(
+    project: CrtProject,
+    name: str,
+    offset_ns: int,
+    *,
+    marker_timestamp_ns: int,
+):
     frames = [
         _frame(0, offset_ns, 0x100),
         _frame(1, offset_ns + 10_000_000, 0x200),
@@ -153,18 +255,42 @@ def _create_session(project: CrtProject, name: str, offset_ns: int):
     ]
     path = project.live_sessions_dir / f"{name}.crt.jsonl"
     writer = SessionStreamWriter(
-        CaptureSession(name=name, source="test", bitrate=250_000, channel=0),
+        CaptureSession(
+            name=name,
+            source="test",
+            bitrate=250_000,
+            channel=0,
+        ),
         path,
     )
     writer.open()
     for frame in frames:
         writer.append(frame)
     writer.close({"clean_close": True})
-    project.register_session(path, name=name, source="test", status="ready")
+
+    preset = MarkerPreset.create("EGR odłączony", "F3")
+    with MarkerStreamWriter(
+        marker_path_for_session(path),
+        presets=(preset,),
+    ) as markers:
+        markers.append(
+            CaptureMarker.from_preset(
+                preset,
+                marker_timestamp_ns,
+                source="test",
+            )
+        )
+
+    project.register_session(
+        path,
+        name=name,
+        source="test",
+        status="ready",
+    )
     project.finalize_session(
         path,
         frame_count=len(frames),
-        marker_count=0,
+        marker_count=1,
         duration_s=0.02,
     )
     record = project.session_by_path(path)
@@ -181,6 +307,11 @@ def _frame(sequence: int, timestamp_ns: int, arbitration_id: int) -> CanFrame:
         data=bytes([sequence]),
         channel=0,
     )
+
+
+def _drain(app: QApplication) -> None:
+    app.sendPostedEvents()
+    app.processEvents()
 
 
 if __name__ == "__main__":
