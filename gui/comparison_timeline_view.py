@@ -310,7 +310,7 @@ class ComparisonTimelineView(QWidget):
             self.anchor_edit.setFocus()
             return
 
-        self.cancel()
+        self._cancel_tasks()
         self._generation += 1
         generation = self._generation
         cancel_event = Event()
@@ -332,15 +332,19 @@ class ComparisonTimelineView(QWidget):
 
     @Slot()
     def cancel(self) -> None:
-        for task in self._tasks.values():
-            task.cancel_event.set()
-        if self._tasks:
+        had_tasks = bool(self._tasks)
+        self._generation += 1
+        self._cancel_tasks()
+        if had_tasks:
             self.status_label.setText("Anulowano budowanie osi czasu.")
         self._set_running(False)
 
     def cancel_all(self) -> None:
-        self._generation += 1
         self.cancel()
+
+    def _cancel_tasks(self) -> None:
+        for task in self._tasks.values():
+            task.cancel_event.set()
 
     @Slot(int, object)
     def _timeline_ready(self, generation: int, value: object) -> None:
@@ -351,9 +355,7 @@ class ComparisonTimelineView(QWidget):
             return
         self.canvas.set_result(value)
         self._populate_lanes(value)
-        self._selected_event = None
-        self.open_button.setEnabled(False)
-        self.selected_label.setText("Kliknij punkt osi czasu, aby wskazać ramkę.")
+        self._clear_selection()
         warning_text = (
             f" Ostrzeżenia: {len(value.warnings)}."
             if value.warnings
@@ -371,6 +373,7 @@ class ComparisonTimelineView(QWidget):
             return
         self.canvas.set_result(None)
         self.lanes_table.setRowCount(0)
+        self._clear_selection()
         self.status_label.setText(f"Nie udało się zbudować osi czasu: {error}")
 
     @Slot(int)
@@ -406,6 +409,13 @@ class ComparisonTimelineView(QWidget):
         self.lanes_table.resizeRowsToContents()
         self.lanes_table.setMaximumHeight(
             min(220, 34 + self.lanes_table.rowCount() * 30)
+        )
+
+    def _clear_selection(self) -> None:
+        self._selected_event = None
+        self.open_button.setEnabled(False)
+        self.selected_label.setText(
+            "Kliknij punkt osi czasu, aby wskazać ramkę."
         )
 
     @Slot(object)
