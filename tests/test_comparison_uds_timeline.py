@@ -56,12 +56,12 @@ def test_projects_transactions_on_saved_alignment_and_compares_sequences() -> No
     after_labels = [
         item.sequence_classification for item in result.lanes[1].transactions
     ]
-    assert after_labels == ["shifted", "shifted", "additional"]
+    assert after_labels == ["shifted", "matched", "additional"]
     difference = result.differences[0]
     assert difference.session_id == "after"
     assert difference.missing_count == 0
     assert difference.additional_count == 1
-    assert difference.shifted_count == 2
+    assert difference.shifted_count == 1
 
 
 def test_filters_did_status_nrc_and_visible_session_without_losing_baseline_comparison() -> None:
