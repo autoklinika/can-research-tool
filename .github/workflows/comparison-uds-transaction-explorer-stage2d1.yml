@@ -38,6 +38,19 @@ jobs:
       - name: Verify UDS transaction explorer core and CSV export
         run: python -m pytest tests/test_comparison_uds_transaction_explorer.py -q
       - name: Verify UDS transaction explorer GUI
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/comparison_uds_transaction_explorer_smoke.py
+        run: |
+          set +e
+          python tests_gui/comparison_uds_transaction_explorer_smoke.py > stage2d1-gui.log 2>&1
+          status=$?
+          cat stage2d1-gui.log
+          exit $status
+      - name: Upload Stage 2D1 GUI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2d1-gui-${{ runner.os }}
+          path: stage2d1-gui.log
+          retention-days: 3
