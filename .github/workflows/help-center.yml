@@ -1,0 +1,43 @@
+name: Help Center Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  help-center:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Help Center sources
+        run: >-
+          python -m compileall -q
+          app/help_catalog.py
+          gui/help_center_view.py
+          gui/help_center_shell.py
+          gui/application_container.py
+          tests/test_help_catalog.py
+          tests_gui/help_center_smoke.py
+      - name: Verify Help catalog and search
+        run: python -m pytest tests/test_help_catalog.py -q
+      - name: Verify production Help Center GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/help_center_smoke.py
