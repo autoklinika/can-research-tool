@@ -47,7 +47,7 @@ def test_session_start_timeline_preserves_source_rows_and_bounded_sampling(
         project,
         comparison,
         synchronization_mode=SYNC_SESSION_START,
-        max_events_per_session=2,
+        max_events_per_session=3,
     )
 
     assert len(result.lanes) == 2
@@ -56,8 +56,12 @@ def test_session_start_timeline_preserves_source_rows_and_bounded_sampling(
         assert lane.synchronized
         assert lane.anchor_source_row == 0
         assert lane.sample_stride == 2
-        assert [event.source_row for event in lane.events] == [0, 2]
-        assert [event.relative_time_ns for event in lane.events] == [0, 20_000_000]
+        assert [event.source_row for event in lane.events] == [0, 2, 3]
+        assert [event.relative_time_ns for event in lane.events] == [
+            0,
+            20_000_000,
+            30_000_000,
+        ]
         assert lane.events[0].message_key == "0:STD:100:data"
 
 
@@ -133,13 +137,13 @@ def test_message_key_anchor_is_retained_when_sampling_would_skip_it(
         _comparison(before.id, after.id),
         synchronization_mode=SYNC_MESSAGE_KEY,
         anchor_message_key="0:STD:200:data",
-        max_events_per_session=2,
+        max_events_per_session=3,
     )
 
     for lane in result.lanes:
-        assert lane.sampled_frame_count == 2
+        assert lane.sampled_frame_count == 3
         assert lane.anchor_source_row == 1
-        assert 1 in [event.source_row for event in lane.events]
+        assert [event.source_row for event in lane.events] == [0, 1, 3]
         anchor_event = next(event for event in lane.events if event.source_row == 1)
         assert anchor_event.relative_time_ns == 0
 
@@ -177,6 +181,12 @@ def test_timeline_build_is_cancellable_and_key_validation_is_strict(
             project,
             _comparison(before.id, after.id),
             should_cancel=lambda: True,
+        )
+    with pytest.raises(ValueError, match="at least three"):
+        build_comparison_timeline(
+            project,
+            _comparison(before.id, after.id),
+            max_events_per_session=2,
         )
     with pytest.raises(ValueError):
         parse_timeline_message_key("0:STD:800:data")
