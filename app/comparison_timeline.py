@@ -88,8 +88,8 @@ def build_comparison_timeline(
 
     if synchronization_mode not in {SYNC_SESSION_START, SYNC_MESSAGE_KEY}:
         raise ValueError(f"Nieobsługiwany tryb synchronizacji: {synchronization_mode!r}")
-    if max_events_per_session <= 0:
-        raise ValueError("max_events_per_session must be greater than zero")
+    if max_events_per_session < 3:
+        raise ValueError("max_events_per_session must be at least three")
 
     normalized_anchor = anchor_message_key.strip()
     parsed_anchor = None
@@ -201,7 +201,8 @@ def _build_lane(
 ) -> ComparisonTimelineLane:
     reader = SessionPagedReader(project.absolute_path(record.relative_path))
     total = reader.frame_count
-    stride = max(1, math.ceil(total / max_events)) if total else 1
+    sample_rows = _sample_source_rows(total, max_events)
+    stride = _display_sample_stride(total, max_events)
     pending: list[_PendingEvent] = []
     first_timestamp: int | None = None
     last_timestamp: int | None = None
@@ -231,11 +232,16 @@ def _build_lane(
             anchor_timestamp = timestamp
             anchor_event = event
 
-        if source_row % stride == 0:
+        if source_row in sample_rows:
             pending.append(event)
 
     _raise_if_cancelled(should_cancel)
-    _retain_anchor_event(pending, anchor_event, max_events=max_events)
+    _retain_anchor_event(
+        pending,
+        anchor_event,
+        max_events=max_events,
+        total_frame_count=total,
+    )
     synchronized = anchor_timestamp is not None
     warning = ""
     if total == 0:
@@ -292,11 +298,30 @@ def _pending_event(source_row: int, frame) -> _PendingEvent:
     )
 
 
+def _sample_source_rows(total: int, max_events: int) -> set[int]:
+    if total <= 0:
+        return set()
+    if total <= max_events:
+        return set(range(total))
+    denominator = max_events - 1
+    return {
+        round(index * (total - 1) / denominator)
+        for index in range(max_events)
+    }
+
+
+def _display_sample_stride(total: int, max_events: int) -> int:
+    if total <= 1 or total <= max_events:
+        return 1
+    return max(1, round((total - 1) / (max_events - 1)))
+
+
 def _retain_anchor_event(
     pending: list[_PendingEvent],
     anchor_event: _PendingEvent | None,
     *,
     max_events: int,
+    total_frame_count: int,
 ) -> None:
     if anchor_event is None:
         return
@@ -305,8 +330,16 @@ def _retain_anchor_event(
     if len(pending) < max_events:
         pending.append(anchor_event)
     else:
+        endpoint_rows = {0, max(0, total_frame_count - 1)}
+        candidates = [
+            index
+            for index, item in enumerate(pending)
+            if item.source_row not in endpoint_rows
+        ]
+        if not candidates:
+            raise RuntimeError("bounded timeline has no replaceable interior sample")
         replacement_index = min(
-            range(len(pending)),
+            candidates,
             key=lambda index: (
                 abs(pending[index].source_row - anchor_event.source_row),
                 -pending[index].source_row,
