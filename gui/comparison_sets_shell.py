@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtWidgets import QMessageBox
 
+from app.comparison_evidence import ComparisonEvidenceLocation
 from app.project import CrtProject
 
 from .comparison_evidence_navigation import ComparisonEvidenceCoordinator
@@ -70,6 +73,9 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         if bool(widget.property("comparisonEvidenceBound")):
             return
         widget.evidence_open_requested.connect(self._open_comparison_evidence)
+        widget.evidence_source_row_requested.connect(
+            self._open_comparison_source_row
+        )
         widget.setProperty("comparisonEvidenceBound", True)
 
     def _open_comparison_evidence(
@@ -78,12 +84,50 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
         message_key: str,
         requester: object | None = None,
     ) -> None:
+        coordinator = self._evidence_coordinator()
+        on_opened, on_failed = self._evidence_callbacks(requester)
+        coordinator.open_evidence(
+            session_id,
+            message_key,
+            on_opened=on_opened,
+            on_failed=on_failed,
+        )
+
+    def _open_comparison_source_row(
+        self,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+        requester: object | None = None,
+    ) -> None:
+        coordinator = self._evidence_coordinator()
+        on_opened, on_failed = self._evidence_callbacks(requester)
+        coordinator.open_source_row(
+            session_id,
+            int(source_row),
+            message_key,
+            on_opened=on_opened,
+            on_failed=on_failed,
+        )
+
+    def _evidence_coordinator(self) -> ComparisonEvidenceCoordinator:
         coordinator = getattr(self, "_comparison_evidence_coordinator", None)
         if not isinstance(coordinator, ComparisonEvidenceCoordinator):
             coordinator = ComparisonEvidenceCoordinator(self)
             self._comparison_evidence_coordinator = coordinator
+        return coordinator
 
-        def opened(_location) -> None:
+    def _evidence_callbacks(
+        self,
+        requester: object | None,
+    ) -> tuple[
+        Callable[[ComparisonEvidenceLocation], None] | None,
+        Callable[[str], None] | None,
+    ]:
+        if requester is None:
+            return None, None
+
+        def opened(_location: ComparisonEvidenceLocation) -> None:
             callback = getattr(requester, "evidence_navigation_succeeded", None)
             if callable(callback):
                 try:
@@ -114,18 +158,10 @@ class ComparisonSetsMainWindow(ProjectPropertiesMainWindow):
                     except RuntimeError:
                         continue
 
-        coordinator.open_evidence(
-            session_id,
-            message_key,
-            on_opened=opened if requester is not None else None,
-            on_failed=failed if requester is not None else None,
-        )
+        return opened, failed
 
     def _import_completed(self, source: str, target: str) -> None:
         super()._import_completed(source, target)
         widget = self.navigator.widget("comparison-sets")
         if isinstance(widget, ComparisonSetsView):
             widget.refresh()
-
-
-__all__ = ["ComparisonSetsMainWindow"]
