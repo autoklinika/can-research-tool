@@ -1,0 +1,45 @@
+name: Comparison Timeline Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  comparison-timeline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile comparison timeline sources
+        run: >-
+          python -m compileall -q
+          app/comparison_timeline.py
+          gui/comparison_timeline_view.py
+          gui/comparison_evidence_navigation.py
+          gui/comparison_sets_analysis_view.py
+          gui/comparison_sets_shell.py
+          gui/comparison_visualization_hardened.py
+          tests/test_comparison_timeline.py
+          tests_gui/comparison_timeline_smoke.py
+      - name: Verify comparison timeline core
+        run: python -m pytest tests/test_comparison_timeline.py -q
+      - name: Verify comparison timeline GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_timeline_smoke.py
