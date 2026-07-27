@@ -36,8 +36,30 @@ jobs:
           tests/test_help_catalog.py
           tests_gui/help_center_smoke.py
       - name: Verify Help catalog and search
-        run: python -m pytest tests/test_help_catalog.py -q
+        run: >-
+          python -m pytest tests/test_help_catalog.py -q
+          --junitxml=help-catalog-junit.xml
+      - name: Upload Help catalog diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: help-catalog-${{ runner.os }}
+          path: help-catalog-junit.xml
+          retention-days: 3
       - name: Verify production Help Center GUI
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/help_center_smoke.py
+        run: |
+          set +e
+          python tests_gui/help_center_smoke.py > help-center-gui.log 2>&1
+          status=$?
+          cat help-center-gui.log
+          exit $status
+      - name: Upload Help Center GUI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: help-center-gui-${{ runner.os }}
+          path: help-center-gui.log
+          retention-days: 3
