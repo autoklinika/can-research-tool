@@ -10,12 +10,26 @@ from .comparison_visualization_stage2c2 import (
 )
 
 
+class _SelectionSafeUdsTransactionExplorerView(
+    ComparisonUdsTransactionExplorerView
+):
+    """Clear Qt selection before replacing the filtered transaction model."""
+
+    def _populate_result(self) -> None:
+        self.transaction_table.clearSelection()
+        super()._populate_result()
+
+    def _clear_result(self) -> None:
+        self.transaction_table.clearSelection()
+        super()._clear_result()
+
+
 class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
     """Comparison dialog extended with artifact-backed UDS transaction explorer."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.uds_explorer = ComparisonUdsTransactionExplorerView(
+        self.uds_explorer = _SelectionSafeUdsTransactionExplorerView(
             self.project,
             self.comparison_set,
             self.result_tabs,
