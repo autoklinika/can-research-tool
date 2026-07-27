@@ -296,6 +296,18 @@ Pierwsza walidacja wykryła, że timeout był oceniany względem ostatniego
 komunikatu UDS zamiast rzeczywistego końca logu. Poprawka pobiera ostatnią ramkę
 przez istniejący indeks stronicowany i nie wykonuje drugiego pełnego skanowania.
 
+## Potwierdzenie ręczne
+
+Dnia 2026-07-27 właściciel projektu uruchomił Stage 2C2 na Windows i potwierdził
+pełny przepływ:
+
+`analiza transakcji UDS → parowanie request/response → statystyki first/final latency → nawigacja do żądania i odpowiedzi → zapis artefaktu → ponowne otwarcie bez skanowania`
+
+Potwierdzono działanie produkcyjnej karty `Latencja UDS`, poprawne przejście do
+dokładnych ramek dowodowych oraz automatyczne odtworzenie trwałego artefaktu.
+Stage 2C2 jest ręcznie zaakceptowany jako funkcjonalny checkpoint do dalszego
+rozwoju stacked.
+
 ## Zachowane kontrakty
 
 Bez zmian pozostają:
