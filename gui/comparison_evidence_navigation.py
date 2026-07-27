@@ -95,23 +95,10 @@ class ComparisonEvidenceCoordinator(QObject):
         on_opened: Callable[[ComparisonEvidenceLocation], None] | None = None,
         on_failed: Callable[[str], None] | None = None,
     ) -> None:
-        project = self._window.project
-        if project is None:
-            error = "Nie można otworzyć dowodów bez aktywnego projektu."
-            self._report(error)
-            if on_failed is not None:
-                on_failed(error)
+        request_data = self._begin_request(on_opened=on_opened, on_failed=on_failed)
+        if request_data is None:
             return
-
-        self._generation += 1
-        generation = self._generation
-        cancel_event = Event()
-        self._requests[generation] = _EvidenceRequest(
-            project=project,
-            cancel_event=cancel_event,
-            on_opened=on_opened,
-            on_failed=on_failed,
-        )
+        generation, project, cancel_event = request_data
         self._report(f"Szukam dowodów dla {message_key} w zapisanej sesji…")
         task = _EvidenceTask(
             generation,
@@ -126,18 +113,93 @@ class ComparisonEvidenceCoordinator(QObject):
         self._tasks[generation] = task
         QThreadPool.globalInstance().start(task)
 
+    def open_source_row(
+        self,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+        *,
+        on_opened: Callable[[ComparisonEvidenceLocation], None] | None = None,
+        on_failed: Callable[[str], None] | None = None,
+    ) -> None:
+        """Open a frame already resolved by a passive timeline scan."""
+
+        if source_row < 0:
+            error = "Numer ramki źródłowej nie może być ujemny."
+            self._report(error)
+            if on_failed is not None:
+                on_failed(error)
+            return
+        request_data = self._begin_request(on_opened=on_opened, on_failed=on_failed)
+        if request_data is None:
+            return
+        generation, project, _cancel_event = request_data
+        session = next(
+            (item for item in project.list_sessions() if item.id == session_id),
+            None,
+        )
+        if session is None:
+            self._finish_failed(
+                generation,
+                f"Nie znaleziono sesji porównawczej: {session_id!r}.",
+            )
+            return
+        location = ComparisonEvidenceLocation(
+            session_id=session.id,
+            session_path=project.absolute_path(session.relative_path),
+            source_row=int(source_row),
+            message_key=message_key,
+        )
+        self._report(
+            f"Otwieram ramkę {source_row + 1} wskazaną na osi czasu: {message_key}."
+        )
+        QTimer.singleShot(
+            0,
+            lambda g=generation, value=location: self._open_location(g, value),
+        )
+
+    def _begin_request(
+        self,
+        *,
+        on_opened: Callable[[ComparisonEvidenceLocation], None] | None,
+        on_failed: Callable[[str], None] | None,
+    ) -> tuple[int, Any, Event] | None:
+        project = self._window.project
+        if project is None:
+            error = "Nie można otworzyć dowodów bez aktywnego projektu."
+            self._report(error)
+            if on_failed is not None:
+                on_failed(error)
+            return None
+        self._generation += 1
+        generation = self._generation
+        cancel_event = Event()
+        self._requests[generation] = _EvidenceRequest(
+            project=project,
+            cancel_event=cancel_event,
+            on_opened=on_opened,
+            on_failed=on_failed,
+        )
+        return generation, project, cancel_event
+
     @Slot(int, object)
     def _location_ready(self, generation: int, value: object) -> None:
-        request = self._requests.get(generation)
-        if request is None:
-            return
         if not isinstance(value, ComparisonEvidenceLocation):
             self._finish_failed(
                 generation,
                 "Nie udało się odczytać lokalizacji dowodu.",
             )
             return
+        self._open_location(generation, value)
 
+    def _open_location(
+        self,
+        generation: int,
+        value: ComparisonEvidenceLocation,
+    ) -> None:
+        request = self._requests.get(generation)
+        if request is None or request.cancel_event.is_set():
+            return
         window = self._window
         if window.project is not request.project:
             self._finish_failed(
