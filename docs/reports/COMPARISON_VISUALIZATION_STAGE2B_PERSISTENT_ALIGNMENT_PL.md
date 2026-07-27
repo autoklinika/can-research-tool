@@ -101,6 +101,23 @@ Testy obejmują:
 - zapis, zamknięcie i ponowne otwarcie osi bez skanowania,
 - pełną nawigację do dokładnej ramki źródłowej.
 
+## Potwierdzenie ręczne
+
+Dnia 2026-07-27 właściciel projektu uruchomił Stage 2B na Windows i potwierdził
+pełny przepływ produkcyjny:
+
+`budowa osi → ustawienie dokładnych kotwic → zapis wyrównania → zamknięcie okna → ponowne otwarcie → automatyczne odtworzenie bez skanowania → przejście do dokładnej ramki źródłowej`
+
+Potwierdzono w szczególności, że zapisany artefakt pozostaje dostępny po
+zamknięciu okna, jest automatycznie odtwarzany bez ponownego skanowania sesji i
+zachowuje dokładny `source_row` potrzebny do nawigacji dowodowej.
+
+Zwalidowany checkpoint funkcjonalny przed dopisaniem dokumentacji:
+
+`ff19e22025372b6e5a3f32f510baf6ebaf890e5f`
+
+Stage 2B ma tym samym ręcznie potwierdzony checkpoint funkcjonalny.
+
 ## Zachowane kontrakty
 
 Bez zmian pozostają:
