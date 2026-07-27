@@ -30,13 +30,20 @@ jobs:
         run: >-
           python -m compileall -q
           app/comparison_uds_transaction_explorer.py
+          app/comparison_uds_explorer_source.py
           gui/comparison_uds_transaction_explorer_view.py
+          gui/comparison_uds_transaction_explorer_source_view.py
           gui/comparison_visualization_stage2d1.py
           gui/comparison_sets_analysis_view.py
           tests/test_comparison_uds_transaction_explorer.py
+          tests/test_comparison_uds_explorer_source.py
           tests_gui/comparison_uds_transaction_explorer_smoke.py
-      - name: Verify UDS transaction explorer core and CSV export
-        run: python -m pytest tests/test_comparison_uds_transaction_explorer.py -q
+      - name: Verify UDS transaction explorer core and artifact selection
+        run: >-
+          python -m pytest
+          tests/test_comparison_uds_transaction_explorer.py
+          tests/test_comparison_uds_explorer_source.py
+          -q
       - name: Verify UDS transaction explorer GUI
         shell: bash
         env:
