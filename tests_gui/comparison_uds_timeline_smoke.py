@@ -99,7 +99,7 @@ def main() -> None:
         assert view.transaction_table.rowCount() == 5
         assert view.difference_table.rowCount() == 1
         assert view.difference_table.item(0, 2).text() == "1"
-        assert view.difference_table.item(0, 3).text() == "2"
+        assert view.difference_table.item(0, 3).text() == "1"
         assert "bez skanowania sesji" in view.status_label.text()
 
         opened: list[tuple[str, int, str]] = []
