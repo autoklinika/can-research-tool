@@ -106,6 +106,7 @@ def main() -> None:
             comparison.id,
         )
         restored.show()
+        _drain(app)
         _wait_for_idle(app, restored)
         assert restored.timing._loaded_artifact_id == artifact_id
         assert restored.timing._result is not None
