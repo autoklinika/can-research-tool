@@ -65,6 +65,12 @@ def main() -> None:
         assert len(result.lanes) == 2
         assert all(lane.anchor_source_row == 0 for lane in result.lanes)
 
+        stale_generation = dialog.timeline._generation
+        dialog.timeline.canvas.set_result(None)
+        dialog.timeline.cancel()
+        dialog.timeline._timeline_ready(stale_generation, result)
+        assert dialog.timeline.canvas._result is None
+
         dialog.timeline.mode_combo.setCurrentIndex(
             dialog.timeline.mode_combo.findData(SYNC_MESSAGE_KEY)
         )
@@ -100,6 +106,12 @@ def main() -> None:
         assert "0x300" in session_view.frame_table.model().data(
             session_view.frame_table.model().index(event.source_row, 2)
         )
+
+        dialog.timeline._event_selected(event)
+        assert dialog.timeline.open_button.isEnabled()
+        dialog.timeline._timeline_failed(dialog.timeline._generation, "test failure")
+        assert dialog.timeline._selected_event is None
+        assert not dialog.timeline.open_button.isEnabled()
 
         assert QThreadPool.globalInstance().waitForDone(5_000)
         window.navigator.close_all()
