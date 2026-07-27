@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from gui.application_container import ApplicationContainer
 from gui.help_center_shell import HelpCenterMainWindow
-from gui.help_center_view import HelpCenterWidget
+from gui.help_center_view_stage2d2 import HelpCenterWidget
 
 
 def main() -> None:
@@ -41,6 +41,17 @@ def main() -> None:
     _drain(app)
     assert "timing-jitter" in help_view.visible_topic_ids
     assert "percentiles" in help_view.visible_topic_ids
+
+    help_view.search_edit.setText("os uds brakujace transakcje")
+    _drain(app)
+    assert help_view.visible_topic_ids[0] == "uds-timeline"
+    help_view.open_topic("uds-timeline")
+    _drain(app)
+    timeline_content = help_view.browser.toPlainText()
+    assert "Trwała oś transakcji UDS" in timeline_content
+    assert "Stage 2B" in timeline_content
+    assert "source_row" in timeline_content
+    assert "evidence_truncated" in timeline_content
 
     help_view.open_topic("uds-transactions")
     _drain(app)
