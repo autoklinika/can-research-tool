@@ -39,11 +39,11 @@ def test_search_is_accent_insensitive_and_searches_content() -> None:
     assert source_results
     assert source_results[0].id == "source-of-truth"
 
-    uds_results = search_help_topics("0x78 odpowiedz koncowa")
-    assert {topic.id for topic in uds_results} >= {
-        "uds-latency",
-        "uds-transactions",
-    }
+    latency_results = search_help_topics("0x78 odpowiedz koncowa")
+    assert "uds-latency" in {topic.id for topic in latency_results}
+
+    explorer_results = search_help_topics("0x78 final response")
+    assert "uds-transactions" in {topic.id for topic in explorer_results}
 
     routine_results = search_help_topics("Routine ID")
     assert {topic.id for topic in routine_results} >= {
