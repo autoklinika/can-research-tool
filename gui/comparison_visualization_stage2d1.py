@@ -26,6 +26,41 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.result_tabs.insertTab(4, self.uds_explorer, "Transakcje UDS")
 
     @Slot(str, int, str)
+    def _prepare_timeline_evidence(
+        self,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+    ) -> None:
+        super()._prepare_timeline_evidence(
+            session_id,
+            source_row,
+            message_key,
+        )
+        if self._evidence_pending:
+            self.timing.setEnabled(False)
+            self.uds_latency.setEnabled(False)
+            if hasattr(self, "uds_explorer"):
+                self.uds_explorer.setEnabled(False)
+
+    @Slot(str, int, str)
+    def _prepare_timing_evidence(
+        self,
+        session_id: str,
+        source_row: int,
+        message_key: str,
+    ) -> None:
+        super()._prepare_timing_evidence(
+            session_id,
+            source_row,
+            message_key,
+        )
+        if self._evidence_pending:
+            self.uds_latency.setEnabled(False)
+            if hasattr(self, "uds_explorer"):
+                self.uds_explorer.setEnabled(False)
+
+    @Slot(str, int, str)
     def _prepare_uds_latency_evidence(
         self,
         session_id: str,
@@ -70,11 +105,17 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
     @Slot()
     def evidence_navigation_succeeded(self) -> None:
         super().evidence_navigation_succeeded()
+        self.timeline.setEnabled(True)
+        self.timing.setEnabled(True)
+        self.uds_latency.setEnabled(True)
         self.uds_explorer.setEnabled(True)
 
     @Slot(str)
     def evidence_navigation_failed(self, error: str) -> None:
         super().evidence_navigation_failed(error)
+        self.timeline.setEnabled(True)
+        self.timing.setEnabled(True)
+        self.uds_latency.setEnabled(True)
         self.uds_explorer.setEnabled(True)
 
     def close_for_project_change(self) -> None:
