@@ -7,7 +7,7 @@ from app.project import CrtProject
 
 from .comparison_analysis_dialog import ComparisonAnalysisDialog
 from .comparison_sets_view import ComparisonSetsView
-from .comparison_visualization_hardened import ComparisonVisualizationDialog
+from .comparison_visualization_stage2c1 import ComparisonVisualizationDialog
 from .window_fullscreen import FullScreenController, enable_full_screen
 
 
