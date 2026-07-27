@@ -45,9 +45,11 @@ def test_search_is_accent_insensitive_and_searches_content() -> None:
         "uds-transactions",
     }
 
-    did_results = search_help_topics("Routine F022")
-    assert did_results
-    assert did_results[0].id in {"uds-transactions", "uds-basics"}
+    routine_results = search_help_topics("Routine ID")
+    assert {topic.id for topic in routine_results} >= {
+        "uds-transactions",
+        "uds-basics",
+    }
 
     assert search_help_topics("") == HELP_TOPICS
     assert search_help_topics("fraza-ktorej-na-pewno-nie-ma") == ()
