@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -305,7 +304,7 @@ def _sample_source_rows(total: int, max_events: int) -> set[int]:
         return set(range(total))
     denominator = max_events - 1
     return {
-        round(index * (total - 1) / denominator)
+        (index * (total - 1) + denominator // 2) // denominator
         for index in range(max_events)
     }
 
