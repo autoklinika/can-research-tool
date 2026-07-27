@@ -1303,8 +1303,11 @@ def _topic_plain_text(topic: HelpTopic) -> str:
 
 
 def _normalize(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", str(value).casefold())
-    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
+    folded = str(value).casefold().translate(str.maketrans({"ł": "l"}))
+    decomposed = unicodedata.normalize("NFKD", folded)
+    without_marks = "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    )
     return " ".join(re.findall(r"[a-z0-9x]+", without_marks))
 
 
