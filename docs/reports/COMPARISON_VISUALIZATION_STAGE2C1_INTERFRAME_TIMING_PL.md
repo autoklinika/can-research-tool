@@ -178,6 +178,17 @@ Ogólny job `Tests/gui-smoke` może kończyć się niezależnie dłużej niż de
 smoki. Self-hosted Windows nie jest wymagany dla tego pasywnego etapu bez
 sprzętu CAN.
 
+## Potwierdzenie ręczne
+
+Dnia 2026-07-27 właściciel projektu uruchomił Stage 2C1 na Windows i potwierdził
+pełny przepływ produkcyjny:
+
+`analiza klucza → statystyki i jitter → wykryte przerwy → nawigacja do obu ramek → zapis artefaktu → ponowne otwarcie bez skanowania`
+
+Potwierdzono poprawne wyświetlenie metryk, działanie nawigacji do obu dokładnych
+`source_row` tworzących odstęp oraz automatyczne odtworzenie trwałego artefaktu
+bez ponownego skanowania źródłowych sesji.
+
 ## Zachowane kontrakty
 
 Bez zmian pozostają:
