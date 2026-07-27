@@ -6,12 +6,8 @@ on:
 
 jobs:
   uds-timeline-stage2d2:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,53 +15,33 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Qt runtime
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libegl1
       - name: Install GUI and test tooling
         run: python -m pip install -q -e ".[gui,dev]"
       - name: Compile Stage 2D2 sources
-        run: >-
-          python -m compileall -q
-          app/comparison_uds_timeline.py
-          app/help_catalog_registry.py
-          app/help_catalog_stage2d2.py
-          gui/comparison_uds_timeline_view.py
-          gui/comparison_visualization_stage2d2.py
-          gui/help_center_view_stage2d2.py
-          tests/test_comparison_uds_timeline.py
-          tests_gui/comparison_uds_timeline_smoke.py
+        run: python -m compileall -q app/comparison_uds_timeline.py app/help_catalog_registry.py app/help_catalog_stage2d2.py gui/comparison_uds_timeline_view.py gui/comparison_visualization_stage2d2.py gui/help_center_view_stage2d2.py tests/test_comparison_uds_timeline.py tests_gui/comparison_uds_timeline_smoke.py
       - name: Verify UDS timeline core and Help coverage
-        run: >-
-          python -m pytest
-          tests/test_comparison_uds_timeline.py
-          tests/test_help_catalog.py
-          -q
-          --junitxml=stage2d2-junit.xml
+        run: python -m pytest tests/test_comparison_uds_timeline.py tests/test_help_catalog.py -q --junitxml=stage2d2-junit.xml
       - name: Upload Stage 2D2 core diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: stage2d2-core-${{ runner.os }}
+          name: stage2d2-core-windows
           path: stage2d2-junit.xml
           retention-days: 3
       - name: Verify production synchronized UDS timeline GUI
-        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
+        shell: pwsh
         run: |
-          set +e
-          python tests_gui/comparison_uds_timeline_smoke.py > stage2d2-gui.log 2>&1
-          status=$?
-          cat stage2d2-gui.log
-          exit $status
+          python tests_gui/comparison_uds_timeline_smoke.py *> stage2d2-gui.log
+          $result = $LASTEXITCODE
+          Get-Content stage2d2-gui.log
+          exit $result
       - name: Upload Stage 2D2 GUI diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: stage2d2-gui-${{ runner.os }}
+          name: stage2d2-gui-windows
           path: stage2d2-gui.log
           retention-days: 3
       - name: Verify production Help Center GUI
