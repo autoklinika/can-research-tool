@@ -144,27 +144,42 @@ Copilot Code Review nie wykonał analizy z powodu wyczerpanego limitu konta.
 Nie zgłoszono wątków review; wykonano własną kontrolę reguł parowania, timeoutów,
 bounded evidence, artefaktu i lifecycle GUI.
 
-## Następny rekomendowany etap po potwierdzeniu ręcznym
+## Potwierdzenie ręczne
 
-Przed kolejną dużą funkcją należy najpierw zapisać ręczne potwierdzenie Stage
-2C2 w raporcie oraz PR #53.
+Dnia 2026-07-27 właściciel projektu potwierdził działanie Stage 2C2 na Windows.
+Zaakceptowany przepływ obejmuje:
 
-Następnie rekomendowany jest:
+`analiza transakcji UDS → parowanie request/response → statystyki first/final latency → nawigacja do żądania i odpowiedzi → zapis artefaktu → ponowne otwarcie bez skanowania`
+
+Stage 2C2 jest ręcznie zamkniętym checkpointem funkcjonalnym. PR #53 ma nadal
+pozostać draftem i bez merge.
+
+## Następny rekomendowany etap
 
 `Comparison Visualization Stage 2D — korelacja protokołowa i widok transakcji`
 
-Możliwy zakres:
+Ze względu na rozmiar zakresu etap należy podzielić:
 
-- filtrowanie transakcji po SID, NRC, statusie i zakresie czasu,
-- szczegóły payloadu żądania i odpowiedzi,
-- grupowanie według SID, DID, subfunkcji lub Routine ID,
+### Stage 2D1 — eksplorator transakcji UDS
+
+- filtrowanie po sesji, SID, NRC, statusie, payloadzie i zakresie czasu,
+- szczegóły request/first/final response,
+- grupowanie według SID, DID, subfunkcji i Routine ID,
 - wykres rozkładu first/final latency,
-- porównanie poszczególnych usług między sesjami,
-- eksport tabeli transakcji i dowodów,
-- powiązanie transakcji UDS z trwałą osią czasu.
+- porównanie usług pomiędzy sesjami,
+- eksport widocznej tabeli oraz dowodów do CSV,
+- nawigacja do dokładnych ramek źródłowych,
+- praca na trwałym artefakcie Stage 2C2 bez skanowania surowych sesji.
+
+### Stage 2D2 — powiązanie z osią czasu
+
+- wizualne naniesienie transakcji na trwałą oś czasu,
+- przejście pomiędzy transakcją a punktem osi,
+- warstwy statusów i latencji,
+- trwała konfiguracja widoku korelacyjnego.
 
 Automatyczne wykrywanie par request/response, functional addressing z wieloma ECU
-i niestandardowe adresowanie ISO-TP powinny pozostać osobnymi decyzjami
+i niestandardowe adresowanie ISO-TP pozostają osobnymi decyzjami
 architektonicznymi.
 
 ## Stałe ograniczenia
