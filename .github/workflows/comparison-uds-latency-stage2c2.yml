@@ -36,7 +36,19 @@ jobs:
           tests/test_comparison_uds_latency.py
           tests_gui/comparison_uds_latency_smoke.py
       - name: Verify UDS latency core and artifact
-        run: python -m pytest tests/test_comparison_uds_latency.py -q
+        run: >-
+          python -m pytest
+          tests/test_comparison_uds_latency.py
+          -q
+          --junitxml=stage2c2-junit.xml
+      - name: Upload Stage 2C2 pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2c2-pytest-${{ runner.os }}
+          path: stage2c2-junit.xml
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Verify UDS latency GUI
         env:
           QT_QPA_PLATFORM: offscreen
