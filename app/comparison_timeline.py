@@ -207,6 +207,7 @@ def _build_lane(
     last_timestamp: int | None = None
     anchor_source_row: int | None = None
     anchor_timestamp: int | None = None
+    anchor_event: _PendingEvent | None = None
 
     for source_row, frame in enumerate(reader.iter_frames()):
         if source_row % _CANCEL_CHECK_INTERVAL == 0:
@@ -215,9 +216,11 @@ def _build_lane(
         if first_timestamp is None:
             first_timestamp = timestamp
         last_timestamp = timestamp
+        event = _pending_event(source_row, frame)
         if synchronization_mode == SYNC_SESSION_START and anchor_timestamp is None:
             anchor_source_row = source_row
             anchor_timestamp = timestamp
+            anchor_event = event
         elif (
             synchronization_mode == SYNC_MESSAGE_KEY
             and anchor_timestamp is None
@@ -226,20 +229,13 @@ def _build_lane(
         ):
             anchor_source_row = source_row
             anchor_timestamp = timestamp
+            anchor_event = event
 
         if source_row % stride == 0:
-            pending.append(
-                _PendingEvent(
-                    source_row=source_row,
-                    sequence=int(frame.sequence),
-                    timestamp_ns=timestamp,
-                    message_key=frame_timeline_message_key(frame),
-                    data_hex=frame.data_hex,
-                    dlc=int(frame.dlc),
-                )
-            )
+            pending.append(event)
 
     _raise_if_cancelled(should_cancel)
+    _retain_anchor_event(pending, anchor_event, max_events=max_events)
     synchronized = anchor_timestamp is not None
     warning = ""
     if total == 0:
@@ -283,6 +279,41 @@ def _build_lane(
         warning=warning,
         events=events,
     )
+
+
+def _pending_event(source_row: int, frame) -> _PendingEvent:
+    return _PendingEvent(
+        source_row=source_row,
+        sequence=int(frame.sequence),
+        timestamp_ns=int(frame.timestamp_ns),
+        message_key=frame_timeline_message_key(frame),
+        data_hex=frame.data_hex,
+        dlc=int(frame.dlc),
+    )
+
+
+def _retain_anchor_event(
+    pending: list[_PendingEvent],
+    anchor_event: _PendingEvent | None,
+    *,
+    max_events: int,
+) -> None:
+    if anchor_event is None:
+        return
+    if any(item.source_row == anchor_event.source_row for item in pending):
+        return
+    if len(pending) < max_events:
+        pending.append(anchor_event)
+    else:
+        replacement_index = min(
+            range(len(pending)),
+            key=lambda index: (
+                abs(pending[index].source_row - anchor_event.source_row),
+                -pending[index].source_row,
+            ),
+        )
+        pending[replacement_index] = anchor_event
+    pending.sort(key=lambda item: item.source_row)
 
 
 def _missing_lane(session_id: str, warning: str) -> ComparisonTimelineLane:
