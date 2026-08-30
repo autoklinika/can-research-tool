@@ -1,0 +1,48 @@
+name: Comparison Timeline Stage 2B Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  comparison-timeline-stage2b:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Stage 2B sources
+        run: >-
+          python -m compileall -q
+          app/comparison_timeline.py
+          app/comparison_timeline_artifacts.py
+          gui/comparison_timeline_view.py
+          gui/comparison_visualization_hardened.py
+          tests/test_comparison_timeline.py
+          tests/test_comparison_timeline_artifacts.py
+          tests_gui/comparison_timeline_smoke.py
+      - name: Verify persistent timeline core
+        run: >-
+          python -m pytest
+          tests/test_comparison_timeline.py
+          tests/test_comparison_timeline_artifacts.py
+          -q
+      - name: Verify persistent timeline GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_timeline_smoke.py
