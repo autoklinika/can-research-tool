@@ -30,13 +30,15 @@ jobs:
           gui/help_center_view.py
           tests/test_signal_discovery.py
           tests/test_session_analysis_service.py
+          tests/test_help_catalog.py
           tests_gui/signal_discovery_smoke.py
           tests_gui/help_center_smoke.py
-      - name: Verify Signal Discovery core
+      - name: Verify Signal Discovery core and Help catalog
         run: >-
           python -m pytest
           tests/test_signal_discovery.py
           tests/test_session_analysis_service.py
+          tests/test_help_catalog.py
           -q --junitxml=signal-discovery-junit.xml
       - name: Verify Signal Discovery production GUI
         run: python tests_gui/signal_discovery_smoke.py
