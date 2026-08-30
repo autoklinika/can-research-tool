@@ -96,11 +96,15 @@ def test_provider_builds_exact_activity_and_bounded_evidence(tmp_path) -> None:
     assert byte0["min_value"] == 0
     assert byte0["max_value"] == 3
     assert byte0["unique_value_count"] == 3
+    assert byte0["transition_opportunity_count"] == 2
     assert byte0["change_count"] == 2
+    assert byte0["change_rate"] == 1.0
     assert byte0["min_source_row"] == 1
     assert byte0["max_source_row"] == 4
     assert byte0["bits"][0]["set_count"] == 2
     assert byte0["bits"][0]["transition_count"] == 1
+    assert byte0["bits"][0]["transition_opportunity_count"] == 2
+    assert byte0["bits"][0]["transition_rate"] == 0.5
     assert byte0["bits"][1]["set_count"] == 1
     assert byte0["bits"][1]["transition_count"] == 1
 
@@ -108,8 +112,12 @@ def test_provider_builds_exact_activity_and_bounded_evidence(tmp_path) -> None:
     assert byte1["present_count"] == 2
     assert byte1["missing_count"] == 1
     # The missing middle byte breaks continuity, so 0x10 -> 0x30 is not counted
-    # as a transition between adjacent observations of the byte.
+    # as a transition between adjacent observations of the byte and there is no
+    # transition opportunity at all for this byte in the example.
+    assert byte1["transition_opportunity_count"] == 0
     assert byte1["change_count"] == 0
+    assert byte1["change_rate"] is None
+    assert byte1["bits"][5]["transition_rate"] is None
 
     sample = payload["sample"]
     assert sample["bounded"] is True
