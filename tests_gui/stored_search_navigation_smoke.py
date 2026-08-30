@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import gc
 import time
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSettings, QThreadPool
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QThreadPool
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
@@ -33,6 +34,15 @@ def _selected_sequence(view: SessionViewWidget) -> int | None:
         return None
     frame = view.frame_model.frame_at(current.row())
     return None if frame is None else frame.sequence
+
+
+def _drain_deferred_deletes(app: QApplication) -> None:
+    QThreadPool.globalInstance().waitForDone(5_000)
+    for _ in range(5):
+        app.sendPostedEvents()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def main() -> None:
@@ -199,8 +209,24 @@ def main() -> None:
         index.close()
         view.shutdown()
         parent.close()
-        app.processEvents()
-        QThreadPool.globalInstance().waitForDone(5_000)
+
+        search.deleteLater()
+        navigator.deleteLater()
+        parent.deleteLater()
+        _drain_deferred_deletes(app)
+
+        navigator = None
+        search = None
+        index = None
+        view = None
+        parent = None
+        controller = None
+        session = None
+        project = None
+        gc.collect()
+        _drain_deferred_deletes(app)
+
+    QSettings().clear()
 
 
 if __name__ == "__main__":

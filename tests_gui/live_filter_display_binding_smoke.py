@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -66,6 +68,15 @@ def _wait_until(predicate, *, timeout_ms: int = 2_000) -> bool:
         elapsed += 20
     QApplication.processEvents()
     return bool(predicate())
+
+
+def _drain_deferred_deletes(app: QApplication) -> None:
+    QThreadPool.globalInstance().waitForDone(5_000)
+    for _ in range(4):
+        app.sendPostedEvents()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def main() -> None:
@@ -135,7 +146,20 @@ def main() -> None:
         assert view.message_model.rowCount() == 0
         assert "Widoczne: 2 / bufor 3" in view.visible_label.text()
 
+        # Windows keeps project.sqlite locked until the complete Qt ownership tree
+        # and queued worker callbacks are destroyed. Closing a top-level widget alone
+        # is not sufficient because it does not imply QObject deletion.
+        view.timer.stop()
         view.close()
+        view.deleteLater()
+        _drain_deferred_deletes(app)
+
+        integration = None
+        view = None
+        container = None
+        project = None
+        gc.collect()
+        _drain_deferred_deletes(app)
 
     app.quit()
 

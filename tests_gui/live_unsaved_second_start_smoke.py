@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gc
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
 from PySide6.QtWidgets import QApplication
 
 from app.capture_service import CapturePaths, CaptureState, CaptureStatus
@@ -54,6 +56,15 @@ class _Controller:
         return True
 
 
+def _drain_deferred_deletes(app: QApplication) -> None:
+    QThreadPool.globalInstance().waitForDone(5_000)
+    for _ in range(5):
+        app.sendPostedEvents()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("Autoklinika-tests")
@@ -62,9 +73,10 @@ def main() -> None:
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(Path(temporary) / "project", name="Second Start")
         controller = _Controller()
-        live = ApplicationContainer(
+        container = ApplicationContainer(
             live_controller_factory=lambda: controller,
-        ).create_live_capture_view(project)
+        )
+        live = container.create_live_capture_view(project)
         live.timer.stop()
 
         temp_dir = project.root / ".crt" / "temp" / "live"
@@ -144,7 +156,15 @@ def main() -> None:
         live.shutdown()
         live.close()
         live.deleteLater()
-        app.processEvents()
+        _drain_deferred_deletes(app)
+
+        integration = None
+        live = None
+        container = None
+        project = None
+        controller = None
+        gc.collect()
+        _drain_deferred_deletes(app)
 
 
 if __name__ == "__main__":

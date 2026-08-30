@@ -7,7 +7,7 @@ from app.project import CrtProject
 
 from .comparison_analysis_dialog import ComparisonAnalysisDialog
 from .comparison_sets_view import ComparisonSetsView
-from .comparison_visualization_stage2d1 import ComparisonVisualizationDialog
+from .comparison_visualization_stage2d2 import ComparisonVisualizationDialog
 from .window_fullscreen import FullScreenController, enable_full_screen
 
 
@@ -52,7 +52,6 @@ class AnalysisEnabledComparisonSetsView(ComparisonSetsView):
         comparison_set = self.selected_comparison_set()
         if comparison_set is None or self._closing:
             return
-
         existing = self._analysis_dialogs.get(comparison_set.id)
         if existing is not None:
             existing.showNormal()

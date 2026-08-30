@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.help_catalog import (
+from app.help_catalog_registry import (
     HELP_CATEGORY_ORDER,
     HELP_TOPICS,
     help_topic,
@@ -45,10 +45,15 @@ def test_search_is_accent_insensitive_and_searches_content() -> None:
     explorer_results = search_help_topics("0x78 final response")
     assert "uds-transactions" in {topic.id for topic in explorer_results}
 
+    timeline_results = search_help_topics("os uds brakujace transakcje")
+    assert timeline_results
+    assert timeline_results[0].id == "uds-timeline"
+
     routine_results = search_help_topics("Routine ID")
     assert {topic.id for topic in routine_results} >= {
         "uds-transactions",
         "uds-basics",
+        "uds-timeline",
     }
 
     assert search_help_topics("") == HELP_TOPICS
@@ -67,6 +72,7 @@ def test_rendered_help_contains_navigation_and_safety_content() -> None:
     home = render_help_home_html()
     assert "Pomoc CAN Research Tool" in home
     assert "help://topic/quick-start" in home
+    assert "help://topic/uds-timeline" in home
     assert "surowe sesje" in home
 
     topic = help_topic("uds-transactions")
@@ -75,6 +81,12 @@ def test_rendered_help_contains_navigation_and_safety_content() -> None:
     assert "comparison_uds_latency" in rendered
     assert "evidence_truncated" in rendered
     assert "help://topic/artifacts" in rendered
+
+    timeline = render_help_topic_html(help_topic("uds-timeline"))
+    assert "Trwała oś transakcji UDS" in timeline
+    assert "Stage 2B" in timeline
+    assert "source_row" in timeline
+    assert "evidence_truncated" in timeline
 
 
 def test_required_program_functions_have_topics() -> None:
@@ -90,6 +102,7 @@ def test_required_program_functions_have_topics() -> None:
         "timing-jitter",
         "uds-latency",
         "uds-transactions",
+        "uds-timeline",
         "artifacts",
         "evidence-navigation",
         "bounded-model",

@@ -6,7 +6,8 @@ on:
 
 jobs:
   preview-capacity-smoke:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,17 +15,33 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Qt runtime
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libegl1
       - name: Install GUI
         run: python -m pip install -q -e ".[gui]"
       - name: Verify bounded Live preview without extra GUI
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_preview_capacity_smoke.py
+        shell: pwsh
+        run: |
+          python tests_gui/live_preview_capacity_smoke.py *> live-preview-capacity.log
+          $result = $LASTEXITCODE
+          Get-Content live-preview-capacity.log
+          exit $result
       - name: Verify Live filtering during active Capture
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests_gui/live_filter_display_binding_smoke.py
+        shell: pwsh
+        run: |
+          python tests_gui/live_filter_display_binding_smoke.py *> live-filter-display-binding.log
+          $result = $LASTEXITCODE
+          Get-Content live-filter-display-binding.log
+          exit $result
+      - name: Upload Windows Live preview diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-preview-windows
+          path: |
+            live-preview-capacity.log
+            live-filter-display-binding.log
+          if-no-files-found: ignore
+          retention-days: 3
