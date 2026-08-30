@@ -59,6 +59,7 @@ class _ByteActivity:
     index: int
     present_count: int = 0
     missing_count: int = 0
+    transition_opportunity_count: int = 0
     change_count: int = 0
     first_value: int | None = None
     last_value: int | None = None
@@ -80,6 +81,7 @@ class _ByteActivity:
             self.first_value = value
             self.first_source_row = source_row
         elif self._previous_value is not None:
+            self.transition_opportunity_count += 1
             if value != self._previous_value:
                 self.change_count += 1
             changed = value ^ self._previous_value
@@ -104,11 +106,12 @@ class _ByteActivity:
 
     def mark_missing(self) -> None:
         self.missing_count += 1
-        # Do not count a transition across a frame where this byte did not exist.
+        # A byte absent from this matching frame breaks observation continuity.
+        # Do not infer a value/bit transition across that gap.
         self._previous_value = None
 
     def to_payload(self) -> dict[str, Any]:
-        transition_denominator = max(0, self.present_count - 1)
+        transition_denominator = self.transition_opportunity_count
         bits = []
         for bit in range(8):
             set_count = self.bit_set_counts[bit]
@@ -119,6 +122,7 @@ class _ByteActivity:
                     "clear_count": self.present_count - set_count,
                     "set_ratio": _ratio(set_count, self.present_count),
                     "transition_count": self.bit_transition_counts[bit],
+                    "transition_opportunity_count": transition_denominator,
                     "transition_rate": _ratio(
                         self.bit_transition_counts[bit], transition_denominator
                     ),
@@ -137,6 +141,7 @@ class _ByteActivity:
             "min_value": self.min_value,
             "max_value": self.max_value,
             "unique_value_count": len(self.unique_values),
+            "transition_opportunity_count": transition_denominator,
             "change_count": self.change_count,
             "change_rate": _ratio(self.change_count, transition_denominator),
             "first_source_row": self.first_source_row,
@@ -204,6 +209,7 @@ class SignalDiscoveryActivityProvider:
 
             processed = source_row + 1
             if processed % _PROGRESS_STRIDE == 0 or processed == expected_frames:
+                context.cancellation.raise_if_cancelled()
                 context.progress.report(
                     processed,
                     progress_total,
@@ -237,6 +243,7 @@ class SignalDiscoveryActivityProvider:
 
             processed = expected_frames + source_row + 1
             if (source_row + 1) % _PROGRESS_STRIDE == 0 or source_row + 1 == expected_frames:
+                context.cancellation.raise_if_cancelled()
                 context.progress.report(
                     processed,
                     progress_total,
