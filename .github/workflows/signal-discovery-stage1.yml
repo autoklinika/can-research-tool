@@ -24,11 +24,14 @@ jobs:
           python -m compileall -q
           app/extensions/builtin/signal_discovery.py
           app/extensions/builtin/__init__.py
+          app/help_catalog_signal_discovery.py
           gui/signal_discovery_view.py
           gui/session_analysis_view.py
+          gui/help_center_view.py
           tests/test_signal_discovery.py
           tests/test_session_analysis_service.py
           tests_gui/signal_discovery_smoke.py
+          tests_gui/help_center_smoke.py
       - name: Verify Signal Discovery core
         run: >-
           python -m pytest
@@ -37,6 +40,8 @@ jobs:
           -q --junitxml=signal-discovery-junit.xml
       - name: Verify Signal Discovery production GUI
         run: python tests_gui/signal_discovery_smoke.py
+      - name: Verify Signal Discovery Help Center
+        run: python tests_gui/help_center_smoke.py
       - name: Upload core diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
