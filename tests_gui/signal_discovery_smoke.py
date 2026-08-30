@@ -70,6 +70,7 @@ def main() -> int:
         assert widget.tabs.tabText(widget.signal_discovery_tab_index) == "Signal Discovery"
         assert discovery.run_button.isEnabled()
         assert discovery.activity_table.columnCount() == 13
+        assert discovery.activity_table.horizontalHeaderItem(12).text() == "B1/B0"
 
         widget.tabs.setCurrentIndex(widget.signal_discovery_tab_index)
         discovery.can_id_edit.setText("123")
@@ -88,6 +89,9 @@ def main() -> int:
         assert discovery._payload is not None
         assert discovery._payload["summary"]["first_source_row"] == 1
         assert discovery._payload["summary"]["last_source_row"] == 4
+        last_bit_cell = discovery.activity_table.item(0, 12)
+        assert last_bit_cell is not None
+        assert "B1 " in last_bit_cell.text() and "B0 " in last_bit_cell.text()
         assert len(discovery.plot._series) == 3
         assert [point["source_row"] for point in discovery.plot._series] == [1, 3, 4]
         assert _sha256(session_path) == source_hash
