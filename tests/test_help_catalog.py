@@ -9,6 +9,7 @@ from app.help_catalog import (
     render_help_topic_html,
     search_help_topics,
 )
+from app.help_catalog_signal_discovery import SIGNAL_DISCOVERY_HELP_TOPIC
 
 
 def test_help_catalog_is_complete_and_consistent() -> None:
@@ -32,6 +33,41 @@ def test_help_catalog_is_complete_and_consistent() -> None:
         assert topic.summary.strip()
         assert topic.sections
         assert set(topic.related).issubset(known_ids)
+
+
+def test_signal_discovery_feature_topic_is_consistent_with_help_catalog() -> None:
+    topic = SIGNAL_DISCOVERY_HELP_TOPIC
+    known_ids = {item.id for item in HELP_TOPICS}
+    assert topic.id == "signal-discovery"
+    assert topic.category in HELP_CATEGORY_ORDER
+    assert topic.title.strip()
+    assert topic.summary.strip()
+    assert topic.sections
+    assert set(topic.related).issubset(known_ids)
+    text = " ".join(
+        (
+            topic.title,
+            topic.summary,
+            " ".join(topic.keywords),
+            *(
+                value
+                for section in topic.sections
+                for value in (
+                    section.title,
+                    *section.paragraphs,
+                    *section.bullets,
+                    *section.steps,
+                    section.note,
+                    section.warning,
+                )
+                if value
+            ),
+        )
+    )
+    assert "source_row" in text
+    assert "Motorola" in text
+    assert "5000" in text
+    assert "pasyw" in text.casefold()
 
 
 def test_search_is_accent_insensitive_and_searches_content() -> None:
