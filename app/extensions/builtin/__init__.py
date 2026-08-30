@@ -30,12 +30,25 @@ from .session_statistics import (
     SESSION_STATISTICS_PROVIDER_VERSION,
     SessionStatisticsProvider,
 )
+from .signal_discovery import (
+    SIGNAL_DISCOVERY_ALGORITHM_VERSION,
+    SIGNAL_DISCOVERY_ARTIFACT_SCHEMA_VERSION,
+    SIGNAL_DISCOVERY_PROVIDER_ID,
+    SIGNAL_DISCOVERY_PROVIDER_VERSION,
+    SignalDiscoveryActivityProvider,
+)
 
 
-def builtin_analysis_providers() -> tuple[SessionStatisticsProvider, ...]:
+def builtin_analysis_providers() -> tuple[
+    SessionStatisticsProvider | SignalDiscoveryActivityProvider,
+    ...,
+]:
     """Return trusted single-session providers without global discovery."""
 
-    return (SessionStatisticsProvider(),)
+    return (
+        SessionStatisticsProvider(),
+        SignalDiscoveryActivityProvider(),
+    )
 
 
 def builtin_comparison_providers() -> tuple[
@@ -96,6 +109,11 @@ __all__ = [
     "SESSION_STATISTICS_PROVIDER_ID",
     "SESSION_STATISTICS_PROVIDER_VERSION",
     "SessionStatisticsProvider",
+    "SIGNAL_DISCOVERY_ALGORITHM_VERSION",
+    "SIGNAL_DISCOVERY_ARTIFACT_SCHEMA_VERSION",
+    "SIGNAL_DISCOVERY_PROVIDER_ID",
+    "SIGNAL_DISCOVERY_PROVIDER_VERSION",
+    "SignalDiscoveryActivityProvider",
     "builtin_analysis_providers",
     "builtin_comparison_providers",
     "register_builtin_comparison_extensions",
