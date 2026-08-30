@@ -24,7 +24,12 @@ def test_extract_bitfield_motorola_uses_candb_sawtooth_start_bit() -> None:
 
     assert extract_bitfield(payload, start_bit=7, length=16, byte_order="motorola") == 0x1234
     assert extract_bitfield(payload, start_bit=23, length=8, byte_order="motorola", signed=True) == -128
-    assert extract_bitfield(payload, start_bit=0, length=9, byte_order="motorola") is None
+    # CANdb++ saw-tooth semantics: after bit 0 the next bit is bit 7 of the
+    # following byte, therefore start_bit=0,length=9 is valid for this payload.
+    assert extract_bitfield(payload, start_bit=0, length=9, byte_order="motorola") == 0x34
+    # Starting at bit 0 of the final byte would need to jump to a non-existent
+    # fourth byte for the second bit.
+    assert extract_bitfield(payload, start_bit=16, length=2, byte_order="motorola") is None
 
 
 def test_bitfield_series_preserves_exact_source_rows_and_scaling() -> None:
