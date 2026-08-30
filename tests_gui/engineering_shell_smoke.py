@@ -65,7 +65,14 @@ def main() -> None:
         assert window.tabs.objectName() == "workspaceTabs"
 
         menu_names = [action.text() for action in window.menuBar().actions()]
-        assert menu_names == ["Plik", "Widok", "Capture", "Analiza", "Narzędzia"]
+        assert menu_names == [
+            "Plik",
+            "Widok",
+            "Capture",
+            "Analiza",
+            "Narzędzia",
+            "Pomoc",
+        ]
         view_menu = next(
             action.menu()
             for action in window.menuBar().actions()
@@ -74,6 +81,15 @@ def main() -> None:
         assert view_menu is not None
         assert "Narzędzia główne" in [action.text() for action in view_menu.actions()]
         assert window.toggle_explorer_action in view_menu.actions()
+
+        help_menu = next(
+            action.menu()
+            for action in window.menuBar().actions()
+            if action.text().replace("&", "") == "Pomoc"
+        )
+        assert help_menu is not None
+        assert window.help_action in help_menu.actions()
+        assert window.help_action.shortcut().toString() == "F1"
 
         assert (
             window.toggle_explorer_action.shortcut().toString()
@@ -244,6 +260,7 @@ def main() -> None:
         collapse_button = None
         close_button = None
         view_menu = None
+        help_menu = None
         explorer_layout = None
         root = None
         window = None

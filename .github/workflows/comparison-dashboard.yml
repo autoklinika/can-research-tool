@@ -1,0 +1,42 @@
+name: Comparison Dashboard Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  comparison-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile comparison sources
+        run: >-
+          python -m compileall -q
+          app/comparison_evidence.py
+          gui/comparison_evidence_navigation.py
+          gui/comparison_evidence_stored_navigation.py
+          gui/comparison_sets_analysis_view.py
+          gui/comparison_sets_shell.py
+          gui/comparison_visualization_charts.py
+          gui/comparison_visualization_hardened.py
+          gui/comparison_visualization_model.py
+          tests/test_comparison_evidence.py
+          tests_gui/comparison_visualization_hardened_smoke.py
+      - name: Verify comparison evidence and model
+        run: python -m pytest tests/test_comparison_evidence.py -q
+      - name: Verify production comparison dialog
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests_gui/comparison_visualization_hardened_smoke.py

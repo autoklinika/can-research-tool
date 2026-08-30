@@ -1,0 +1,71 @@
+name: Comparison UDS Transaction Explorer Stage 2D1 Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  comparison-uds-transaction-explorer-stage2d1:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Stage 2D1 sources
+        run: >-
+          python -m compileall -q
+          app/comparison_uds_transaction_explorer.py
+          app/comparison_uds_explorer_source.py
+          gui/comparison_uds_transaction_explorer_view.py
+          gui/comparison_uds_transaction_explorer_source_view.py
+          gui/comparison_visualization_stage2d1.py
+          gui/comparison_sets_analysis_view.py
+          tests/test_comparison_uds_transaction_explorer.py
+          tests/test_comparison_uds_explorer_source.py
+          tests_gui/comparison_uds_transaction_explorer_smoke.py
+          tests_gui/comparison_uds_explorer_source_smoke.py
+      - name: Verify UDS transaction explorer core and artifact selection
+        run: >-
+          python -m pytest
+          tests/test_comparison_uds_transaction_explorer.py
+          tests/test_comparison_uds_explorer_source.py
+          -q
+      - name: Verify UDS transaction explorer GUI
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set +e
+          {
+            python tests_gui/comparison_uds_transaction_explorer_smoke.py
+            first_status=$?
+            python tests_gui/comparison_uds_explorer_source_smoke.py
+            second_status=$?
+            if [ $first_status -ne 0 ]; then exit $first_status; fi
+            exit $second_status
+          } > stage2d1-gui.log 2>&1
+          status=$?
+          cat stage2d1-gui.log
+          exit $status
+      - name: Upload Stage 2D1 GUI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2d1-gui-${{ runner.os }}
+          path: stage2d1-gui.log
+          retention-days: 3
