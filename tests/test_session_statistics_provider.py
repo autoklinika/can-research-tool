@@ -30,13 +30,14 @@ from app.session_stream import SessionStreamWriter
 def test_builtin_registry_exposes_session_statistics_provider() -> None:
     registry = ExtensionRegistry()
     manifests = register_builtin_extensions(registry)
+    manifests_by_id = {manifest.id: manifest for manifest in manifests}
 
-    assert len(manifests) == 1
-    assert manifests[0] == SessionStatisticsProvider.manifest
-    assert manifests[0].id == SESSION_STATISTICS_PROVIDER_ID
-    assert manifests[0].inputs == ("session",)
-    assert manifests[0].outputs == ("session_statistics",)
-    assert registry.get_analysis(SESSION_STATISTICS_PROVIDER_ID).manifest == manifests[0]
+    assert SESSION_STATISTICS_PROVIDER_ID in manifests_by_id
+    manifest = manifests_by_id[SESSION_STATISTICS_PROVIDER_ID]
+    assert manifest == SessionStatisticsProvider.manifest
+    assert manifest.inputs == ("session",)
+    assert manifest.outputs == ("session_statistics",)
+    assert registry.get_analysis(SESSION_STATISTICS_PROVIDER_ID).manifest == manifest
 
 
 def test_session_statistics_are_persistent_deterministic_and_evidence_linked(tmp_path) -> None:
