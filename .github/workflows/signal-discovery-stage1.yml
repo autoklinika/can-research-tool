@@ -8,6 +8,8 @@ jobs:
   signal-discovery:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,12 +28,15 @@ jobs:
           gui/session_analysis_view.py
           tests/test_signal_discovery.py
           tests/test_session_analysis_service.py
+          tests_gui/signal_discovery_smoke.py
       - name: Verify Signal Discovery core
         run: >-
           python -m pytest
           tests/test_signal_discovery.py
           tests/test_session_analysis_service.py
           -q --junitxml=signal-discovery-junit.xml
+      - name: Verify Signal Discovery production GUI
+        run: python tests_gui/signal_discovery_smoke.py
       - name: Upload core diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
