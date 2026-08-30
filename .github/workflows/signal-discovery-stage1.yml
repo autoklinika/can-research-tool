@@ -1,0 +1,41 @@
+name: Signal Discovery Stage 1 Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  signal-discovery:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Signal Discovery sources
+        run: >-
+          python -m compileall -q
+          app/extensions/builtin/signal_discovery.py
+          app/extensions/builtin/__init__.py
+          gui/signal_discovery_view.py
+          gui/session_analysis_view.py
+          tests/test_signal_discovery.py
+          tests/test_session_analysis_service.py
+      - name: Verify Signal Discovery core
+        run: >-
+          python -m pytest
+          tests/test_signal_discovery.py
+          tests/test_session_analysis_service.py
+          -q --junitxml=signal-discovery-junit.xml
+      - name: Upload core diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-discovery-core-windows
+          path: signal-discovery-junit.xml
+          retention-days: 3
