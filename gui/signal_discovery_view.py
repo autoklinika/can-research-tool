@@ -532,7 +532,7 @@ class SignalDiscoveryView(QWidget):
                 str(byte.get("unique_value_count", 0)),
                 _percent(change_rate),
             ]
-            for bit_index in range(7, 0, -1):
+            for bit_index in range(7, 1, -1):
                 values.append(_format_bit(bit_map.get(bit_index)))
             values.append(
                 f"B1 {_format_bit(bit_map.get(1))} | B0 {_format_bit(bit_map.get(0))}"
