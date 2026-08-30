@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
 
 from app.domain import Artifact
 from app.extensions import CancellationToken, ExtensionCancelled, ProgressUpdate
+from app.extensions.builtin import SIGNAL_DISCOVERY_PROVIDER_ID
 from app.project import CrtProject
 from app.session_analysis_service import AnalysisExecutionResult, SessionAnalysisService
 
 from .detailed_logical_session_view import DetailedLogicalSessionViewWidget
+from .signal_discovery_view import SignalDiscoveryView
 
 
 class SessionAnalysisSignals(QObject):
@@ -82,6 +84,7 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         self._analysis_task: SessionAnalysisTask | None = None
         self._analysis_artifacts: tuple[Artifact, ...] = ()
         self._session_record = None
+        self.signal_discovery_view: SignalDiscoveryView | None = None
         super().__init__(*args, **kwargs)
 
         if project is not None:
@@ -89,6 +92,7 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
             if self._session_record is not None:
                 self._analysis_service = SessionAnalysisService(project)
         self._build_analysis_workspace()
+        self._build_signal_discovery_workspace()
         self._refresh_artifacts()
 
     def _build_analysis_workspace(self) -> None:
@@ -106,6 +110,9 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         service = self._analysis_service
         if service is not None:
             for manifest in service.available_session_analyses():
+                # Signal Discovery has a dedicated parameterized workspace below.
+                if manifest.id == SIGNAL_DISCOVERY_PROVIDER_ID:
+                    continue
                 self.analysis_provider_combo.addItem(manifest.name, manifest.id)
         controls.addWidget(self.analysis_provider_combo)
 
@@ -194,6 +201,16 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
             self.analysis_status.setText(
                 "Gotowe. Analiza działa pasywnie na niezmiennym pliku zapisanej sesji."
             )
+
+    def _build_signal_discovery_workspace(self) -> None:
+        view = SignalDiscoveryView(
+            service=self._analysis_service,
+            session_record=self._session_record,
+            session_view=self,
+            parent=self.tabs,
+        )
+        self.signal_discovery_view = view
+        self.signal_discovery_tab_index = self.tabs.addTab(view, "Signal Discovery")
 
     @Slot()
     def _start_analysis(self) -> None:
@@ -349,6 +366,8 @@ class AnalysisEnabledSessionViewWidget(DetailedLogicalSessionViewWidget):
         task = self._analysis_task
         if task is not None:
             task.cancel()
+        if self.signal_discovery_view is not None:
+            self.signal_discovery_view.shutdown()
         super().shutdown()
 
 
