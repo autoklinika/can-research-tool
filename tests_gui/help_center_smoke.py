@@ -49,11 +49,14 @@ def main() -> None:
     _drain(app)
     assert help_view.current_topic_id == "signal-discovery"
     signal_content = help_view.browser.toPlainText()
+    assert "Signal Discovery — aktywność bitów i ręczny bitfield" in signal_content
     assert "Byte / Bit Activity Map" in signal_content
+    assert "Intel" in signal_content
     assert "Motorola" in signal_content
     assert "5000" in signal_content
     assert "source_row" in signal_content
     assert "nie generuje transmisji CAN" in signal_content
+    assert "nie tworzy jeszcze Signal Hypothesis ani Draft DBC" in signal_content
 
     help_view.open_topic("uds-transactions")
     _drain(app)
