@@ -24,10 +24,12 @@ jobs:
           python -m compileall -q
           app/extensions/builtin/experiment_marker_correlation.py
           app/experiment_diff_service.py
+          app/help_catalog_experiment_diff.py
           gui/experiment_diff_view.py
           gui/comparison_visualization_stage2d1.py
           tests/test_experiment_marker_correlation.py
           tests_gui/experiment_diff_smoke.py
+          tests_gui/help_center_smoke.py
       - name: Verify Experiment Diff core
         run: >-
           python -m pytest
@@ -35,6 +37,8 @@ jobs:
           -q --junitxml=experiment-diff-junit.xml
       - name: Verify Experiment Diff production GUI
         run: python tests_gui/experiment_diff_smoke.py
+      - name: Verify Experiment Diff Help Center
+        run: python tests_gui/help_center_smoke.py
       - name: Upload core diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
