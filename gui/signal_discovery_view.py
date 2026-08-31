@@ -284,7 +284,7 @@ class SignalDiscoveryView(QWidget):
         self.summary_label.setWordWrap(True)
         activity_layout.addWidget(self.summary_label)
 
-        self.activity_table = QTableWidget(0, 13, activity_group)
+        self.activity_table = QTableWidget(0, 14, activity_group)
         self.activity_table.setObjectName("signalDiscoveryActivityTable")
         self.activity_table.setHorizontalHeaderLabels(
             (
@@ -300,7 +300,8 @@ class SignalDiscoveryView(QWidget):
                 "B4",
                 "B3",
                 "B2",
-                "B1/B0",
+                "B1",
+                "B0",
             )
         )
         self.activity_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -309,7 +310,10 @@ class SignalDiscoveryView(QWidget):
         self.activity_table.verticalHeader().hide()
         header = self.activity_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setStretchLastSection(True)
+        for column in range(6, 14):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            self.activity_table.setColumnWidth(column, 68)
+        header.setStretchLastSection(False)
         activity_layout.addWidget(self.activity_table, 1)
 
         evidence_row = QHBoxLayout()
@@ -532,11 +536,8 @@ class SignalDiscoveryView(QWidget):
                 str(byte.get("unique_value_count", 0)),
                 _percent(change_rate),
             ]
-            for bit_index in range(7, 1, -1):
+            for bit_index in range(7, -1, -1):
                 values.append(_format_bit(bit_map.get(bit_index)))
-            values.append(
-                f"B1 {_format_bit(bit_map.get(1))} | B0 {_format_bit(bit_map.get(0))}"
-            )
             for column, text in enumerate(values):
                 self.activity_table.setItem(row_index, column, QTableWidgetItem(text))
 
