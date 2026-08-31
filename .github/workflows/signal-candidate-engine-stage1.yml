@@ -25,6 +25,7 @@ jobs:
           app/extensions/manifest.py
           app/extensions/registry.py
           app/extensions/contracts.py
+          app/extensions/writers.py
           app/extensions/__init__.py
           app/extensions/builtin/signal_candidate_engine.py
           app/session_analysis_service.py
