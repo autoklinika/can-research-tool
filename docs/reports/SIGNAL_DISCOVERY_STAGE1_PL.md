@@ -274,7 +274,32 @@ Ten etap nie implementuje jeszcze:
 
 ---
 
-## 9. Warunek zamknięcia etapu
+## 9. Ręczny test na rzeczywistej sesji — 2026-08-31
+
+Pierwszy test użytkownika na Windows wykonano na rzeczywistej zapisanej sesji CAN dla:
+
+`0x1AFFB680`, EXT 29-bit, data, kanał 0.
+
+Zaobserwowano:
+
+- 2401 pasujących ramek,
+- DLC 8..8,
+- dla Byte 0 zakres `0x60..0xB2`, 36 unikalnych wartości,
+- wykres `start_bit=0`, `length=8`, Intel, unsigned, scale 1, offset 0 daje ten sam zakres: min 96 (`0x60`), max 178 (`0xB2`),
+- `Otwórz ramkę MIN` prowadzi do dokładnej źródłowej ramki zawierającej wartość minimalną,
+- `Otwórz ramkę MAX` prowadzi do dokładnej źródłowej ramki zawierającej wartość maksymalną.
+
+Wynik: **MIN/MAX evidence navigation — ręcznie potwierdzone na rzeczywistym logu.**
+
+Pozostało do ręcznego potwierdzenia w tym etapie:
+
+1. kliknięcie punktu wykresu i przejście do dokładnej ramki `source_row`,
+2. czytelność tabeli Activity Map — wizualnie kolumny bitów B1/B0 wymagają jeszcze oceny/poprawki layoutu,
+3. ręczne sprawdzenie artykułu Help Center.
+
+---
+
+## 10. Warunek zamknięcia etapu
 
 Przed uznaniem Stage 1 za ręcznie zaakceptowany wymagane są:
 
