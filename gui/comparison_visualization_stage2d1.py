@@ -5,6 +5,7 @@ from PySide6.QtCore import Slot
 # Import registers feature-owned articles in the legacy shared Help catalog.
 from app.help_catalog_experiment_diff import EXPERIMENT_DIFF_HELP_TOPIC as _EXPERIMENT_DIFF_HELP_TOPIC
 from app.help_catalog_signal_candidates import SIGNAL_CANDIDATES_HELP_TOPIC as _SIGNAL_CANDIDATES_HELP_TOPIC
+from app.help_catalog_signal_hypothesis import SIGNAL_HYPOTHESIS_HELP_TOPIC as _SIGNAL_HYPOTHESIS_HELP_TOPIC
 
 from .comparison_uds_transaction_explorer_source_view import (
     PreferredSourceUdsTransactionExplorerView,
@@ -14,6 +15,7 @@ from .comparison_visualization_stage2c2 import (
 )
 from .experiment_diff_view import ExperimentDiffView
 from .signal_candidates_view import SignalCandidatesView
+from .signal_hypothesis_view import SignalHypothesisView
 
 
 class _SelectionSafeUdsTransactionExplorerView(
@@ -31,7 +33,7 @@ class _SelectionSafeUdsTransactionExplorerView(
 
 
 class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
-    """Comparison dialog extended with UDS explorer and signal discovery workflows."""
+    """Comparison dialog extended with UDS and signal reverse-engineering workflows."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -67,6 +69,22 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.signal_candidates.output_message.connect(self.output_message.emit)
         self.result_tabs.insertTab(6, self.signal_candidates, "Signal Candidates")
 
+        self.signal_hypothesis = SignalHypothesisView(
+            self.project,
+            self.comparison_set,
+            self.result_tabs,
+        )
+        self.signal_hypothesis.output_message.connect(self.output_message.emit)
+        self.result_tabs.insertTab(7, self.signal_hypothesis, "Signal Hypothesis")
+
+    def _set_signal_workspaces_enabled(self, enabled: bool) -> None:
+        if hasattr(self, "experiment_diff"):
+            self.experiment_diff.setEnabled(enabled)
+        if hasattr(self, "signal_candidates"):
+            self.signal_candidates.setEnabled(enabled)
+        if hasattr(self, "signal_hypothesis"):
+            self.signal_hypothesis.setEnabled(enabled)
+
     @Slot(str, int, str)
     def _prepare_timeline_evidence(
         self,
@@ -84,10 +102,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
             self.uds_latency.setEnabled(False)
             if hasattr(self, "uds_explorer"):
                 self.uds_explorer.setEnabled(False)
-            if hasattr(self, "experiment_diff"):
-                self.experiment_diff.setEnabled(False)
-            if hasattr(self, "signal_candidates"):
-                self.signal_candidates.setEnabled(False)
+            self._set_signal_workspaces_enabled(False)
 
     @Slot(str, int, str)
     def _prepare_timing_evidence(
@@ -105,10 +120,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
             self.uds_latency.setEnabled(False)
             if hasattr(self, "uds_explorer"):
                 self.uds_explorer.setEnabled(False)
-            if hasattr(self, "experiment_diff"):
-                self.experiment_diff.setEnabled(False)
-            if hasattr(self, "signal_candidates"):
-                self.signal_candidates.setEnabled(False)
+            self._set_signal_workspaces_enabled(False)
 
     @Slot(str, int, str)
     def _prepare_uds_latency_evidence(
@@ -124,10 +136,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         )
         if hasattr(self, "uds_explorer"):
             self.uds_explorer.setEnabled(False)
-        if hasattr(self, "experiment_diff"):
-            self.experiment_diff.setEnabled(False)
-        if hasattr(self, "signal_candidates"):
-            self.signal_candidates.setEnabled(False)
+        self._set_signal_workspaces_enabled(False)
 
     @Slot(str, int, str)
     def _prepare_uds_explorer_evidence(
@@ -144,10 +153,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.timing.setEnabled(False)
         self.uds_latency.setEnabled(False)
         self.uds_explorer.setEnabled(False)
-        if hasattr(self, "experiment_diff"):
-            self.experiment_diff.setEnabled(False)
-        if hasattr(self, "signal_candidates"):
-            self.signal_candidates.setEnabled(False)
+        self._set_signal_workspaces_enabled(False)
         self._set_evidence_running(True)
         self.status_label.setText(
             f"Otwieram ramkę {source_row + 1} z eksploratora UDS. "
@@ -175,9 +181,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.timing.setEnabled(False)
         self.uds_latency.setEnabled(False)
         self.uds_explorer.setEnabled(False)
-        self.experiment_diff.setEnabled(False)
-        if hasattr(self, "signal_candidates"):
-            self.signal_candidates.setEnabled(False)
+        self._set_signal_workspaces_enabled(False)
         self._set_evidence_running(True)
         self.status_label.setText(
             f"Otwieram ramkę {source_row + 1} z Experiment Diff. "
@@ -205,8 +209,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.timing.setEnabled(False)
         self.uds_latency.setEnabled(False)
         self.uds_explorer.setEnabled(False)
-        self.experiment_diff.setEnabled(False)
-        self.signal_candidates.setEnabled(False)
+        self._set_signal_workspaces_enabled(False)
         self._set_evidence_running(True)
         self.status_label.setText(
             f"Otwieram ramkę {source_row + 1} z Signal Candidates. "
@@ -226,8 +229,7 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.timing.setEnabled(True)
         self.uds_latency.setEnabled(True)
         self.uds_explorer.setEnabled(True)
-        self.experiment_diff.setEnabled(True)
-        self.signal_candidates.setEnabled(True)
+        self._set_signal_workspaces_enabled(True)
 
     @Slot(str)
     def evidence_navigation_failed(self, error: str) -> None:
@@ -236,19 +238,20 @@ class ComparisonVisualizationDialog(_BaseComparisonVisualizationDialog):
         self.timing.setEnabled(True)
         self.uds_latency.setEnabled(True)
         self.uds_explorer.setEnabled(True)
-        self.experiment_diff.setEnabled(True)
-        self.signal_candidates.setEnabled(True)
+        self._set_signal_workspaces_enabled(True)
 
     def close_for_project_change(self) -> None:
         self.uds_explorer.cancel_all()
         self.experiment_diff.cancel_all()
         self.signal_candidates.cancel_all()
+        self.signal_hypothesis.cancel_all()
         super().close_for_project_change()
 
     def closeEvent(self, event) -> None:
         self.uds_explorer.cancel_all()
         self.experiment_diff.cancel_all()
         self.signal_candidates.cancel_all()
+        self.signal_hypothesis.cancel_all()
         super().closeEvent(event)
 
 
