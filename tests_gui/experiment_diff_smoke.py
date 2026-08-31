@@ -69,7 +69,7 @@ def main() -> int:
 
         view.table.selectRow(0)
         _drain(app)
-        assert view.evidence_combo.count() == 2
+        assert view.evidence_combo.count() == 4
         assert view.open_before_button.isEnabled()
         assert view.open_after_button.isEnabled()
 
@@ -79,14 +79,29 @@ def main() -> int:
                 (session_id, source_row, message_key)
             )
         )
+
+        # First evidence row is a changed target experiment.
         view.open_before_button.click()
         view.open_after_button.click()
         _drain(app)
-        assert len(requests) == 2
         assert requests[0][1] == 0
         assert requests[1][1] == 1
         assert requests[0][2] == "0:STD:123:data"
         assert requests[1][2] == "0:STD:123:data"
+
+        # Control evidence is preserved even though the candidate did not change.
+        view.evidence_combo.setCurrentIndex(2)
+        _drain(app)
+        assert "CTRL" in view.evidence_combo.currentText()
+        assert "stan 1→1" in view.evidence_label.text()
+        view.open_before_button.click()
+        view.open_after_button.click()
+        _drain(app)
+        assert len(requests) == 4
+        assert requests[2][1] == 2
+        assert requests[3][1] == 3
+        assert requests[2][2] == "0:STD:123:data"
+        assert requests[3][2] == "0:STD:123:data"
 
         for session_id, expected in hashes.items():
             record = next(item for item in project.list_sessions() if item.id == session_id)
