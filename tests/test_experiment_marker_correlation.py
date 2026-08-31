@@ -80,12 +80,27 @@ def test_repeated_target_change_is_ranked_above_unchanged_controls(tmp_path: Pat
     assert candidate["timing"]["median_delay_ns"] == pytest.approx(14_000_000.0)
 
     evidence = candidate["evidence"]
-    assert len(evidence) == 2
-    assert {item["session_id"] for item in evidence} == {first.id, second.id}
-    assert all(item["group"] == "target" for item in evidence)
-    assert all(item["before"]["source_row"] == 0 for item in evidence)
-    assert all(item["after"]["source_row"] == 1 for item in evidence)
-    assert sorted(item["delay_ns"] for item in evidence) == [12_000_000, 16_000_000]
+    assert candidate["evidence_event_count"] == 4
+    assert candidate["evidence_changed_event_count"] == 2
+    assert not candidate["evidence_truncated"]
+    assert len(evidence) == 4
+
+    target_evidence = [item for item in evidence if item["group"] == "target"]
+    assert len(target_evidence) == 2
+    assert {item["session_id"] for item in target_evidence} == {first.id, second.id}
+    assert all(item["changed"] for item in target_evidence)
+    assert all(item["before"]["source_row"] == 0 for item in target_evidence)
+    assert all(item["after"]["source_row"] == 1 for item in target_evidence)
+    assert sorted(item["delay_ns"] for item in target_evidence) == [12_000_000, 16_000_000]
+
+    control_evidence = [item for item in evidence if item["group"] == "control"]
+    assert len(control_evidence) == 2
+    assert {item["session_id"] for item in control_evidence} == {first.id, second.id}
+    assert all(not item["changed"] for item in control_evidence)
+    assert all(item["before_state"] == 1 and item["after_state"] == 1 for item in control_evidence)
+    assert all(item["before"]["source_row"] == 2 for item in control_evidence)
+    assert all(item["after"]["source_row"] == 3 for item in control_evidence)
+    assert all(item["delay_ns"] is None for item in control_evidence)
 
     for session_id, expected_hash in source_hashes.items():
         record = next(item for item in project.list_sessions() if item.id == session_id)
