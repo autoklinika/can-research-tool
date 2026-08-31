@@ -35,7 +35,7 @@ def main() -> None:
     assert isinstance(help_view, HelpCenterWidget)
     assert window.tabs.count() == initial_count + 1
     assert "Pomoc CAN Research Tool" in help_view.browser.toPlainText()
-    assert len(help_view.visible_topic_ids) >= 26
+    assert len(help_view.visible_topic_ids) >= 27
 
     help_view.search_edit.setText("jitter percentyl")
     _drain(app)
@@ -57,6 +57,20 @@ def main() -> None:
     assert "source_row" in signal_content
     assert "nie generuje transmisji CAN" in signal_content
     assert "nie tworzy jeszcze Signal Hypothesis ani Draft DBC" in signal_content
+
+    help_view.search_edit.setText("experiment diff marker correlation control")
+    _drain(app)
+    assert "experiment-diff-marker-correlation" in help_view.visible_topic_ids
+    help_view.open_topic("experiment-diff-marker-correlation")
+    _drain(app)
+    assert help_view.current_topic_id == "experiment-diff-marker-correlation"
+    experiment_content = help_view.browser.toPlainText()
+    assert "Experiment Diff — korelacja zmian z markerami" in experiment_content
+    assert "Target 7/7" in experiment_content
+    assert "Control 0/5" in experiment_content
+    assert "source_row" in experiment_content
+    assert "AI nie uczestniczy" in experiment_content
+    assert "nie wykonuje żadnego CAN TX" in experiment_content
 
     help_view.open_topic("uds-transactions")
     _drain(app)
