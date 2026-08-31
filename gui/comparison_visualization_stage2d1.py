@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Slot
 
+# Import registers the feature-owned article in the legacy shared Help catalog.
+from app.help_catalog_experiment_diff import EXPERIMENT_DIFF_HELP_TOPIC as _EXPERIMENT_DIFF_HELP_TOPIC
+
 from .comparison_uds_transaction_explorer_source_view import (
     PreferredSourceUdsTransactionExplorerView,
 )
