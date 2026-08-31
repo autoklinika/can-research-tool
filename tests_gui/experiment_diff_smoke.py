@@ -188,10 +188,25 @@ def _wait_until(app: QApplication, predicate, *, timeout_s: float) -> None:
 
 
 def _drain(app: QApplication, cycles: int = 12) -> None:
-    QThreadPool.globalInstance().waitForDone(5_000)
+    # Flush queued QTimer/singleShot callbacks before waiting. Some comparison
+    # tabs schedule background artifact loads during construction; waiting first
+    # would miss a task that starts on the next processEvents() cycle and could
+    # leave project.sqlite open while TemporaryDirectory is being removed.
     for _ in range(cycles):
         app.processEvents()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+    pool = QThreadPool.globalInstance()
+    pool.waitForDone(5_000)
+
+    # Deliver completion/deletion signals emitted by workers, then perform one
+    # final wait in case those callbacks schedule bounded follow-up work.
+    for _ in range(cycles):
+        app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    pool.waitForDone(5_000)
     app.processEvents()
 
 
