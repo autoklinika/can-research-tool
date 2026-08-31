@@ -58,7 +58,7 @@ class ArtifactWriter:
         metadata: Mapping[str, Any] | None = None,
     ) -> Artifact:
         content = json.dumps(
-            payload,
+            _materialize_json(payload),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -167,6 +167,16 @@ class FindingWriter:
             algorithm_version=self._algorithm_version,
             operator_comment=operator_comment,
         )
+
+
+def _materialize_json(value: Any) -> Any:
+    """Convert immutable Mapping/Sequence projections into JSON-native containers."""
+
+    if isinstance(value, Mapping):
+        return {str(key): _materialize_json(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_materialize_json(item) for item in value]
+    return value
 
 
 def _validate_filename(filename: str) -> str:

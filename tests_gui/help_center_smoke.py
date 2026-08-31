@@ -72,6 +72,22 @@ def main() -> None:
     assert "AI nie uczestniczy" in experiment_content
     assert "nie wykonuje żadnego CAN TX" in experiment_content
 
+    help_view.search_edit.setText("signal candidate strong medium weak artifact")
+    _drain(app)
+    assert "signal-candidate-engine" in help_view.visible_topic_ids
+    help_view.open_topic("signal-candidate-engine")
+    _drain(app)
+    assert help_view.current_topic_id == "signal-candidate-engine"
+    candidate_content = help_view.browser.toPlainText()
+    assert "Signal Candidate Engine — ranking kandydatów sygnałów" in candidate_content
+    assert "strong / medium / weak" in candidate_content
+    assert "artifact.read" in candidate_content
+    assert "nie skanuje ponownie RAW CAN" in candidate_content
+    assert "source_row" in candidate_content
+    assert "AI nie uczestniczy w Candidate Engine Stage 1" in candidate_content
+    assert "Signal Hypothesis Stage 1" in candidate_content
+    assert "nie generuje żadnej transmisji CAN" in candidate_content
+
     help_view.open_topic("uds-transactions")
     _drain(app)
     assert help_view.current_topic_id == "uds-transactions"

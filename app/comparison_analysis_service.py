@@ -13,6 +13,7 @@ from .extensions import (
     CancellationToken,
     ComparisonContext,
     ExtensionManifest,
+    ExtensionPermission,
     ExtensionRegistry,
     ExtensionRunner,
     ExtensionType,
@@ -105,7 +106,13 @@ class ComparisonAnalysisService:
         token = cancellation or CancellationToken()
         progress = ProgressReporter(progress_callback)
         context = AnalysisContext(
-            project=ProjectContext(self.project, token),
+            project=ProjectContext(
+                self.project,
+                token,
+                artifact_read_enabled=(
+                    ExtensionPermission.ARTIFACT_READ in manifest.permissions
+                ),
+            ),
             analysis_run_id=run.id,
             inputs=(analysis_input,),
             cancellation=token,

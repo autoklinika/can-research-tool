@@ -155,6 +155,7 @@ class ExtensionRegistry:
         allowed = {
             ExtensionPermission.PROJECT_READ,
             ExtensionPermission.SESSION_READ,
+            ExtensionPermission.ARTIFACT_READ,
             ExtensionPermission.ARTIFACT_WRITE,
             ExtensionPermission.FINDING_WRITE,
         }

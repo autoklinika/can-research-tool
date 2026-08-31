@@ -26,6 +26,7 @@ from .builtin import (
 )
 from .contracts import (
     AnalysisContext,
+    ArtifactSnapshot,
     CancellationToken,
     ComparisonContext,
     ExtensionCancelled,
@@ -53,6 +54,7 @@ from .writers import ArtifactWriter, FindingWriter
 __all__ = [
     "AnalysisContext",
     "AnalysisProvider",
+    "ArtifactSnapshot",
     "ArtifactWriter",
     "COMPARISON_STATISTICS_ALGORITHM_VERSION",
     "COMPARISON_STATISTICS_ARTIFACT_SCHEMA_VERSION",

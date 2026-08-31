@@ -29,6 +29,7 @@ class ExtensionType(StrEnum):
 class ExtensionPermission(StrEnum):
     PROJECT_READ = "project.read"
     SESSION_READ = "session.read"
+    ARTIFACT_READ = "artifact.read"
     ARTIFACT_WRITE = "artifact.write"
     FINDING_WRITE = "finding.write"
     AI_USE = "ai.use"
