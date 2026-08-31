@@ -106,9 +106,10 @@ def test_marker_selector_prefers_immutable_preset_id_over_name(tmp_path: Path) -
     # Captured snapshots may keep an old name after a preset is renamed. The
     # selector identity must stay tied to preset_id, not mutable display text.
     sidecar = marker_path_for_session(project.absolute_path(second.relative_path))
-    markers = list(_read_marker_records(sidecar))
-    markers[0]["name"] = "Renamed later"
-    _write_marker_records(sidecar, markers)
+    records = _read_marker_records(sidecar)
+    marker_record = next(record for record in records if record.get("record") == "marker")
+    marker_record["name"] = "Renamed later"
+    _write_marker_records(sidecar, records)
 
     options = ExperimentDiffService(project).marker_options(comparison.id)
     matching = [item for item in options if item.preset_id == preset.id]
