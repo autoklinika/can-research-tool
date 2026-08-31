@@ -221,7 +221,7 @@ def _validate_local_url(value: str) -> None:
         # Single-label hostnames are commonly resolved only inside a LAN.
         if "." not in host:
             return
-        raise ValueError("Signal Hypothesis Stage 1 accepts only local/private AI hosts")
+        raise ValueError("Signal Hypothesis Stage 1 rejects public AI endpoints")
     if address.is_private or address.is_loopback or address.is_link_local:
         return
     raise ValueError("Signal Hypothesis Stage 1 rejects public AI endpoints")
