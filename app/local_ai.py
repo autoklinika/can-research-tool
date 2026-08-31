@@ -117,8 +117,9 @@ class OpenAICompatibleLocalClient:
                 {"role": "system", "content": str(system_prompt)},
                 {"role": "user", "content": str(user_prompt)},
             ],
-            "temperature": 0.1,
+            "temperature": 0.0,
             "stream": False,
+            "response_format": {"type": "json_object"},
         }
         headers = {"Content-Type": "application/json"}
         if self._config.api_key:
