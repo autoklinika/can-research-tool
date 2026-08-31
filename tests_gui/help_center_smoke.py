@@ -35,12 +35,28 @@ def main() -> None:
     assert isinstance(help_view, HelpCenterWidget)
     assert window.tabs.count() == initial_count + 1
     assert "Pomoc CAN Research Tool" in help_view.browser.toPlainText()
-    assert len(help_view.visible_topic_ids) >= 25
+    assert len(help_view.visible_topic_ids) >= 26
 
     help_view.search_edit.setText("jitter percentyl")
     _drain(app)
     assert "timing-jitter" in help_view.visible_topic_ids
     assert "percentiles" in help_view.visible_topic_ids
+
+    help_view.search_edit.setText("signal discovery source row")
+    _drain(app)
+    assert "signal-discovery" in help_view.visible_topic_ids
+    help_view.open_topic("signal-discovery")
+    _drain(app)
+    assert help_view.current_topic_id == "signal-discovery"
+    signal_content = help_view.browser.toPlainText()
+    assert "Signal Discovery — aktywność bitów i ręczny bitfield" in signal_content
+    assert "Byte / Bit Activity Map" in signal_content
+    assert "Intel" in signal_content
+    assert "Motorola" in signal_content
+    assert "5000" in signal_content
+    assert "source_row" in signal_content
+    assert "nie generuje transmisji CAN" in signal_content
+    assert "nie tworzy jeszcze Signal Hypothesis ani Draft DBC" in signal_content
 
     help_view.open_topic("uds-transactions")
     _drain(app)

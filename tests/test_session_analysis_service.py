@@ -5,7 +5,10 @@ import hashlib
 import pytest
 
 from app.artifact_catalog import ArtifactIntegrityError
-from app.extensions.builtin import SESSION_STATISTICS_PROVIDER_ID
+from app.extensions.builtin import (
+    SESSION_STATISTICS_PROVIDER_ID,
+    SIGNAL_DISCOVERY_PROVIDER_ID,
+)
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_analysis_service import SessionAnalysisService
@@ -21,7 +24,10 @@ def test_session_analysis_service_runs_builtin_provider_and_catalogs_artifact(tm
 
     service = SessionAnalysisService(project)
     manifests = service.available_session_analyses()
-    assert [manifest.id for manifest in manifests] == [SESSION_STATISTICS_PROVIDER_ID]
+    assert [manifest.id for manifest in manifests] == [
+        SESSION_STATISTICS_PROVIDER_ID,
+        SIGNAL_DISCOVERY_PROVIDER_ID,
+    ]
 
     result = service.run(
         SESSION_STATISTICS_PROVIDER_ID,

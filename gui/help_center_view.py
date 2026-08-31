@@ -18,7 +18,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.help_catalog import (
+from app import help_catalog as _help_catalog
+from app.help_catalog_signal_discovery import SIGNAL_DISCOVERY_HELP_TOPIC
+
+# Help Center Stage 1 predates modular help topics. Keep its public catalog contract
+# intact while allowing this feature-owned article to participate in the existing
+# search, home rendering, related links and contextual open_help_topic() flow.
+if not any(topic.id == SIGNAL_DISCOVERY_HELP_TOPIC.id for topic in _help_catalog.HELP_TOPICS):
+    _help_catalog.HELP_TOPICS = (*_help_catalog.HELP_TOPICS, SIGNAL_DISCOVERY_HELP_TOPIC)
+    _help_catalog._TOPIC_BY_ID[SIGNAL_DISCOVERY_HELP_TOPIC.id] = SIGNAL_DISCOVERY_HELP_TOPIC
+
+from app.help_catalog import (  # noqa: E402
     HELP_CATEGORY_ORDER,
     HELP_TOPICS,
     HelpTopic,
@@ -81,7 +91,7 @@ class HelpCenterWidget(QWidget):
         self.search_edit.setObjectName("helpSearchEdit")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setPlaceholderText(
-            "np. import logu, filtr, jitter, DID, 0x78, brak wyników…"
+            "np. import logu, filtr, jitter, DID, 0x78, Signal Discovery…"
         )
         self.search_edit.textChanged.connect(self._rebuild_tree)
         self.search_edit.returnPressed.connect(self._open_first_visible_topic)
