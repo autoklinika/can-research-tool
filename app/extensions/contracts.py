@@ -6,7 +6,8 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import Any
 
-from app.domain import AnalysisInput
+from app.artifact_catalog import ArtifactCatalog
+from app.domain import AnalysisInput, ArtifactSource
 from app.models import CanFrame
 from app.project import CrtProject, SessionRecord
 from app.session_stream import SessionPagedReader
@@ -126,6 +127,32 @@ class SessionSource:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactSnapshot:
+    """Integrity-checked immutable JSON artifact exposed to trusted extensions."""
+
+    id: str
+    analysis_run_id: str
+    artifact_type: str
+    schema_version: int
+    provider_id: str
+    provider_version: str
+    algorithm_version: str
+    sources: tuple[ArtifactSource, ...]
+    sha256: str
+    metadata: Mapping[str, Any]
+    created_at_utc: str
+    payload: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("artifact snapshot id cannot be empty")
+        if not self.artifact_type.strip():
+            raise ValueError("artifact snapshot type cannot be empty")
+        if self.schema_version <= 0:
+            raise ValueError("artifact snapshot schema_version must be greater than zero")
+
+
+@dataclass(frozen=True, slots=True)
 class ComparisonContext:
     """Immutable comparison-set snapshot supplied to a comparison provider."""
 
@@ -168,9 +195,12 @@ class ProjectContext:
         self,
         project: CrtProject,
         cancellation: CancellationToken | None = None,
+        *,
+        artifact_read_enabled: bool = False,
     ) -> None:
         self._project = project
         self._cancellation = cancellation or CancellationToken()
+        self._artifact_read_enabled = bool(artifact_read_enabled)
 
     @property
     def project_id(self) -> str:
@@ -197,6 +227,36 @@ class ProjectContext:
         if record is None:
             raise KeyError(f"unknown session: {session_id}")
         return self._session_source(record)
+
+    def artifact(
+        self,
+        artifact_id: str,
+        *,
+        maximum_bytes: int = 16 * 1024 * 1024,
+    ) -> ArtifactSnapshot:
+        """Return an integrity-checked JSON artifact without exposing writable storage."""
+
+        self._cancellation.raise_if_cancelled()
+        if not self._artifact_read_enabled:
+            raise PermissionError("extension did not declare artifact.read permission")
+        catalog = ArtifactCatalog(self._project)
+        artifact = catalog.get(artifact_id)
+        payload = catalog.read_json(artifact, maximum_bytes=maximum_bytes)
+        self._cancellation.raise_if_cancelled()
+        return ArtifactSnapshot(
+            id=artifact.id,
+            analysis_run_id=artifact.analysis_run_id,
+            artifact_type=artifact.artifact_type,
+            schema_version=artifact.schema_version,
+            provider_id=artifact.provider_id,
+            provider_version=artifact.provider_version,
+            algorithm_version=artifact.algorithm_version,
+            sources=artifact.sources,
+            sha256=artifact.sha256,
+            metadata=_freeze_mapping(artifact.metadata),
+            created_at_utc=artifact.created_at_utc,
+            payload=_freeze_mapping(payload),
+        )
 
     def _session_source(self, record: SessionRecord) -> SessionSource:
         reader = SessionPagedReader(self._project.absolute_path(record.relative_path))
@@ -229,3 +289,15 @@ class AnalysisContext:
             raise ValueError("analysis_run_id cannot be empty")
         if not self.inputs:
             raise ValueError("analysis context requires at least one input")
+
+
+def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    return value
