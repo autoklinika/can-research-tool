@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .artifact_catalog import ArtifactCatalog
 from .comparison_analysis_service import (
     ComparisonAnalysisExecutionResult,
     ComparisonAnalysisService,
@@ -22,25 +23,17 @@ from .project import CrtProject
 
 
 class SignalHypothesisService:
-    """Generate and read non-authoritative hypotheses for Signal Candidates."""
+    """Offline-safe catalog plus optional local-AI hypothesis execution."""
 
     def __init__(
         self,
         project: CrtProject,
         *,
-        ai_client: LocalAIClient,
+        ai_client: LocalAIClient | None = None,
     ) -> None:
         self.project = project
         self.ai_client = ai_client
-        registry = ExtensionRegistry(passive_only=True, ai_enabled=True)
-        register_builtin_extensions(registry)
-        register_builtin_comparison_extensions(registry)
-        registry.register(SignalHypothesisAIProvider())
-        self.analysis = ComparisonAnalysisService(
-            project,
-            registry=registry,
-            ai_client=ai_client,
-        )
+        self.artifacts = ArtifactCatalog(project)
 
     @classmethod
     def from_config(
@@ -53,12 +46,12 @@ class SignalHypothesisService:
     def list_candidate_artifacts(self, comparison_set_id: str) -> tuple[Artifact, ...]:
         return tuple(
             artifact
-            for artifact in self.analysis.list_artifacts(comparison_set_id)
+            for artifact in self.artifacts.list_for_comparison_set(comparison_set_id)
             if artifact.artifact_type == "signal_candidates"
         )
 
     def candidate_rows(self, artifact: Artifact) -> tuple[dict[str, Any], ...]:
-        payload = self.analysis.artifacts.read_json(artifact)
+        payload = self.artifacts.read_json(artifact)
         if payload.get("schema") != "crt.signal_candidates":
             raise ValueError("wybrany artefakt nie jest Signal Candidates")
         rows = payload.get("candidates")
@@ -77,7 +70,18 @@ class SignalHypothesisService:
         cancellation=None,
         progress_callback=None,
     ) -> ComparisonAnalysisExecutionResult:
-        return self.analysis.run(
+        if self.ai_client is None:
+            raise ValueError("lokalne AI nie jest skonfigurowane")
+        registry = ExtensionRegistry(passive_only=True, ai_enabled=True)
+        register_builtin_extensions(registry)
+        register_builtin_comparison_extensions(registry)
+        registry.register(SignalHypothesisAIProvider())
+        analysis = ComparisonAnalysisService(
+            self.project,
+            registry=registry,
+            ai_client=self.ai_client,
+        )
+        return analysis.run(
             SIGNAL_HYPOTHESIS_PROVIDER_ID,
             comparison_set_id,
             parameters={
@@ -93,12 +97,12 @@ class SignalHypothesisService:
     def list_hypothesis_artifacts(self, comparison_set_id: str) -> tuple[Artifact, ...]:
         return tuple(
             artifact
-            for artifact in self.analysis.list_artifacts(comparison_set_id)
+            for artifact in self.artifacts.list_for_comparison_set(comparison_set_id)
             if artifact.artifact_type == "signal_hypothesis"
         )
 
     def read_hypothesis(self, artifact: Artifact) -> dict[str, Any]:
-        payload = self.analysis.artifacts.read_json(artifact)
+        payload = self.artifacts.read_json(artifact)
         return dict(payload)
 
 
