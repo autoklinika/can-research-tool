@@ -146,7 +146,7 @@ class SignalCandidateEngineProvider:
         artifact_sources = tuple(
             ArtifactSource(
                 session_id=session_id,
-                source_kind="derived_artifacts",
+                source_kind="session",
                 source_reference={
                     "comparison_set_id": comparison.id,
                     "experiment_artifact_ids": list(experiment_ids),
