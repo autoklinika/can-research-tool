@@ -8,6 +8,7 @@ from typing import Any
 
 from app.artifact_catalog import ArtifactCatalog
 from app.domain import AnalysisInput, ArtifactSource
+from app.local_ai import LocalAIClient
 from app.models import CanFrame
 from app.project import CrtProject, SessionRecord
 from app.session_stream import SessionPagedReader
@@ -283,6 +284,7 @@ class AnalysisContext:
     artifact_writer: object
     finding_writer: object
     comparison: ComparisonContext | None = None
+    ai_client: LocalAIClient | None = None
 
     def __post_init__(self) -> None:
         if not self.analysis_run_id.strip():
