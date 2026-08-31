@@ -1,0 +1,59 @@
+name: Signal Candidate Engine Stage 1 Validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  signal-candidate-engine:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+      - name: Compile Signal Candidate Engine sources
+        run: >-
+          python -m compileall -q
+          app/extensions/manifest.py
+          app/extensions/registry.py
+          app/extensions/contracts.py
+          app/extensions/__init__.py
+          app/extensions/builtin/signal_candidate_engine.py
+          app/session_analysis_service.py
+          app/comparison_analysis_service.py
+          app/signal_candidate_service.py
+          app/help_catalog_signal_candidates.py
+          gui/signal_candidates_view.py
+          gui/comparison_visualization_stage2d1.py
+          tests/test_extension_artifact_read.py
+          tests/test_signal_candidate_engine.py
+          tests_gui/signal_candidates_smoke.py
+          tests_gui/help_center_smoke.py
+      - name: Verify artifact read contract and Candidate Engine core
+        run: >-
+          python -m pytest
+          tests/test_extension_artifact_read.py
+          tests/test_signal_candidate_engine.py
+          tests/test_extension_api_foundation.py
+          tests/test_experiment_marker_correlation.py
+          tests/test_signal_discovery.py
+          -q --junitxml=signal-candidate-engine-junit.xml
+      - name: Verify Signal Candidates production GUI
+        run: python tests_gui/signal_candidates_smoke.py
+      - name: Verify Signal Candidate Engine Help Center
+        run: python tests_gui/help_center_smoke.py
+      - name: Upload Candidate Engine diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-candidate-engine-windows
+          path: signal-candidate-engine-junit.xml
+          retention-days: 3
