@@ -137,9 +137,9 @@ def main() -> int:
             assert fake.requests == 1
             assert view.progress.value() == 100
             assert view.hypothesis_combo.count() == 1
-            assert "EGR_state_candidate" in view.hypothesis_label.text()
+            assert "unknown_bit_state_candidate" in view.hypothesis_label.text()
             assert "verified=false" in view.hypothesis_label.text()
-            assert "Powtórz stan odwrotny" in view.next_steps_label.text()
+            assert "Powtórz eksperyment w przeciwnym stanie" in view.next_steps_label.text()
 
             # A syntactically valid but empty JSON object must be rejected before
             # artifact.write. The last valid hypothesis stays visible and no
@@ -153,7 +153,7 @@ def main() -> int:
             assert view.hypothesis_combo.count() == 1
             assert "AI response rejected" in view.status_label.text()
             assert "response_excerpt" in view.status_label.text()
-            assert "EGR_state_candidate" in view.hypothesis_label.text()
+            assert "unknown_bit_state_candidate" in view.hypothesis_label.text()
 
             dialog = ComparisonVisualizationDialog(project, comparison.id)
             _drain(app)
