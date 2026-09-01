@@ -27,6 +27,8 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
         "DBC",
         "response contract",
         "schema v2",
+        "label redaction",
+        "anti bias",
     ),
     sections=(
         HelpSection(
@@ -40,10 +42,11 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             "Co trafia do lokalnego AI",
             bullets=(
                 "identyfikator kandydata: CAN ID, kanał, STD/EXT, Byte i Bit",
-                "deterministyczny candidate_score, klasa i najlepsze wsparcie Experiment Diff",
-                "opcjonalna walidacja Signal Discovery",
+                "deterministyczny candidate_score, klasa i numeryczne wsparcie Experiment Diff",
+                "opcjonalna zagregowana walidacja Signal Discovery bez nazw sesji i artefaktów źródłowych",
                 "ograniczona liczba exact evidence z source_row i payloadem tylko dla wybranego kandydata",
-                "opcjonalny krótki kontekst operatora wpisany w GUI",
+                "nazwy markerów, etykiety eksperymentu, notatki i nazwy sesji są redagowane przed requestem, aby nie kotwiczyć modelu na semantyce typu TEST_EGR",
+                "opcjonalny krótki kontekst operatora wpisany w GUI jest jedynym świadomym kanałem przekazania semantycznej wskazówki",
                 "RAW CAN ani pełna sesja nie są przekazywane do AI",
             ),
         ),
@@ -52,6 +55,7 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             paragraphs=(
                 "Stage 1 korzysta z lokalnego endpointu zgodnego z OpenAI Chat Completions, np. Ollama /v1. W karcie Signal Hypothesis podaje się Local AI URL, model i timeout.",
                 "Adapter Stage 1 akceptuje localhost, prywatne adresy LAN oraz lokalne hosty .local/.lan. Publiczne endpointy AI są odrzucane, aby przypadkowo nie wysłać danych poza lokalną infrastrukturę.",
+                "Dla krótkiego audytowalnego structured output adapter domyślnie używa reasoning_effort=none, max_tokens=768, temperature=0 oraz response_format=json_object.",
                 "Ustawienia URL/model/timeout są zapisywane lokalnie przez QSettings. Można też użyć CRT_AI_BASE_URL, CRT_AI_MODEL i CRT_AI_TIMEOUT_S jako wartości początkowych.",
             ),
         ),
@@ -70,7 +74,8 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
         HelpSection(
             "Walidacja odpowiedzi AI — kontrakt v2",
             paragraphs=(
-                "Poprawny JSON nie wystarcza. CRT waliduje semantyczny kontrakt odpowiedzi przed zapisaniem artefaktu. Brak wymaganych pól, pusta nazwa, puste physical_meaning lub rationale, niepoprawny confidence, brak eksperymentu weryfikacyjnego albo brak ostrzeżenia powodują odrzucenie odpowiedzi.",
+                "Poprawny JSON nie wystarcza. CRT waliduje semantyczny kontrakt odpowiedzi przed zapisaniem artefaktu. Pusta nazwa, puste physical_meaning lub rationale, niepoprawny confidence, brak eksperymentu weryfikacyjnego albo brak ostrzeżenia powodują odrzucenie odpowiedzi.",
+                "Jeżeli model pominie wyłącznie semantycznie opcjonalne unit, scale lub offset, CRT uzupełnia je jako null. Jeżeli treściwa hipoteza pominie tylko AI confidence, CRT nie wymyśla pewności: zapisuje 0.0 i dopisuje jawne ostrzeżenie o tym fallbacku. Pusty lub semantycznie niekompletny JSON nadal jest odrzucany.",
                 "Jeżeli model nie potrafi ustalić znaczenia fizycznego, ma zwrócić neutralną hipotezę, np. unknown_bit_state_candidate, jasno opisać niepewność, użyć niskiego confidence i zaproponować test rozstrzygający. Nie powinien zwracać pustego obiektu {}.",
                 "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera bounded pole diagnostyczne response_excerpt — krótki, ograniczony fragment odpowiedzi modelu. Dla poprawnego wyniku artefakt zapisuje response_sha256 i response_contract_version=2, ale nie pełną surową odpowiedź modelu.",
             ),
