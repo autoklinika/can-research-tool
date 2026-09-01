@@ -103,6 +103,20 @@ def test_accepts_uncertain_but_actionable_hypothesis() -> None:
     assert len(normalized["warnings"]) == 1
 
 
+def test_accepts_missing_nonsemantic_optional_fields_without_inventing_confidence() -> None:
+    payload = _valid_response()
+    for key in ("unit", "scale", "offset", "confidence"):
+        payload.pop(key)
+
+    normalized = _normalize_hypothesis(payload)
+
+    assert normalized["unit"] is None
+    assert normalized["scale"] is None
+    assert normalized["offset"] is None
+    assert normalized["confidence"] == 0.0
+    assert any("nie podał confidence" in item for item in normalized["warnings"])
+
+
 def test_response_excerpt_is_bounded_and_single_line() -> None:
     excerpt = _response_excerpt("{\n  \"status\": \"ok\"\n}" + " x" * 1000, limit=80)
 
@@ -114,7 +128,7 @@ def test_response_excerpt_is_bounded_and_single_line() -> None:
 def test_prompt_redacts_experiment_marker_and_session_labels_but_preserves_operator_context() -> None:
     raw = {
         "task": "hypothesis",
-        "response_contract": {"version": 2},
+        "response_contract": {"version": 2, "language": "pl-PL"},
         "candidate": {
             "candidate_key": "0:STD:321:data:B0.2",
             "candidate_score": 1.0,
@@ -168,6 +182,7 @@ def test_prompt_redacts_experiment_marker_and_session_labels_but_preserves_opera
     assert "session_name" not in machine_context
     assert "marker" not in sanitized["evidence"][0]
     assert sanitized["operator_context"] == "operator explicitly says EGR here"
+    assert sanitized["response_contract"]["language"] == "pl-PL"
     assert sanitized["response_contract"]["semantic_labels_redacted"] is True
     assert sanitized["response_contract"]["semantic_labels_source"] == "operator_context_only"
     assert sanitized["candidate"]["best_support"]["target"]["changed_event_count"] == 6
@@ -177,10 +192,10 @@ def test_prompt_redacts_experiment_marker_and_session_labels_but_preserves_opera
 def test_safe_response_repair_adds_only_nonsemantic_nulls_and_conservative_missing_confidence() -> None:
     model_response = {
         "name": "unknown_bit_state_candidate",
-        "physical_meaning": "Bit is correlated with the target experiment; physical meaning is unknown.",
-        "rationale": "Target changed repeatedly while control did not.",
-        "next_experiments": ["Repeat the inverse state and verify 1->0."],
-        "warnings": ["Correlation is not semantic proof."],
+        "physical_meaning": "Bit jest skorelowany z eksperymentem target; znaczenie fizyczne pozostaje nieznane.",
+        "rationale": "Target zmieniał się wielokrotnie, podczas gdy kontrola pozostawała stabilna.",
+        "next_experiments": ["Powtórz stan przeciwny i zweryfikuj przejście 1->0."],
+        "warnings": ["Korelacja nie jest dowodem semantycznym."],
     }
 
     repaired = json.loads(
@@ -191,7 +206,7 @@ def test_safe_response_repair_adds_only_nonsemantic_nulls_and_conservative_missi
     assert repaired["scale"] is None
     assert repaired["offset"] is None
     assert repaired["confidence"] == 0.0
-    assert any("omitted confidence" in item for item in repaired["warnings"])
+    assert any("nie podał confidence" in item for item in repaired["warnings"])
     normalized = _normalize_hypothesis(repaired)
     assert normalized["confidence"] == 0.0
 
