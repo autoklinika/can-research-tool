@@ -14,8 +14,8 @@ from ..manifest import ExtensionManifest, ExtensionPermission, ExtensionType
 
 
 SIGNAL_HYPOTHESIS_PROVIDER_ID = "crt.comparison.signal_hypothesis_ai"
-SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.3"
-SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "4"
+SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.4"
+SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "5"
 SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION = 2
 
 _DEFAULT_MAXIMUM_EVIDENCE_EVENTS = 8
@@ -24,10 +24,6 @@ _REQUIRED_HYPOTHESIS_KEYS = frozenset(
     {
         "name",
         "physical_meaning",
-        "unit",
-        "scale",
-        "offset",
-        "confidence",
         "rationale",
         "next_experiments",
         "warnings",
@@ -36,23 +32,29 @@ _REQUIRED_HYPOTHESIS_KEYS = frozenset(
 
 _SYSTEM_PROMPT = """You are the optional local AI interpretation layer in CRT, a CAN reverse-engineering workstation.
 The deterministic signal_candidates artifact is the source of truth. You must never change its score, class, counts, direction or evidence and you must never describe a hypothesis as confirmed.
-Infer only a cautious, testable signal hypothesis from the supplied structured candidate data. Marker/experiment names are operator labels and may be suggestive, but are not proof of physical meaning.
-Return exactly one JSON object. Do not include markdown, prose outside JSON, hidden chain-of-thought, or an empty object. Always return every required key:
+Infer only a cautious, testable signal hypothesis from the supplied structured candidate data.
+Automatic experiment names, marker names, notes and session names are intentionally omitted from the AI context to prevent semantic anchoring. Only operator_context may deliberately provide semantic context, and even then it is a hint rather than proof.
+Return exactly one JSON object. Do not include markdown, prose outside JSON, hidden chain-of-thought, or an empty object.
+Required keys:
 {
   "name": string,
   "physical_meaning": string,
-  "unit": string or null,
-  "scale": number or null,
-  "offset": number or null,
-  "confidence": number from 0 to 1,
   "rationale": string,
   "next_experiments": array of strings,
   "warnings": array of strings
 }
-Write all human-readable explanatory text in Polish (pl-PL), regardless of the language used in the input data. In particular, physical_meaning, rationale, every next_experiments item and every warnings item must be written in Polish. The name field may remain a short technical identifier and unit may use a standard engineering symbol.
+Optional keys:
+{
+  "unit": string or null,
+  "scale": number or null,
+  "offset": number or null,
+  "confidence": number from 0 to 1
+}
+Write all human-readable explanatory text in Polish (pl-PL), regardless of the language used in input data. In particular, physical_meaning, rationale, every next_experiments item and every warnings item must be written in Polish. The name field may remain a short technical identifier and unit may use a standard engineering symbol.
 Never use an empty string for name, physical_meaning or rationale. next_experiments and warnings must each contain at least one concrete item.
-If unit, scale or offset cannot be justified, return null for that field.
-If the physical meaning cannot be identified from the evidence, do not refuse and do not return {}. Use a neutral name such as "unknown_bit_state_candidate", explicitly state in Polish in physical_meaning that the bit is only correlated with the observed experiment and its physical meaning is unknown, use low confidence, explain the uncertainty in Polish in rationale, propose at least one discriminating verification experiment in Polish, and warn in Polish that marker labels are not proof.
+If unit, scale or offset cannot be justified, return null or omit that optional field.
+If confidence cannot be justified, omit it. CRT will then record confidence 0.0 and explicitly warn that confidence was not provided; do not invent a confidence value just to satisfy a schema.
+If the physical meaning cannot be identified from the evidence, do not refuse and do not return {}. Use a neutral name such as "unknown_bit_state_candidate", explicitly state in Polish that the bit is correlated with the observed target/control pattern but its physical meaning is unknown, explain the uncertainty, propose at least one discriminating verification experiment, and warn that correlation does not prove semantics.
 A strong deterministic candidate score means strong correlation in the supplied experiment; it does not by itself prove semantic meaning.
 """
 
@@ -96,7 +98,7 @@ class SignalHypothesisAIProvider:
             maximum_evidence_events=parameters["maximum_evidence_events"],
             user_context=parameters["user_context"],
         )
-        context.progress.report(1, 4, "prepared bounded candidate context for local AI")
+        context.progress.report(1, 4, "prepared bounded label-blind candidate context for local AI")
         completion = context.ai_client.complete(
             system_prompt=_SYSTEM_PROMPT,
             user_prompt=json.dumps(ai_context, ensure_ascii=False, sort_keys=True, indent=2),
@@ -165,9 +167,11 @@ class SignalHypothesisAIProvider:
                 "automatic_confirmation": False,
                 "ai_failure_blocks_crt": False,
                 "semantic_response_validation": True,
+                "automatic_semantic_labels_sent": False,
             },
             "context_sent_to_ai": {
                 "raw_session_included": False,
+                "automatic_semantic_labels_included": False,
                 "candidate_artifact_id": source.id,
                 "candidate_key": candidate_identity["candidate_key"],
                 "evidence_events_included": len(ai_context["evidence"]),
@@ -202,6 +206,7 @@ class SignalHypothesisAIProvider:
                 "ai_model": completion.model,
                 "response_contract_version": 2,
                 "response_language": "pl-PL",
+                "automatic_semantic_labels_sent": False,
                 "response_sha256": response_sha256,
                 "verified": False,
             },
@@ -225,11 +230,18 @@ def _ai_context(
     )
     evidence = [_compact_evidence(item) for item in evidence_rows[:maximum_evidence_events]]
     return {
-        "task": "Propose a testable CAN signal hypothesis; do not claim confirmation. Write explanatory output in Polish (pl-PL).",
+        "task": "Zaproponuj testowalną hipotezę sygnału CAN bez twierdzenia, że znaczenie zostało potwierdzone. Odpowiedź opisową napisz po polsku (pl-PL).",
         "response_contract": {
             "version": 2,
             "language": "pl-PL",
-            "all_fields_required": True,
+            "required_fields": [
+                "name",
+                "physical_meaning",
+                "rationale",
+                "next_experiments",
+                "warnings",
+            ],
+            "optional_fields": ["unit", "scale", "offset", "confidence"],
             "nonempty_fields": ["name", "physical_meaning", "rationale"],
             "nonempty_arrays": ["next_experiments", "warnings"],
             "polish_text_fields": [
@@ -239,6 +251,7 @@ def _ai_context(
                 "warnings",
             ],
             "unknown_meaning_fallback": "unknown_bit_state_candidate",
+            "missing_confidence_behavior": "CRT records 0.0 and adds an explicit warning",
         },
         "candidate_artifact": {
             "artifact_id": artifact.id,
@@ -250,27 +263,73 @@ def _ai_context(
             "strength": str(candidate.get("strength", "")),
             "candidate_score": _ratio(candidate.get("candidate_score")),
             "support_count": _integer(candidate.get("support_count")),
-            "best_support": _json_value(candidate.get("best_support")),
-            "activity_validation": _json_value(candidate.get("activity_validation")),
+            "best_support": _compact_support(candidate.get("best_support")),
+            "activity_validation": _compact_activity(candidate.get("activity_validation")),
         },
         "evidence": evidence,
         "operator_context": user_context or None,
     }
 
 
+def _compact_support(value: object) -> dict[str, Any]:
+    support = _mapping(value)
+    target = _mapping(support.get("target"))
+    control = _mapping(support.get("control"))
+    direction = _mapping(support.get("direction"))
+    timing = _mapping(support.get("timing"))
+    return {
+        "score": _number_or_none(support.get("score")),
+        "target": {
+            "event_count": _integer(target.get("event_count")),
+            "eligible_event_count": _integer(target.get("eligible_event_count")),
+            "changed_event_count": _integer(target.get("changed_event_count")),
+            "change_ratio": _number_or_none(target.get("change_ratio")),
+        },
+        "control": {
+            "event_count": _integer(control.get("event_count")),
+            "eligible_event_count": _integer(control.get("eligible_event_count")),
+            "changed_event_count": _integer(control.get("changed_event_count")),
+            "change_ratio": _number_or_none(control.get("change_ratio")),
+        },
+        "direction": {
+            "dominant": str(direction.get("dominant", "")),
+            "consistency_ratio": _number_or_none(direction.get("consistency_ratio")),
+        },
+        "timing": {
+            "mean_delay_ns": _number_or_none(timing.get("mean_delay_ns")),
+            "median_delay_ns": _number_or_none(timing.get("median_delay_ns")),
+            "min_delay_ns": _number_or_none(timing.get("min_delay_ns")),
+            "max_delay_ns": _number_or_none(timing.get("max_delay_ns")),
+        },
+        "evidence_event_count": _integer(support.get("evidence_event_count")),
+        "evidence_truncated": bool(support.get("evidence_truncated", False)),
+    }
+
+
+def _compact_activity(value: object) -> dict[str, Any]:
+    activity = _mapping(value)
+    return {
+        "status": str(activity.get("status", "")),
+        "artifact_count": _integer(activity.get("artifact_count")),
+        "session_count": _integer(activity.get("session_count")),
+        "comparison_session_count": _integer(activity.get("comparison_session_count")),
+        "coverage_ratio": _number_or_none(activity.get("coverage_ratio")),
+        "variable_observation_count": _integer(activity.get("variable_observation_count")),
+        "constant_observation_count": _integer(activity.get("constant_observation_count")),
+        "variable_ratio": _number_or_none(activity.get("variable_ratio")),
+        "transition_count": _integer(activity.get("transition_count")),
+        "transition_opportunity_count": _integer(activity.get("transition_opportunity_count")),
+        "transition_rate": _number_or_none(activity.get("transition_rate")),
+        "set_ratio": _number_or_none(activity.get("set_ratio")),
+    }
+
+
 def _compact_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
-    marker = _mapping(value.get("marker"))
     before = _mapping(value.get("before"))
     after = _mapping(value.get("after"))
     return {
         "group": str(value.get("group", "")),
         "changed": bool(value.get("changed", False)),
-        "session_id": str(value.get("session_id", "")),
-        "session_name": str(value.get("session_name", "")),
-        "marker": {
-            "name": str(marker.get("name", "")),
-            "note": str(marker.get("note", "")),
-        },
         "before_state": _integer(value.get("before_state")),
         "after_state": _integer(value.get("after_state")),
         "delay_ns": _number_or_none(value.get("delay_ns")),
@@ -344,10 +403,11 @@ def _normalize_hypothesis(value: Mapping[str, Any]) -> dict[str, Any]:
     physical_meaning = _strict_text(
         value["physical_meaning"], "physical_meaning", 600, allow_empty=False
     )
-    unit = _strict_optional_text(value["unit"], "unit", 60)
-    scale = _strict_number_or_none(value["scale"], "scale")
-    offset = _strict_number_or_none(value["offset"], "offset")
-    confidence = _strict_confidence(value["confidence"])
+    unit = _strict_optional_text(value.get("unit"), "unit", 60)
+    scale = _strict_number_or_none(value.get("scale"), "scale")
+    offset = _strict_number_or_none(value.get("offset"), "offset")
+    confidence_missing = "confidence" not in value or value.get("confidence") is None
+    confidence = 0.0 if confidence_missing else _strict_confidence(value.get("confidence"))
     rationale = _strict_text(value["rationale"], "rationale", 1200, allow_empty=False)
     next_experiments = _strict_string_list(
         value["next_experiments"],
@@ -363,6 +423,11 @@ def _normalize_hypothesis(value: Mapping[str, Any]) -> dict[str, Any]:
         limit=400,
         require_nonempty=True,
     )
+    if confidence_missing:
+        system_warning = (
+            "Model nie podał confidence; CRT zapisał confidence AI = 0.0 bez estymowania pewności."
+        )
+        warnings = warnings[:4] + [system_warning]
 
     return {
         "name": name,
