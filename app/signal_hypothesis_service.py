@@ -15,6 +15,7 @@ from .extensions.builtin import (
     register_builtin_extensions,
 )
 from .extensions.builtin.signal_hypothesis_ai import (
+    SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION,
     SIGNAL_HYPOTHESIS_PROVIDER_ID,
     SignalHypothesisAIProvider,
 )
@@ -99,10 +100,29 @@ class SignalHypothesisService:
             artifact
             for artifact in self.artifacts.list_for_comparison_set(comparison_set_id)
             if artifact.artifact_type == "signal_hypothesis"
+            and artifact.schema_version == SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION
+        )
+
+    def legacy_hypothesis_count(self, comparison_set_id: str) -> int:
+        return sum(
+            1
+            for artifact in self.artifacts.list_for_comparison_set(comparison_set_id)
+            if artifact.artifact_type == "signal_hypothesis"
+            and artifact.schema_version != SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION
         )
 
     def read_hypothesis(self, artifact: Artifact) -> dict[str, Any]:
+        if artifact.artifact_type != "signal_hypothesis":
+            raise ValueError("wybrany artefakt nie jest Signal Hypothesis")
+        if artifact.schema_version != SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION:
+            raise ValueError(
+                "starszy artefakt Signal Hypothesis ma nieaktualny kontrakt odpowiedzi AI"
+            )
         payload = self.artifacts.read_json(artifact)
+        if payload.get("schema") != "crt.signal_hypothesis":
+            raise ValueError("nieoczekiwany schemat Signal Hypothesis")
+        if payload.get("schema_version") != SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION:
+            raise ValueError("niespójna wersja schematu Signal Hypothesis")
         return dict(payload)
 
 
