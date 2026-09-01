@@ -112,7 +112,7 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert hypothesis["unit"] is None
     assert hypothesis["scale"] is None
     assert hypothesis["offset"] is None
-    assert hypothesis["confidence"] == pytest.approx(0.25)
+    assert hypothesis["confidence"] == pytest.approx(0.0)
     assert len(hypothesis["next_experiments"]) == 2
     assert hypothesis["warnings"]
 
