@@ -11,6 +11,7 @@ on:
       - "app/extensions/builtin/signal_hypothesis_ai.py"
       - "gui/signal_hypothesis_view.py"
       - "gui/comparison_visualization_stage2d1.py"
+      - "tests/test_local_ai_request_contract.py"
       - "tests/test_signal_hypothesis_ai.py"
       - "tests/test_signal_hypothesis_ai_response_contract.py"
       - "tests_gui/signal_hypothesis_smoke.py"
@@ -47,6 +48,7 @@ jobs:
           app/extensions/builtin/signal_hypothesis_ai.py
           gui/signal_hypothesis_view.py
           gui/comparison_visualization_stage2d1.py
+          tests/test_local_ai_request_contract.py
           tests/test_signal_hypothesis_ai.py
           tests/test_signal_hypothesis_ai_response_contract.py
           tests_gui/signal_hypothesis_smoke.py
@@ -55,6 +57,7 @@ jobs:
       - name: Verify local AI guardrails and Signal Hypothesis core
         run: >-
           python -m pytest
+          tests/test_local_ai_request_contract.py
           tests/test_signal_hypothesis_ai.py
           tests/test_signal_hypothesis_ai_response_contract.py
           tests/test_extension_api_foundation.py
