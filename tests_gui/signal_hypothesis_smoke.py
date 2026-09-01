@@ -34,6 +34,7 @@ class _FakeLocalAI:
             timeout_s=5,
         )
         self.requests = 0
+        self.content: str | None = None
 
     @property
     def config(self) -> LocalAIConfig:
@@ -42,17 +43,17 @@ class _FakeLocalAI:
     def complete(self, *, system_prompt: str, user_prompt: str, cancellation=None):
         self.requests += 1
         assert "source of truth" in system_prompt
+        assert "do not return {}" in system_prompt
         supplied = json.loads(user_prompt)
+        assert supplied["response_contract"]["version"] == 2
         assert supplied["candidate"]["candidate_key"] == "0:STD:123:data:B0.2"
         assert supplied["candidate"]["candidate_score"] == 1.0
         assert "raw" not in supplied
         if cancellation is not None:
             cancellation.raise_if_cancelled()
-        return LocalAICompletion(
-            provider="fake-local",
-            model="fake-qwen",
-            endpoint="http://127.0.0.1:11434/v1/chat/completions",
-            content=json.dumps(
+        content = self.content
+        if content is None:
+            content = json.dumps(
                 {
                     "name": "EGR_state_candidate",
                     "physical_meaning": "Możliwy stan związany z EGR.",
@@ -64,7 +65,12 @@ class _FakeLocalAI:
                     "next_experiments": ["Powtórz stan odwrotny i sprawdź 1->0."],
                     "warnings": ["Marker nie potwierdza znaczenia fizycznego."],
                 }
-            ),
+            )
+        return LocalAICompletion(
+            provider="fake-local",
+            model="fake-qwen",
+            endpoint="http://127.0.0.1:11434/v1/chat/completions",
+            content=content,
             latency_ms=5.0,
             usage={},
         )
@@ -134,7 +140,20 @@ def main() -> int:
             assert "EGR_state_candidate" in view.hypothesis_label.text()
             assert "verified=false" in view.hypothesis_label.text()
             assert "Powtórz stan odwrotny" in view.next_steps_label.text()
-            assert "source-of-truth" not in view.status_label.text().lower() or True
+
+            # A syntactically valid but empty JSON object must be rejected before
+            # artifact.write. The last valid hypothesis stays visible and no
+            # second result is created.
+            fake.content = "{}"
+            view.run_button.click()
+            assert view._task is not None
+            _wait_until(app, lambda: view._task is None, timeout_s=20.0)
+            assert fake.requests == 2
+            assert view.progress.value() == 0
+            assert view.hypothesis_combo.count() == 1
+            assert "AI response rejected" in view.status_label.text()
+            assert "response_excerpt" in view.status_label.text()
+            assert "EGR_state_candidate" in view.hypothesis_label.text()
 
             dialog = ComparisonVisualizationDialog(project, comparison.id)
             _drain(app)
@@ -145,7 +164,7 @@ def main() -> int:
             assert "Signal Candidates" in tab_names
             assert "Signal Hypothesis" in tab_names
             assert dialog.signal_hypothesis is not None
-            assert fake.requests == 1  # constructing production dialog never invokes AI
+            assert fake.requests == 2  # constructing production dialog never invokes AI
 
             dialog.close_for_project_change()
             dialog.close()
