@@ -12,6 +12,7 @@ on:
       - "gui/signal_hypothesis_view.py"
       - "gui/comparison_visualization_stage2d1.py"
       - "tests/test_signal_hypothesis_ai.py"
+      - "tests/test_signal_hypothesis_ai_response_contract.py"
       - "tests_gui/signal_hypothesis_smoke.py"
       - "tests_gui/help_center_smoke.py"
       - ".github/workflows/signal-hypothesis-ai-stage1.yml"
@@ -47,6 +48,7 @@ jobs:
           gui/signal_hypothesis_view.py
           gui/comparison_visualization_stage2d1.py
           tests/test_signal_hypothesis_ai.py
+          tests/test_signal_hypothesis_ai_response_contract.py
           tests_gui/signal_hypothesis_smoke.py
           tests_gui/help_center_smoke.py
 
@@ -54,6 +56,7 @@ jobs:
         run: >-
           python -m pytest
           tests/test_signal_hypothesis_ai.py
+          tests/test_signal_hypothesis_ai_response_contract.py
           tests/test_extension_api_foundation.py
           tests/test_signal_candidate_engine.py
           -q --junitxml=signal-hypothesis-ai-junit.xml
