@@ -25,7 +25,7 @@ class LocalAIConfig:
     model: str
     timeout_s: float = 30.0
     api_key: str = ""
-    max_tokens: int = 768
+    max_tokens: int = 1536
     reasoning_effort: str = "none"
 
     def __post_init__(self) -> None:
@@ -59,7 +59,7 @@ class LocalAIConfig:
             model=os.environ.get("CRT_AI_MODEL", "qwen3.6:35b-hermes64k"),
             timeout_s=float(os.environ.get("CRT_AI_TIMEOUT_S", "30")),
             api_key=os.environ.get("CRT_AI_API_KEY", ""),
-            max_tokens=int(os.environ.get("CRT_AI_MAX_TOKENS", "768")),
+            max_tokens=int(os.environ.get("CRT_AI_MAX_TOKENS", "1536")),
             reasoning_effort=os.environ.get("CRT_AI_REASONING_EFFORT", "none"),
         )
 
@@ -128,6 +128,9 @@ class OpenAICompatibleLocalClient:
         cancellation: object | None = None,
     ) -> LocalAICompletion:
         _raise_if_cancelled(cancellation)
+        effective_system_prompt = _augment_signal_hypothesis_system_prompt(
+            str(system_prompt), str(user_prompt)
+        )
         request_options = {
             "reasoning_effort": self._config.reasoning_effort,
             "max_tokens": self._config.max_tokens,
@@ -135,7 +138,7 @@ class OpenAICompatibleLocalClient:
         payload = {
             "model": self._config.model,
             "messages": [
-                {"role": "system", "content": str(system_prompt)},
+                {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": str(user_prompt)},
             ],
             "temperature": 0.0,
@@ -171,12 +174,20 @@ class OpenAICompatibleLocalClient:
         try:
             decoded = json.loads(raw.decode("utf-8"))
             choices = decoded.get("choices")
-            message = choices[0].get("message") if isinstance(choices, list) and choices else None
+            choice = choices[0] if isinstance(choices, list) and choices else None
+            finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+            if finish_reason == "length":
+                raise LocalAIUnavailable(
+                    f"local AI response truncated at max_tokens={self._config.max_tokens}"
+                )
+            message = choice.get("message") if isinstance(choice, dict) else None
             content = message.get("content") if isinstance(message, dict) else None
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("response has no assistant content")
             usage = decoded.get("usage")
             usage = dict(usage) if isinstance(usage, dict) else {}
+            if finish_reason is not None:
+                usage["finish_reason"] = str(finish_reason)
             model = str(decoded.get("model") or self._config.model)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError, IndexError) as exc:
             raise LocalAIUnavailable(f"invalid local AI response: {exc}") from exc
@@ -218,6 +229,42 @@ def extract_json_object(content: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LocalAIError("AI response JSON must be an object")
     return value
+
+
+def _augment_signal_hypothesis_system_prompt(system_prompt: str, user_prompt: str) -> str:
+    """Add bounded epistemic constraints only to Signal Hypothesis requests."""
+
+    try:
+        payload = json.loads(user_prompt)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return system_prompt
+    if not isinstance(payload, dict):
+        return system_prompt
+    task = str(payload.get("task") or "")
+    response_contract = payload.get("response_contract")
+    if "hipotezę sygnału CAN" not in task or not isinstance(response_contract, dict):
+        return system_prompt
+
+    operator_context = str(payload.get("operator_context") or "").strip()
+    note = (
+        "\nDODATKOWY KONTRAKT ZWIĘZŁOŚCI CRT: odpowiedź ma być krótka i domknięta jako jeden JSON. "
+        "physical_meaning: maksymalnie 2 krótkie zdania. rationale: maksymalnie 4 krótkie zdania. "
+        "next_experiments: maksymalnie 3 elementy. warnings: maksymalnie 3 elementy. "
+        "Nie powtarzaj całego operator_context i nie rozwijaj wiedzy podręcznikowej o pojeździe lub układzie."
+    )
+    if operator_context:
+        note += (
+            "\nDODATKOWY KONTRAKT EPISTEMICZNY CRT: operator_context jest wyłącznie wskazówką domenową, nie dowodem. "
+            "Możesz zaproponować możliwy związek kandydata z domeną opisaną przez operatora, ale używaj języka "
+            "hipotetycznego: 'może', 'możliwy', 'kandydat związany z'. NIE wolno samodzielnie przypisywać znaczenia "
+            "wartości 0/1, stanu domyślnego, kierunku sterowania, typu aktuatora, fizycznego położenia, "
+            "otwarcia/zamknięcia, progu, przyczyny, ani rozstrzygać 'komenda vs pomiar', chyba że operator_context "
+            "mówi o tym wprost. Jeżeli operator_context mówi tylko o teście lub odłączeniu EGR, dopuszczalne jest "
+            "'możliwy kandydat związany ze stanem EGR'; niedopuszczalne są twierdzenia typu 'bezpośrednie sterowanie "
+            "zaworem', '1 oznacza otwarcie', '0 oznacza zamknięcie' lub 'domyślnie zamknięty'. Jeżeli semantyka "
+            "opiera się wyłącznie na korelacji deterministycznej i operator_context, confidence nie może przekroczyć 0.35."
+        )
+    return system_prompt + note
 
 
 def _raise_if_cancelled(cancellation: object | None) -> None:
