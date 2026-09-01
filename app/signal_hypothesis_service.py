@@ -31,7 +31,7 @@ from .project import CrtProject
 
 
 _CONTEXT_POLICY = "label-redacted-v1"
-_RESPONSE_REPAIR_POLICY = "safe-nonsemantic-v1"
+_RESPONSE_REPAIR_POLICY = "safe-nonsemantic-v2-pl"
 
 
 class _SignalHypothesisAIClient:
@@ -58,10 +58,13 @@ class _SignalHypothesisAIClient:
     ) -> LocalAICompletion:
         sanitized_prompt = _sanitize_signal_hypothesis_prompt(user_prompt)
         format_note = (
-            "\nFor this request, experiment/marker/session labels were intentionally "
-            "redacted to prevent semantic anchoring. Infer semantics only when operator_context "
-            "explicitly supplies them. confidence is mandatory and must be numeric 0..1; use a "
-            "low value when uncertain."
+            "\nDla tego żądania nazwy eksperymentów, markerów i sesji zostały celowo "
+            "usunięte, aby ograniczyć semantyczne zakotwiczenie modelu. Wnioskuj o znaczeniu "
+            "wyłącznie wtedy, gdy operator_context jawnie wnosi taką wskazówkę, i nadal traktuj "
+            "ją jako wskazówkę, nie dowód. Wszystkie pola opisowe odpowiedzi "
+            "(physical_meaning, rationale, next_experiments, warnings) zapisz po polsku (pl-PL). "
+            "confidence jest opcjonalne; jeżeli nie potrafisz uzasadnić wartości, pomiń je zamiast "
+            "zgadywać."
         )
         completion = self._inner.complete(
             system_prompt=str(system_prompt) + format_note,
@@ -293,7 +296,7 @@ def _repair_nonsemantic_response_omissions(content: str) -> str:
 
     unit/scale/offset default to null. Missing AI self-confidence is conservatively
     set to 0.0 only when the response already contains the semantic core and a
-    verification experiment; an explicit warning is appended. Empty/invalid
+    verification experiment; an explicit Polish warning is appended. Empty/invalid
     semantic hypotheses still flow unchanged to the strict provider validator.
     """
 
@@ -319,7 +322,7 @@ def _repair_nonsemantic_response_omissions(content: str) -> str:
         if isinstance(warnings, list):
             warnings = list(warnings)
             warnings.append(
-                "AI omitted confidence; CRT assigned 0.0 rather than inventing confidence."
+                "Model nie podał confidence; CRT przypisał 0.0 zamiast wymyślać poziom pewności."
             )
             repaired["warnings"] = warnings
         changed = True
