@@ -48,18 +48,18 @@ class _FakeLocalAI:
         if content is None:
             content = json.dumps(
                 {
-                    "name": "EGR_state_candidate",
-                    "physical_meaning": "Możliwy binarny stan związany z eksperymentem EGR.",
+                    "name": "unknown_bit_state_candidate",
+                    "physical_meaning": "Nieznany stan binarny skorelowany z obserwowanym wzorcem target/control; znaczenie fizyczne nie jest potwierdzone.",
                     "unit": None,
                     "scale": None,
                     "offset": None,
-                    "confidence": 0.82,
-                    "rationale": "Bit zmienia się konsekwentnie po markerze testowym i nie zmienia się przy kontroli.",
+                    "confidence": 0.25,
+                    "rationale": "Bit zmienia się konsekwentnie po zdarzeniach target i pozostaje stabilny dla kontroli, co potwierdza korelację, ale nie semantykę sygnału.",
                     "next_experiments": [
-                        "Powtórz test EGR w przeciwnym stanie i sprawdź zmianę 1->0.",
-                        "Dodaj drugi niezależny marker kontrolny.",
+                        "Powtórz eksperyment w przeciwnym stanie i sprawdź przejście 1->0.",
+                        "Dodaj niezależny bodziec kontrolny, który nie powinien wpływać na badany bit.",
                     ],
-                    "warnings": ["Nazwa markera nie jest dowodem znaczenia fizycznego."],
+                    "warnings": ["Korelacja z eksperymentem nie jest dowodem znaczenia fizycznego."],
                 },
                 ensure_ascii=False,
             )
@@ -88,7 +88,7 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
         comparison_id,
         candidate_artifact_id=candidate_artifact.id,
         candidate_key=candidate["candidate_key"],
-        user_context="Marker oznaczał fizyczne odłączenie EGR; traktuj jako wskazówkę, nie dowód.",
+        user_context="",
     )
 
     assert len(result.artifacts) == 1
@@ -108,11 +108,11 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert hypothesis["status"] == "suggested"
     assert hypothesis["verified"] is False
     assert hypothesis["ai_generated"] is True
-    assert hypothesis["name"] == "EGR_state_candidate"
+    assert hypothesis["name"] == "unknown_bit_state_candidate"
     assert hypothesis["unit"] is None
     assert hypothesis["scale"] is None
     assert hypothesis["offset"] is None
-    assert hypothesis["confidence"] == pytest.approx(0.82)
+    assert hypothesis["confidence"] == pytest.approx(0.25)
     assert len(hypothesis["next_experiments"]) == 2
     assert hypothesis["warnings"]
 
@@ -125,9 +125,12 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
         "automatic_confirmation": False,
         "ai_failure_blocks_crt": False,
         "semantic_response_validation": True,
+        "automatic_semantic_labels_sent": False,
     }
     assert payload["context_sent_to_ai"]["raw_session_included"] is False
+    assert payload["context_sent_to_ai"]["automatic_semantic_labels_included"] is False
     assert payload["context_sent_to_ai"]["evidence_events_included"] == 6
+    assert payload["context_sent_to_ai"]["user_context"] == ""
     assert payload["ai"]["provider"] == "fake-local"
     assert payload["ai"]["model"] == "fake-qwen"
     assert payload["ai"]["response_contract_version"] == 2
@@ -137,7 +140,10 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
 
     assert len(fake.requests) == 1
     assert "Polish (pl-PL)" in fake.requests[0]["system"]
-    sent = json.loads(fake.requests[0]["user"])
+    sent_text = fake.requests[0]["user"]
+    assert "EGR" not in sent_text
+    assert "disconnected" not in sent_text
+    sent = json.loads(sent_text)
     assert set(sent) == {
         "task",
         "response_contract",
@@ -148,6 +154,19 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     }
     assert sent["response_contract"]["version"] == 2
     assert sent["response_contract"]["language"] == "pl-PL"
+    assert sent["response_contract"]["required_fields"] == [
+        "name",
+        "physical_meaning",
+        "rationale",
+        "next_experiments",
+        "warnings",
+    ]
+    assert sent["response_contract"]["optional_fields"] == [
+        "unit",
+        "scale",
+        "offset",
+        "confidence",
+    ]
     assert sent["response_contract"]["polish_text_fields"] == [
         "physical_meaning",
         "rationale",
@@ -157,7 +176,12 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert sent["response_contract"]["unknown_meaning_fallback"] == "unknown_bit_state_candidate"
     assert sent["candidate"]["candidate_score"] == pytest.approx(1.0)
     assert sent["candidate"]["candidate_key"] == "0:STD:123:data:B0.2"
+    assert "experiment" not in sent["candidate"]["best_support"]
+    assert "artifacts" not in sent["candidate"]["activity_validation"]
     assert len(sent["evidence"]) == 6
+    assert all("marker" not in item for item in sent["evidence"])
+    assert all("session_id" not in item for item in sent["evidence"])
+    assert all("session_name" not in item for item in sent["evidence"])
     assert "session" not in sent
     assert "frames" not in sent
     assert "raw" not in sent
