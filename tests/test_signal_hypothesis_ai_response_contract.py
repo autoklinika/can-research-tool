@@ -10,7 +10,9 @@ from app.extensions.builtin.signal_hypothesis_ai import (
 )
 from app.local_ai import LocalAIError
 from app.signal_hypothesis_service import (
+    _apply_no_context_semantic_guardrail,
     _repair_nonsemantic_response_omissions,
+    _repair_structured_text_arrays,
     _sanitize_signal_hypothesis_prompt,
 )
 
@@ -140,8 +142,8 @@ def test_prompt_redacts_experiment_marker_and_session_labels_but_preserves_opera
                     "post_window_ms": 50,
                 },
                 "score": 1.0,
-                "target": {"event_count": 6, "changed_event_count": 6, "change_ratio": 1.0},
-                "control": {"event_count": 4, "changed_event_count": 0, "change_ratio": 0.0},
+                "target": {"event_count": 6, "eligible_event_count": 6, "changed_event_count": 6, "change_ratio": 1.0},
+                "control": {"event_count": 4, "eligible_event_count": 4, "changed_event_count": 0, "change_ratio": 0.0},
                 "direction": {"dominant": "0->1", "consistency_ratio": 1.0},
                 "timing": {"mean_delay_ns": 70_000_000.0},
                 "evidence_event_count": 10,
@@ -213,3 +215,81 @@ def test_safe_response_repair_adds_only_nonsemantic_nulls_and_conservative_missi
 
 def test_safe_response_repair_does_not_rescue_semantically_empty_json() -> None:
     assert _repair_nonsemantic_response_omissions("{}") == "{}"
+
+
+def test_structured_next_experiments_are_flattened_without_inventing_text() -> None:
+    payload = _valid_response()
+    payload["next_experiments"] = [
+        {
+            "name": "Test reakcji na zmianę stanu",
+            "description": "Powtórz eksperyment i sprawdź przejście odwrotne.",
+        }
+    ]
+
+    repaired = json.loads(_repair_structured_text_arrays(json.dumps(payload, ensure_ascii=False)))
+
+    assert repaired["next_experiments"] == [
+        "Test reakcji na zmianę stanu — Powtórz eksperyment i sprawdź przejście odwrotne."
+    ]
+    normalized = _normalize_hypothesis(repaired)
+    assert len(normalized["next_experiments"]) == 1
+
+
+def test_no_context_guardrail_neutralizes_domain_hallucination_from_real_test_shape() -> None:
+    hallucination = {
+        "name": "Sygnał sterujący przekaźnikiem chłodzenia silnika",
+        "physical_meaning": "Stan przekaźnika wentylatora chłodzącego aktywowany po przekroczeniu 95 C.",
+        "unit": None,
+        "scale": None,
+        "offset": None,
+        "confidence": 0.95,
+        "rationale": "Wysoka temperatura powoduje aktywację wentylatora.",
+        "next_experiments": [
+            {
+                "name": "Test obciążenia termicznego",
+                "description": "Podgrzej silnik i obserwuj wentylator.",
+            }
+        ],
+        "warnings": ["Sprawdź przekaźnik."],
+    }
+    prompt_payload = {
+        "candidate": {
+            "candidate_score": 1.0,
+            "strength": "strong",
+            "best_support": {
+                "target": {
+                    "event_count": 6,
+                    "eligible_event_count": 6,
+                    "changed_event_count": 6,
+                },
+                "control": {
+                    "event_count": 4,
+                    "eligible_event_count": 4,
+                    "changed_event_count": 0,
+                },
+                "direction": {"dominant": "0->1"},
+                "timing": {"mean_delay_ns": 70_000_000.0},
+            },
+        },
+        "operator_context": None,
+    }
+
+    shaped = _repair_structured_text_arrays(json.dumps(hallucination, ensure_ascii=False))
+    guarded = json.loads(_apply_no_context_semantic_guardrail(shaped, prompt_payload))
+    rendered = json.dumps(guarded, ensure_ascii=False).lower()
+
+    assert guarded["name"] == "unknown_bit_state_candidate"
+    assert guarded["confidence"] == 0.0
+    assert guarded["unit"] is None
+    assert guarded["scale"] is None
+    assert guarded["offset"] is None
+    assert "6/6" in guarded["rationale"]
+    assert "0/4" in guarded["rationale"]
+    assert "70.0 ms" in guarded["rationale"]
+    assert "1→0" in guarded["next_experiments"][0]
+    assert "chłod" not in rendered
+    assert "wentyl" not in rendered
+    assert "95" not in rendered
+    assert any("Brak kontekstu operatora" in item for item in guarded["warnings"])
+    normalized = _normalize_hypothesis(guarded)
+    assert normalized["name"] == "unknown_bit_state_candidate"
