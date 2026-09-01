@@ -132,9 +132,11 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert payload["ai"]["model"] == "fake-qwen"
     assert payload["ai"]["response_contract_version"] == 2
     assert payload["ai"]["response_format"] == "json_object"
+    assert payload["ai"]["response_language"] == "pl-PL"
     assert len(payload["ai"]["response_sha256"]) == 64
 
     assert len(fake.requests) == 1
+    assert "Polish (pl-PL)" in fake.requests[0]["system"]
     sent = json.loads(fake.requests[0]["user"])
     assert set(sent) == {
         "task",
@@ -145,6 +147,13 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
         "operator_context",
     }
     assert sent["response_contract"]["version"] == 2
+    assert sent["response_contract"]["language"] == "pl-PL"
+    assert sent["response_contract"]["polish_text_fields"] == [
+        "physical_meaning",
+        "rationale",
+        "next_experiments",
+        "warnings",
+    ]
     assert sent["response_contract"]["unknown_meaning_fallback"] == "unknown_bit_state_candidate"
     assert sent["candidate"]["candidate_score"] == pytest.approx(1.0)
     assert sent["candidate"]["candidate_key"] == "0:STD:123:data:B0.2"
