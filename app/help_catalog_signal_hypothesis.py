@@ -29,6 +29,8 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
         "schema v2",
         "label redaction",
         "anti bias",
+        "pl-PL",
+        "polski",
     ),
     sections=(
         HelpSection(
@@ -69,6 +71,7 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
                 "krótkie uzasadnienie oparte o przekazane evidence",
                 "następne eksperymenty potrzebne do potwierdzenia lub odrzucenia hipotezy",
                 "ostrzeżenia i alternatywne interpretacje",
+                "pola opisowe physical_meaning, rationale, next_experiments i warnings są wymagane po polsku (pl-PL); techniczny identyfikator name i symbol jednostki mogą pozostać językowo neutralne",
             ),
         ),
         HelpSection(
@@ -76,8 +79,8 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             paragraphs=(
                 "Poprawny JSON nie wystarcza. CRT waliduje semantyczny kontrakt odpowiedzi przed zapisaniem artefaktu. Pusta nazwa, puste physical_meaning lub rationale, niepoprawny confidence, brak eksperymentu weryfikacyjnego albo brak ostrzeżenia powodują odrzucenie odpowiedzi.",
                 "Jeżeli model pominie wyłącznie semantycznie opcjonalne unit, scale lub offset, CRT uzupełnia je jako null. Jeżeli treściwa hipoteza pominie tylko AI confidence, CRT nie wymyśla pewności: zapisuje 0.0 i dopisuje jawne ostrzeżenie o tym fallbacku. Pusty lub semantycznie niekompletny JSON nadal jest odrzucany.",
-                "Jeżeli model nie potrafi ustalić znaczenia fizycznego, ma zwrócić neutralną hipotezę, np. unknown_bit_state_candidate, jasno opisać niepewność, użyć niskiego confidence i zaproponować test rozstrzygający. Nie powinien zwracać pustego obiektu {}.",
-                "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera bounded pole diagnostyczne response_excerpt — krótki, ograniczony fragment odpowiedzi modelu. Dla poprawnego wyniku artefakt zapisuje response_sha256 i response_contract_version=2, ale nie pełną surową odpowiedź modelu.",
+                "Jeżeli model nie potrafi ustalić znaczenia fizycznego, ma zwrócić neutralną hipotezę, np. unknown_bit_state_candidate, jasno po polsku opisać niepewność i zaproponować test rozstrzygający. Nie powinien zwracać pustego obiektu {}.",
+                "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera bounded pole diagnostyczne response_excerpt — krótki, ograniczony fragment odpowiedzi modelu. Dla poprawnego wyniku artefakt zapisuje response_sha256, response_contract_version=2 i response_language=pl-PL, ale nie pełną surową odpowiedź modelu.",
             ),
             note=(
                 "Aktualny artefakt Signal Hypothesis ma schema_version=2. Starsze wyniki schema v1 z wcześniejszego, zbyt łagodnego kontraktu pozostają w projekcie jako historia, ale nie są pokazywane jako aktualne hipotezy."
