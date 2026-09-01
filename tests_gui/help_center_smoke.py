@@ -102,6 +102,11 @@ def main() -> None:
     assert "Publiczne endpointy AI są odrzucane" in hypothesis_content
     assert "AI unavailable/error" in hypothesis_content
     assert "Draft DBC" in hypothesis_content
+    assert "kontrakt v2" in hypothesis_content
+    assert "unknown_bit_state_candidate" in hypothesis_content
+    assert "nie zapisuje nowego signal_hypothesis" in hypothesis_content
+    assert "schema_version=2" in hypothesis_content
+    assert "response_excerpt" in hypothesis_content
 
     help_view.open_topic("uds-transactions")
     _drain(app)
