@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -12,12 +13,25 @@ from ..manifest import ExtensionManifest, ExtensionPermission, ExtensionType
 
 
 SIGNAL_HYPOTHESIS_PROVIDER_ID = "crt.comparison.signal_hypothesis_ai"
-SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.0"
-SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "1"
+SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.1"
+SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "2"
 SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION = 1
 
 _DEFAULT_MAXIMUM_EVIDENCE_EVENTS = 8
 _MAXIMUM_EVIDENCE_EVENTS_LIMIT = 32
+_REQUIRED_HYPOTHESIS_KEYS = frozenset(
+    {
+        "name",
+        "physical_meaning",
+        "unit",
+        "scale",
+        "offset",
+        "confidence",
+        "rationale",
+        "next_experiments",
+        "warnings",
+    }
+)
 
 _SYSTEM_PROMPT = """You are the optional local AI interpretation layer in CRT, a CAN reverse-engineering workstation.
 The deterministic signal_candidates artifact is the source of truth. You must never change its score, class, counts, direction or evidence and you must never describe a hypothesis as confirmed.
@@ -36,6 +50,7 @@ Required JSON keys:
   "warnings": array of strings
 }
 If scale, offset or unit cannot be justified, return null. Prefer an empty/neutral name over invented certainty.
+Even when the signal meaning is uncertain, physical_meaning and rationale must explain that uncertainty and next_experiments must contain at least one concrete verification experiment.
 """
 
 
@@ -290,16 +305,46 @@ def _candidate_identity(candidate: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_hypothesis(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = sorted(_REQUIRED_HYPOTHESIS_KEYS - set(value))
+    if missing:
+        raise LocalAIError(
+            "AI hypothesis is missing required fields: " + ", ".join(missing)
+        )
+
+    name = _strict_text(value["name"], "name", 120, allow_empty=True)
+    physical_meaning = _strict_text(
+        value["physical_meaning"], "physical_meaning", 600, allow_empty=False
+    )
+    unit = _strict_optional_text(value["unit"], "unit", 60)
+    scale = _strict_number_or_none(value["scale"], "scale")
+    offset = _strict_number_or_none(value["offset"], "offset")
+    confidence = _strict_confidence(value["confidence"])
+    rationale = _strict_text(value["rationale"], "rationale", 1200, allow_empty=False)
+    next_experiments = _strict_string_list(
+        value["next_experiments"],
+        "next_experiments",
+        maximum=5,
+        limit=400,
+        require_nonempty=True,
+    )
+    warnings = _strict_string_list(
+        value["warnings"],
+        "warnings",
+        maximum=5,
+        limit=400,
+        require_nonempty=False,
+    )
+
     return {
-        "name": _text(value.get("name"), 120),
-        "physical_meaning": _text(value.get("physical_meaning"), 600),
-        "unit": _optional_text(value.get("unit"), 60),
-        "scale": _number_or_none(value.get("scale")),
-        "offset": _number_or_none(value.get("offset")),
-        "confidence": _ratio(value.get("confidence")),
-        "rationale": _text(value.get("rationale"), 1200),
-        "next_experiments": _string_list(value.get("next_experiments"), maximum=5, limit=400),
-        "warnings": _string_list(value.get("warnings"), maximum=5, limit=400),
+        "name": name,
+        "physical_meaning": physical_meaning,
+        "unit": unit,
+        "scale": scale,
+        "offset": offset,
+        "confidence": confidence,
+        "rationale": rationale,
+        "next_experiments": next_experiments,
+        "warnings": warnings,
     }
 
 
@@ -346,6 +391,68 @@ def _json_value(value: Any) -> Any:
 
 def _text(value: object, limit: int) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _strict_text(value: object, field: str, limit: int, *, allow_empty: bool) -> str:
+    if not isinstance(value, str):
+        raise LocalAIError(f"AI hypothesis field {field} must be a string")
+    text = value.strip()[:limit]
+    if not allow_empty and not text:
+        raise LocalAIError(f"AI hypothesis field {field} cannot be empty")
+    return text
+
+
+def _strict_optional_text(value: object, field: str, limit: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise LocalAIError(f"AI hypothesis field {field} must be a string or null")
+    text = value.strip()[:limit]
+    return text or None
+
+
+def _strict_number_or_none(value: object, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LocalAIError(f"AI hypothesis field {field} must be a number or null")
+    number = float(value)
+    if not math.isfinite(number):
+        raise LocalAIError(f"AI hypothesis field {field} must be finite")
+    return number
+
+
+def _strict_confidence(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LocalAIError("AI hypothesis field confidence must be a number from 0 to 1")
+    number = float(value)
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise LocalAIError("AI hypothesis field confidence must be between 0 and 1")
+    return round(number, 6)
+
+
+def _strict_string_list(
+    value: object,
+    field: str,
+    *,
+    maximum: int,
+    limit: int,
+    require_nonempty: bool,
+) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        raise LocalAIError(f"AI hypothesis field {field} must be an array of strings")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise LocalAIError(f"AI hypothesis field {field} must contain only strings")
+        text = item.strip()[:limit]
+        if text:
+            result.append(text)
+        if len(result) >= maximum:
+            break
+    if require_nonempty and not result:
+        raise LocalAIError(f"AI hypothesis field {field} must contain at least one item")
+    return result
 
 
 def _optional_text(value: object, limit: int) -> str | None:
