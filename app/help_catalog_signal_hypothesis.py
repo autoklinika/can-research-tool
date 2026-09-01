@@ -72,7 +72,7 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             paragraphs=(
                 "Poprawny JSON nie wystarcza. CRT waliduje semantyczny kontrakt odpowiedzi przed zapisaniem artefaktu. Brak wymaganych pól, pusta nazwa, puste physical_meaning lub rationale, niepoprawny confidence, brak eksperymentu weryfikacyjnego albo brak ostrzeżenia powodują odrzucenie odpowiedzi.",
                 "Jeżeli model nie potrafi ustalić znaczenia fizycznego, ma zwrócić neutralną hipotezę, np. unknown_bit_state_candidate, jasno opisać niepewność, użyć niskiego confidence i zaproponować test rozstrzygający. Nie powinien zwracać pustego obiektu {}.",
-                "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera krótki, ograniczony fragment odpowiedzi modelu, aby można było zdiagnozować problem bez zapisywania wadliwej hipotezy jako wyniku.",
+                "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera bounded pole diagnostyczne response_excerpt — krótki, ograniczony fragment odpowiedzi modelu. Dla poprawnego wyniku artefakt zapisuje response_sha256 i response_contract_version=2, ale nie pełną surową odpowiedź modelu.",
             ),
             note=(
                 "Aktualny artefakt Signal Hypothesis ma schema_version=2. Starsze wyniki schema v1 z wcześniejszego, zbyt łagodnego kontraktu pozostają w projekcie jako historia, ale nie są pokazywane jako aktualne hipotezy."
