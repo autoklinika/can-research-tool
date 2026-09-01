@@ -24,13 +24,14 @@ from app.signal_hypothesis_service import SignalHypothesisService
 
 
 class _FakeLocalAI:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, content: str | None = None) -> None:
         self._config = LocalAIConfig(
             base_url="http://127.0.0.1:11434/v1",
             model="fake-qwen",
             timeout_s=5,
         )
         self.fail = fail
+        self.content = content
         self.requests: list[dict[str, str]] = []
 
     @property
@@ -43,11 +44,9 @@ class _FakeLocalAI:
         self.requests.append({"system": system_prompt, "user": user_prompt})
         if self.fail:
             raise LocalAIUnavailable("synthetic offline")
-        return LocalAICompletion(
-            provider="fake-local",
-            model="fake-qwen",
-            endpoint="http://127.0.0.1:11434/v1/chat/completions",
-            content=json.dumps(
+        content = self.content
+        if content is None:
+            content = json.dumps(
                 {
                     "name": "EGR_state_candidate",
                     "physical_meaning": "Możliwy binarny stan związany z eksperymentem EGR.",
@@ -63,7 +62,12 @@ class _FakeLocalAI:
                     "warnings": ["Nazwa markera nie jest dowodem znaczenia fizycznego."],
                 },
                 ensure_ascii=False,
-            ),
+            )
+        return LocalAICompletion(
+            provider="fake-local",
+            model="fake-qwen",
+            endpoint="http://127.0.0.1:11434/v1/chat/completions",
+            content=content,
             latency_ms=12.5,
             usage={"prompt_tokens": 100, "completion_tokens": 80},
         )
@@ -90,8 +94,10 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert len(result.artifacts) == 1
     artifact = result.artifacts[0]
     assert artifact.artifact_type == "signal_hypothesis"
+    assert artifact.schema_version == 2
     payload = service.read_hypothesis(artifact)
     assert payload["schema"] == "crt.signal_hypothesis"
+    assert payload["schema_version"] == 2
     assert payload["source_candidate"]["artifact_id"] == candidate_artifact.id
     assert payload["source_candidate"]["artifact_sha256"] == candidate_artifact.sha256
     assert payload["source_candidate"]["candidate_key"] == "0:STD:123:data:B0.2"
@@ -108,6 +114,7 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
     assert hypothesis["offset"] is None
     assert hypothesis["confidence"] == pytest.approx(0.82)
     assert len(hypothesis["next_experiments"]) == 2
+    assert hypothesis["warnings"]
 
     assert payload["guardrails"] == {
         "source_of_truth": "signal_candidates",
@@ -117,21 +124,28 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
         "active_diagnostics": False,
         "automatic_confirmation": False,
         "ai_failure_blocks_crt": False,
+        "semantic_response_validation": True,
     }
     assert payload["context_sent_to_ai"]["raw_session_included"] is False
     assert payload["context_sent_to_ai"]["evidence_events_included"] == 6
     assert payload["ai"]["provider"] == "fake-local"
     assert payload["ai"]["model"] == "fake-qwen"
+    assert payload["ai"]["response_contract_version"] == 2
+    assert payload["ai"]["response_format"] == "json_object"
+    assert len(payload["ai"]["response_sha256"]) == 64
 
     assert len(fake.requests) == 1
     sent = json.loads(fake.requests[0]["user"])
     assert set(sent) == {
         "task",
+        "response_contract",
         "candidate_artifact",
         "candidate",
         "evidence",
         "operator_context",
     }
+    assert sent["response_contract"]["version"] == 2
+    assert sent["response_contract"]["unknown_meaning_fallback"] == "unknown_bit_state_candidate"
     assert sent["candidate"]["candidate_score"] == pytest.approx(1.0)
     assert sent["candidate"]["candidate_key"] == "0:STD:123:data:B0.2"
     assert len(sent["evidence"]) == 6
@@ -141,6 +155,31 @@ def test_signal_hypothesis_uses_only_candidate_artifact_and_keeps_source_truth(
 
     candidate_after = candidate_service.read_artifact(candidate_artifact)
     assert candidate_after == candidate_payload
+    for session_id, expected in hashes.items():
+        record = next(item for item in project.list_sessions() if item.id == session_id)
+        assert _sha256(project.absolute_path(record.relative_path)) == expected
+
+
+def test_signal_hypothesis_rejects_empty_json_and_writes_no_artifact(
+    tmp_path: Path,
+) -> None:
+    project, comparison_id, candidate_artifact, hashes = _build_candidate(tmp_path)
+    candidate_payload = SignalCandidateService(project).read_artifact(candidate_artifact)
+    candidate_key = candidate_payload["candidates"][0]["candidate_key"]
+    service = SignalHypothesisService(project, ai_client=_FakeLocalAI(content="{}"))
+
+    with pytest.raises(
+        Exception,
+        match=r"AI response rejected.*missing required fields.*response_excerpt=.*\{\}",
+    ):
+        service.run(
+            comparison_id,
+            candidate_artifact_id=candidate_artifact.id,
+            candidate_key=candidate_key,
+        )
+
+    assert service.list_hypothesis_artifacts(comparison_id) == ()
+    assert service.list_candidate_artifacts(comparison_id)
     for session_id, expected in hashes.items():
         record = next(item for item in project.list_sessions() if item.id == session_id)
         assert _sha256(project.absolute_path(record.relative_path)) == expected
