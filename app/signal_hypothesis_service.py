@@ -30,6 +30,10 @@ from .local_ai import (
 from .project import CrtProject
 
 
+_CONTEXT_POLICY = "label-redacted-v1"
+_RESPONSE_REPAIR_POLICY = "safe-nonsemantic-v1"
+
+
 class _SignalHypothesisAIClient:
     """Feature-local wrapper that removes experiment-label bias before inference.
 
@@ -65,15 +69,17 @@ class _SignalHypothesisAIClient:
             cancellation=cancellation,
         )
         repaired = _repair_nonsemantic_response_omissions(completion.content)
-        if repaired == completion.content:
-            return completion
+        usage = dict(completion.usage)
+        usage["crt_context_policy"] = _CONTEXT_POLICY
+        usage["crt_response_repair_policy"] = _RESPONSE_REPAIR_POLICY
+        usage["crt_response_repaired"] = repaired != completion.content
         return LocalAICompletion(
             provider=completion.provider,
             model=completion.model,
             endpoint=completion.endpoint,
             content=repaired,
             latency_ms=completion.latency_ms,
-            usage=completion.usage,
+            usage=usage,
         )
 
 
