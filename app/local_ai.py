@@ -4,7 +4,7 @@ import ipaddress
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -25,22 +25,32 @@ class LocalAIConfig:
     model: str
     timeout_s: float = 30.0
     api_key: str = ""
+    max_tokens: int = 768
+    reasoning_effort: str = "none"
 
     def __post_init__(self) -> None:
         base_url = self.base_url.strip().rstrip("/")
         model = self.model.strip()
         timeout_s = float(self.timeout_s)
+        max_tokens = int(self.max_tokens)
+        reasoning_effort = self.reasoning_effort.strip().lower()
         if not base_url:
             raise ValueError("local AI base URL cannot be empty")
         if not model:
             raise ValueError("local AI model cannot be empty")
-        if not 1.0 <= timeout_s <= 120.0:
-            raise ValueError("local AI timeout must be between 1 and 120 seconds")
+        if not 1.0 <= timeout_s <= 300.0:
+            raise ValueError("local AI timeout must be between 1 and 300 seconds")
+        if not 64 <= max_tokens <= 4096:
+            raise ValueError("local AI max_tokens must be between 64 and 4096")
+        if reasoning_effort not in {"none", "low", "medium", "high"}:
+            raise ValueError("local AI reasoning_effort must be none, low, medium or high")
         _validate_local_url(base_url)
         object.__setattr__(self, "base_url", base_url)
         object.__setattr__(self, "model", model)
         object.__setattr__(self, "timeout_s", timeout_s)
         object.__setattr__(self, "api_key", self.api_key.strip())
+        object.__setattr__(self, "max_tokens", max_tokens)
+        object.__setattr__(self, "reasoning_effort", reasoning_effort)
 
     @classmethod
     def from_environment(cls) -> "LocalAIConfig":
@@ -49,6 +59,8 @@ class LocalAIConfig:
             model=os.environ.get("CRT_AI_MODEL", "qwen3.6:35b-hermes64k"),
             timeout_s=float(os.environ.get("CRT_AI_TIMEOUT_S", "30")),
             api_key=os.environ.get("CRT_AI_API_KEY", ""),
+            max_tokens=int(os.environ.get("CRT_AI_MAX_TOKENS", "768")),
+            reasoning_effort=os.environ.get("CRT_AI_REASONING_EFFORT", "none"),
         )
 
 
@@ -60,6 +72,7 @@ class LocalAICompletion:
     content: str
     latency_ms: float
     usage: Mapping[str, Any]
+    request_options: Mapping[str, Any] = field(default_factory=dict)
 
 
 class LocalAIClient(Protocol):
@@ -83,6 +96,10 @@ class OpenAICompatibleLocalClient:
     The client deliberately accepts only localhost/private-LAN destinations by
     default. CRT never sends RAW sessions through this adapter; callers decide
     the bounded structured context that is supplied to the model.
+
+    Signal Hypothesis requests default to reasoning_effort=none because CRT
+    needs a short auditable structured suggestion rather than hidden extended
+    reasoning. max_tokens bounds completion time and response size.
     """
 
     provider_name = "openai-compatible-local"
@@ -111,6 +128,10 @@ class OpenAICompatibleLocalClient:
         cancellation: object | None = None,
     ) -> LocalAICompletion:
         _raise_if_cancelled(cancellation)
+        request_options = {
+            "reasoning_effort": self._config.reasoning_effort,
+            "max_tokens": self._config.max_tokens,
+        }
         payload = {
             "model": self._config.model,
             "messages": [
@@ -120,6 +141,7 @@ class OpenAICompatibleLocalClient:
             "temperature": 0.0,
             "stream": False,
             "response_format": {"type": "json_object"},
+            **request_options,
         }
         headers = {"Content-Type": "application/json"}
         if self._config.api_key:
@@ -165,6 +187,7 @@ class OpenAICompatibleLocalClient:
             content=content.strip(),
             latency_ms=round(latency_ms, 3),
             usage=usage,
+            request_options=request_options,
         )
 
 
