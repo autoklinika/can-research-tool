@@ -14,8 +14,8 @@ from ..manifest import ExtensionManifest, ExtensionPermission, ExtensionType
 
 
 SIGNAL_HYPOTHESIS_PROVIDER_ID = "crt.comparison.signal_hypothesis_ai"
-SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.2"
-SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "3"
+SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.3"
+SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "4"
 SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION = 2
 
 _DEFAULT_MAXIMUM_EVIDENCE_EVENTS = 8
@@ -49,9 +49,10 @@ Return exactly one JSON object. Do not include markdown, prose outside JSON, hid
   "next_experiments": array of strings,
   "warnings": array of strings
 }
+Write all human-readable explanatory text in Polish (pl-PL), regardless of the language used in the input data. In particular, physical_meaning, rationale, every next_experiments item and every warnings item must be written in Polish. The name field may remain a short technical identifier and unit may use a standard engineering symbol.
 Never use an empty string for name, physical_meaning or rationale. next_experiments and warnings must each contain at least one concrete item.
 If unit, scale or offset cannot be justified, return null for that field.
-If the physical meaning cannot be identified from the evidence, do not refuse and do not return {}. Use a neutral name such as "unknown_bit_state_candidate", explicitly state in physical_meaning that the bit is only correlated with the observed experiment and its physical meaning is unknown, use low confidence, explain the uncertainty in rationale, propose at least one discriminating verification experiment, and warn that marker labels are not proof.
+If the physical meaning cannot be identified from the evidence, do not refuse and do not return {}. Use a neutral name such as "unknown_bit_state_candidate", explicitly state in Polish in physical_meaning that the bit is only correlated with the observed experiment and its physical meaning is unknown, use low confidence, explain the uncertainty in Polish in rationale, propose at least one discriminating verification experiment in Polish, and warn in Polish that marker labels are not proof.
 A strong deterministic candidate score means strong correlation in the supplied experiment; it does not by itself prove semantic meaning.
 """
 
@@ -152,6 +153,7 @@ class SignalHypothesisAIProvider:
                 "usage": dict(completion.usage),
                 "response_format": "json_object",
                 "response_contract_version": 2,
+                "response_language": "pl-PL",
                 "response_sha256": response_sha256,
             },
             "guardrails": {
@@ -199,6 +201,7 @@ class SignalHypothesisAIProvider:
                 "strength": str(candidate.get("strength", "")),
                 "ai_model": completion.model,
                 "response_contract_version": 2,
+                "response_language": "pl-PL",
                 "response_sha256": response_sha256,
                 "verified": False,
             },
@@ -222,12 +225,19 @@ def _ai_context(
     )
     evidence = [_compact_evidence(item) for item in evidence_rows[:maximum_evidence_events]]
     return {
-        "task": "Propose a testable CAN signal hypothesis; do not claim confirmation.",
+        "task": "Propose a testable CAN signal hypothesis; do not claim confirmation. Write explanatory output in Polish (pl-PL).",
         "response_contract": {
             "version": 2,
+            "language": "pl-PL",
             "all_fields_required": True,
             "nonempty_fields": ["name", "physical_meaning", "rationale"],
             "nonempty_arrays": ["next_experiments", "warnings"],
+            "polish_text_fields": [
+                "physical_meaning",
+                "rationale",
+                "next_experiments",
+                "warnings",
+            ],
             "unknown_meaning_fallback": "unknown_bit_state_candidate",
         },
         "candidate_artifact": {
