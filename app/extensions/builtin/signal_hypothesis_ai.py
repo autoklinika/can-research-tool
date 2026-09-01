@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -13,9 +14,9 @@ from ..manifest import ExtensionManifest, ExtensionPermission, ExtensionType
 
 
 SIGNAL_HYPOTHESIS_PROVIDER_ID = "crt.comparison.signal_hypothesis_ai"
-SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.1"
-SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "2"
-SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION = 1
+SIGNAL_HYPOTHESIS_PROVIDER_VERSION = "1.0.2"
+SIGNAL_HYPOTHESIS_ALGORITHM_VERSION = "3"
+SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION = 2
 
 _DEFAULT_MAXIMUM_EVIDENCE_EVENTS = 8
 _MAXIMUM_EVIDENCE_EVENTS_LIMIT = 32
@@ -36,8 +37,7 @@ _REQUIRED_HYPOTHESIS_KEYS = frozenset(
 _SYSTEM_PROMPT = """You are the optional local AI interpretation layer in CRT, a CAN reverse-engineering workstation.
 The deterministic signal_candidates artifact is the source of truth. You must never change its score, class, counts, direction or evidence and you must never describe a hypothesis as confirmed.
 Infer only a cautious, testable signal hypothesis from the supplied structured candidate data. Marker/experiment names are operator labels and may be suggestive, but are not proof of physical meaning.
-Return JSON only. Do not include markdown and do not provide hidden chain-of-thought. Use a short evidence-based rationale.
-Required JSON keys:
+Return exactly one JSON object. Do not include markdown, prose outside JSON, hidden chain-of-thought, or an empty object. Always return every required key:
 {
   "name": string,
   "physical_meaning": string,
@@ -49,8 +49,10 @@ Required JSON keys:
   "next_experiments": array of strings,
   "warnings": array of strings
 }
-If scale, offset or unit cannot be justified, return null. Prefer an empty/neutral name over invented certainty.
-Even when the signal meaning is uncertain, physical_meaning and rationale must explain that uncertainty and next_experiments must contain at least one concrete verification experiment.
+Never use an empty string for name, physical_meaning or rationale. next_experiments and warnings must each contain at least one concrete item.
+If unit, scale or offset cannot be justified, return null for that field.
+If the physical meaning cannot be identified from the evidence, do not refuse and do not return {}. Use a neutral name such as "unknown_bit_state_candidate", explicitly state in physical_meaning that the bit is only correlated with the observed experiment and its physical meaning is unknown, use low confidence, explain the uncertainty in rationale, propose at least one discriminating verification experiment, and warn that marker labels are not proof.
+A strong deterministic candidate score means strong correlation in the supplied experiment; it does not by itself prove semantic meaning.
 """
 
 
@@ -102,12 +104,16 @@ class SignalHypothesisAIProvider:
         context.progress.report(2, 4, "local AI response received; validating hypothesis")
         try:
             response = extract_json_object(completion.content)
-        except LocalAIError:
-            raise
-        hypothesis = _normalize_hypothesis(response)
+            hypothesis = _normalize_hypothesis(response)
+        except LocalAIError as exc:
+            raise LocalAIError(
+                f"AI response rejected (model={completion.model}): {exc}; "
+                f"response_excerpt={_response_excerpt(completion.content)}"
+            ) from exc
         context.cancellation.raise_if_cancelled()
 
         candidate_identity = _candidate_identity(candidate)
+        response_sha256 = hashlib.sha256(completion.content.encode("utf-8")).hexdigest()
         payload = {
             "schema": "crt.signal_hypothesis",
             "schema_version": SIGNAL_HYPOTHESIS_ARTIFACT_SCHEMA_VERSION,
@@ -144,6 +150,9 @@ class SignalHypothesisAIProvider:
                 "endpoint": completion.endpoint,
                 "latency_ms": completion.latency_ms,
                 "usage": dict(completion.usage),
+                "response_format": "json_object",
+                "response_contract_version": 2,
+                "response_sha256": response_sha256,
             },
             "guardrails": {
                 "source_of_truth": "signal_candidates",
@@ -153,6 +162,7 @@ class SignalHypothesisAIProvider:
                 "active_diagnostics": False,
                 "automatic_confirmation": False,
                 "ai_failure_blocks_crt": False,
+                "semantic_response_validation": True,
             },
             "context_sent_to_ai": {
                 "raw_session_included": False,
@@ -188,10 +198,12 @@ class SignalHypothesisAIProvider:
                 "candidate_score": _ratio(candidate.get("candidate_score")),
                 "strength": str(candidate.get("strength", "")),
                 "ai_model": completion.model,
+                "response_contract_version": 2,
+                "response_sha256": response_sha256,
                 "verified": False,
             },
         )
-        context.progress.report(4, 4, "saved non-authoritative Signal Hypothesis artifact")
+        context.progress.report(4, 4, "saved validated non-authoritative Signal Hypothesis artifact")
         return artifact
 
 
@@ -211,6 +223,13 @@ def _ai_context(
     evidence = [_compact_evidence(item) for item in evidence_rows[:maximum_evidence_events]]
     return {
         "task": "Propose a testable CAN signal hypothesis; do not claim confirmation.",
+        "response_contract": {
+            "version": 2,
+            "all_fields_required": True,
+            "nonempty_fields": ["name", "physical_meaning", "rationale"],
+            "nonempty_arrays": ["next_experiments", "warnings"],
+            "unknown_meaning_fallback": "unknown_bit_state_candidate",
+        },
         "candidate_artifact": {
             "artifact_id": artifact.id,
             "sha256": artifact.sha256,
@@ -311,7 +330,7 @@ def _normalize_hypothesis(value: Mapping[str, Any]) -> dict[str, Any]:
             "AI hypothesis is missing required fields: " + ", ".join(missing)
         )
 
-    name = _strict_text(value["name"], "name", 120, allow_empty=True)
+    name = _strict_text(value["name"], "name", 120, allow_empty=False)
     physical_meaning = _strict_text(
         value["physical_meaning"], "physical_meaning", 600, allow_empty=False
     )
@@ -332,7 +351,7 @@ def _normalize_hypothesis(value: Mapping[str, Any]) -> dict[str, Any]:
         "warnings",
         maximum=5,
         limit=400,
-        require_nonempty=False,
+        require_nonempty=True,
     )
 
     return {
@@ -455,22 +474,11 @@ def _strict_string_list(
     return result
 
 
-def _optional_text(value: object, limit: int) -> str | None:
-    text = _text(value, limit)
-    return text or None
-
-
-def _string_list(value: object, *, maximum: int, limit: int) -> list[str]:
-    if not isinstance(value, (list, tuple)):
-        return []
-    result = []
-    for item in value:
-        text = _text(item, limit)
-        if text:
-            result.append(text)
-        if len(result) >= maximum:
-            break
-    return result
+def _response_excerpt(content: str, *, limit: int = 1200) -> str:
+    compact = " ".join(str(content).strip().split())
+    if len(compact) > limit:
+        compact = compact[:limit] + "…"
+    return json.dumps(compact, ensure_ascii=False)
 
 
 def _integer(value: object, *, default: int = 0) -> int:
