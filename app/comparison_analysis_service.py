@@ -26,6 +26,7 @@ from .extensions.builtin import (
     register_builtin_comparison_extensions,
     register_builtin_extensions,
 )
+from .local_ai import LocalAIClient
 from .project import CrtProject
 from .project_domain_store import ProjectDomainStore
 
@@ -39,19 +40,24 @@ class ComparisonAnalysisExecutionResult:
 
 
 class ComparisonAnalysisService:
-    """Application layer for deterministic passive analysis of comparison sets."""
+    """Application layer for passive comparison analyses, including optional local AI."""
 
     def __init__(
         self,
         project: CrtProject,
         *,
         registry: ExtensionRegistry | None = None,
+        ai_client: LocalAIClient | None = None,
     ) -> None:
         self.project = project
         self.store = ProjectDomainStore(project)
         self.comparison_sets = ComparisonSetStore(project)
+        self.ai_client = ai_client
         if registry is None:
-            registry = ExtensionRegistry(passive_only=True, ai_enabled=False)
+            registry = ExtensionRegistry(
+                passive_only=True,
+                ai_enabled=ai_client is not None,
+            )
             register_builtin_extensions(registry)
             register_builtin_comparison_extensions(registry)
         self.registry = registry
@@ -80,6 +86,8 @@ class ComparisonAnalysisService:
         manifest = provider.manifest
         if "comparison_set" not in manifest.inputs:
             raise ValueError(f"provider does not accept comparison_set input: {manifest.id}")
+        if manifest.requires_ai and self.ai_client is None:
+            raise ValueError(f"AI provider has no configured local AI client: {manifest.id}")
 
         comparison = self.comparison_sets.get(cleaned_comparison_set_id)
         normalized_parameters = dict(comparison.parameters)
@@ -139,6 +147,11 @@ class ComparisonAnalysisService:
                 base_session_id=comparison.base_session_id,
                 synchronization_mode=comparison.synchronization_mode,
                 parameters=dict(comparison.parameters),
+            ),
+            ai_client=(
+                self.ai_client
+                if ExtensionPermission.AI_USE in manifest.permissions
+                else None
             ),
         )
         result = self.runner.execute_comparison(manifest.id, context)

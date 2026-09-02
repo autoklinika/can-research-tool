@@ -88,6 +88,26 @@ def main() -> None:
     assert "Signal Hypothesis Stage 1" in candidate_content
     assert "nie generuje żadnej transmisji CAN" in candidate_content
 
+    help_view.search_edit.setText("signal hypothesis local AI Ollama Qwen")
+    _drain(app)
+    assert "signal-hypothesis-ai" in help_view.visible_topic_ids
+    help_view.open_topic("signal-hypothesis-ai")
+    _drain(app)
+    assert help_view.current_topic_id == "signal-hypothesis-ai"
+    hypothesis_content = help_view.browser.toPlainText()
+    assert "Signal Hypothesis — lokalne AI i hipotezy sygnałów" in hypothesis_content
+    assert "suggested" in hypothesis_content
+    assert "verified=false" in hypothesis_content
+    assert "RAW CAN" in hypothesis_content
+    assert "Publiczne endpointy AI są odrzucane" in hypothesis_content
+    assert "AI unavailable/error" in hypothesis_content
+    assert "Draft DBC" in hypothesis_content
+    assert "kontrakt v2" in hypothesis_content
+    assert "unknown_bit_state_candidate" in hypothesis_content
+    assert "nie zapisuje nowego signal_hypothesis" in hypothesis_content
+    assert "schema_version=2" in hypothesis_content
+    assert "response_excerpt" in hypothesis_content
+
     help_view.open_topic("uds-transactions")
     _drain(app)
     assert help_view.current_topic_id == "uds-transactions"
