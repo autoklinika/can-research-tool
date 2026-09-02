@@ -1,0 +1,67 @@
+name: Signal Hypothesis Review Stage 2 Validation
+
+on:
+  pull_request:
+    paths:
+      - "app/extensions/builtin/signal_hypothesis_review.py"
+      - "app/signal_hypothesis_review_service.py"
+      - "gui/signal_hypothesis_view.py"
+      - "gui/signal_hypothesis_view_stage1.py"
+      - "tests/test_signal_hypothesis_review.py"
+      - "tests_gui/signal_hypothesis_review_smoke.py"
+      - "app/help_catalog_signal_hypothesis.py"
+      - "docs/reports/SIGNAL_HYPOTHESIS_REVIEW_STAGE2_PL.md"
+      - ".github/workflows/signal-hypothesis-review-stage2.yml"
+  workflow_dispatch:
+
+jobs:
+  signal-hypothesis-review:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+
+      - name: Compile review sources
+        run: >-
+          python -m compileall -q
+          app/extensions/builtin/signal_hypothesis_review.py
+          app/signal_hypothesis_review_service.py
+          gui/signal_hypothesis_view.py
+          gui/signal_hypothesis_view_stage1.py
+          tests/test_signal_hypothesis_review.py
+          tests_gui/signal_hypothesis_review_smoke.py
+
+      - name: Verify append-only review core
+        run: >-
+          python -m pytest
+          tests/test_signal_hypothesis_review.py
+          tests/test_signal_hypothesis_ai.py
+          tests/test_signal_candidate_engine.py
+          -q --junitxml=signal-hypothesis-review-junit.xml
+
+      - name: Verify review GUI without network
+        run: python tests_gui/signal_hypothesis_review_smoke.py
+
+      - name: Verify existing Signal Hypothesis GUI regression
+        run: python tests_gui/signal_hypothesis_smoke.py
+
+      - name: Upload review diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-hypothesis-review-windows
+          path: signal-hypothesis-review-junit.xml
+          if-no-files-found: warn
+          retention-days: 3
