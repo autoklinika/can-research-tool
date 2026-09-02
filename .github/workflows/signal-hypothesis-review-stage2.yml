@@ -5,11 +5,13 @@ on:
     paths:
       - "app/extensions/builtin/signal_hypothesis_review.py"
       - "app/signal_hypothesis_review_service.py"
+      - "app/help_catalog_signal_hypothesis_review.py"
       - "gui/signal_hypothesis_view.py"
       - "gui/signal_hypothesis_view_stage1.py"
+      - "gui/signal_hypothesis_view_stage2.py"
       - "tests/test_signal_hypothesis_review.py"
       - "tests_gui/signal_hypothesis_review_smoke.py"
-      - "app/help_catalog_signal_hypothesis.py"
+      - "tests_gui/signal_hypothesis_smoke.py"
       - "docs/reports/SIGNAL_HYPOTHESIS_REVIEW_STAGE2_PL.md"
       - ".github/workflows/signal-hypothesis-review-stage2.yml"
   workflow_dispatch:
@@ -38,10 +40,13 @@ jobs:
           python -m compileall -q
           app/extensions/builtin/signal_hypothesis_review.py
           app/signal_hypothesis_review_service.py
+          app/help_catalog_signal_hypothesis_review.py
           gui/signal_hypothesis_view.py
           gui/signal_hypothesis_view_stage1.py
+          gui/signal_hypothesis_view_stage2.py
           tests/test_signal_hypothesis_review.py
           tests_gui/signal_hypothesis_review_smoke.py
+          tests_gui/signal_hypothesis_smoke.py
 
       - name: Verify append-only review core
         run: >-
@@ -56,6 +61,9 @@ jobs:
 
       - name: Verify existing Signal Hypothesis GUI regression
         run: python tests_gui/signal_hypothesis_smoke.py
+
+      - name: Verify Help Center regression
+        run: python tests_gui/help_center_smoke.py
 
       - name: Upload review diagnostics
         if: failure()
