@@ -5,6 +5,7 @@ on:
     paths:
       - "app/local_ai.py"
       - "app/signal_hypothesis_service.py"
+      - "app/signal_hypothesis_guardrail.py"
       - "app/help_catalog_signal_hypothesis.py"
       - "app/comparison_analysis_service.py"
       - "app/extensions/contracts.py"
@@ -14,6 +15,7 @@ on:
       - "tests/test_local_ai_request_contract.py"
       - "tests/test_signal_hypothesis_ai.py"
       - "tests/test_signal_hypothesis_ai_response_contract.py"
+      - "tests/test_signal_hypothesis_operator_context_guardrail.py"
       - "tests_gui/signal_hypothesis_smoke.py"
       - "tests_gui/help_center_smoke.py"
       - ".github/workflows/signal-hypothesis-ai-stage1.yml"
@@ -42,6 +44,7 @@ jobs:
           python -m compileall -q
           app/local_ai.py
           app/signal_hypothesis_service.py
+          app/signal_hypothesis_guardrail.py
           app/help_catalog_signal_hypothesis.py
           app/comparison_analysis_service.py
           app/extensions/contracts.py
@@ -51,6 +54,7 @@ jobs:
           tests/test_local_ai_request_contract.py
           tests/test_signal_hypothesis_ai.py
           tests/test_signal_hypothesis_ai_response_contract.py
+          tests/test_signal_hypothesis_operator_context_guardrail.py
           tests_gui/signal_hypothesis_smoke.py
           tests_gui/help_center_smoke.py
 
@@ -60,6 +64,7 @@ jobs:
           tests/test_local_ai_request_contract.py
           tests/test_signal_hypothesis_ai.py
           tests/test_signal_hypothesis_ai_response_contract.py
+          tests/test_signal_hypothesis_operator_context_guardrail.py
           tests/test_extension_api_foundation.py
           tests/test_signal_candidate_engine.py
           -q --junitxml=signal-hypothesis-ai-junit.xml
