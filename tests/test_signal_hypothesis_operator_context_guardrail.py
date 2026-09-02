@@ -102,8 +102,11 @@ def test_operator_context_is_domain_hint_not_bit_semantics() -> None:
         "Powtórz odłączenie EGR i sprawdź powtarzalność przejścia.",
         "Wykonaj przeciwny stan eksperymentu i sprawdź, czy bit wraca do 0.",
     ]
-    assert len(hypothesis["warnings"]) == 3
-    assert all("dowód" in item or "CRT" in item or "nie potwierdza" in item for item in hypothesis["warnings"])
+    assert hypothesis["warnings"] == [
+        "Kontekst operatora jest wskazówką semantyczną, a nie dowodem znaczenia sygnału.",
+        "CRT nie przypisuje znaczenia stanom 0/1 ani roli komenda/pomiar bez osobnego evidence.",
+        "Silna korelacja z eksperymentem nie potwierdza funkcji fizycznej kandydata.",
+    ]
 
 
 def test_operator_context_guardrail_does_nothing_without_context() -> None:
