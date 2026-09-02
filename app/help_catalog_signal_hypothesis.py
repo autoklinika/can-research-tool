@@ -63,24 +63,31 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             ),
         ),
         HelpSection(
+            "Kontekst operatora — domena, nie semantyka bitu",
+            paragraphs=(
+                "Niepusty Kontekst operatora może wskazać obszar eksperymentu, np. EGR, ale nadal nie jest dowodem funkcji bitu. CRT przed artifact.write deterministycznie zastępuje zbyt szczegółowe twierdzenia modelu bezpiecznym opisem: kandydat może być związany z obszarem wskazanym przez operatora, lecz dane nie określają funkcji bitu ani znaczenia stanów 0 i 1.",
+                "CRT nie zapisuje na podstawie samego kontekstu operatora twierdzeń typu 1=otwarcie, 0=zamknięcie, command/feedback, nazwy konkretnego aktuatora, progu, stanu domyślnego ani jednostki/scale/offset. AI confidence jest w tym trybie ograniczone do maksymalnie 0.35.",
+                "Także następne eksperymenty są budowane przez CRT deterministycznie dla dokładnego CAN ID / Byte / Bit i obserwowanego kierunku. Dzięki temu model nie może pomylić np. B0.2 z innym bitem ani dopisać nieuzasadnionych manipulacji fizycznych. Eksperymenty dotyczą powtórzenia bodźca operatora, przejścia odwrotnego i niezależnej kontroli.",
+            ),
+        ),
+        HelpSection(
             "Konfiguracja lokalnego AI",
             paragraphs=(
                 "Stage 1 korzysta z lokalnego endpointu zgodnego z OpenAI Chat Completions, np. Ollama /v1. W karcie Signal Hypothesis podaje się Local AI URL, model i timeout.",
                 "Adapter Stage 1 akceptuje localhost, prywatne adresy LAN oraz lokalne hosty .local/.lan. Publiczne endpointy AI są odrzucane, aby przypadkowo nie wysłać danych poza lokalną infrastrukturę.",
-                "Dla krótkiego audytowalnego structured output adapter domyślnie używa reasoning_effort=none, max_tokens=768, temperature=0 oraz response_format=json_object.",
+                "Dla krótkiego audytowalnego structured output adapter domyślnie używa reasoning_effort=none, max_tokens=1536, temperature=0 oraz response_format=json_object.",
                 "Ustawienia URL/model/timeout są zapisywane lokalnie przez QSettings. Można też użyć CRT_AI_BASE_URL, CRT_AI_MODEL i CRT_AI_TIMEOUT_S jako wartości początkowych.",
             ),
         ),
         HelpSection(
             "Co AI może zaproponować",
             bullets=(
-                "roboczą nazwę sygnału",
-                "możliwe znaczenie fizyczne — wyłącznie gdy istnieje jawny kontekst operatora lub inne przyszłe deterministyczne źródło semantyczne",
-                "jednostkę, scale i offset tylko gdy dane to uzasadniają",
-                "confidence AI od 0 do 1 — jest to pewność modelu, a nie deterministyczny score CRT",
-                "krótkie uzasadnienie oparte o przekazane evidence",
-                "następne eksperymenty potrzebne do potwierdzenia lub odrzucenia hipotezy",
-                "ostrzeżenia i alternatywne interpretacje",
+                "roboczą interpretację przed zastosowaniem deterministycznych guardraili CRT",
+                "możliwy obszar znaczenia fizycznego wyłącznie na podstawie jawnego kontekstu operatora; końcowy zapis nie może wykraczać poza poziom wspierany przez evidence",
+                "jednostkę, scale i offset tylko gdy dane to uzasadniają; przy operator_context Stage 1 guardrail zeruje te pola do null, dopóki nie ma osobnego evidence",
+                "confidence AI od 0 do 1 jako surową ocenę modelu; zapisany wynik może zostać deterministycznie obniżony przez CRT",
+                "krótkie uzasadnienie oparte o przekazane evidence; zapisane rationale może zostać zastąpione deterministycznym rationale CRT",
+                "pomysły na weryfikację; zapisane next_experiments są jednak generowane przez CRT dla dokładnego kandydata, aby nie dopuścić błędnego bitu ani nieuzasadnionych działań",
                 "pola opisowe physical_meaning, rationale, next_experiments i warnings są wymagane po polsku (pl-PL); techniczny identyfikator name i symbol jednostki mogą pozostać językowo neutralne",
             ),
         ),
@@ -89,7 +96,7 @@ SIGNAL_HYPOTHESIS_HELP_TOPIC = HelpTopic(
             paragraphs=(
                 "Poprawny JSON nie wystarcza. CRT waliduje semantyczny kontrakt odpowiedzi przed zapisaniem artefaktu. Pusta nazwa, puste physical_meaning lub rationale, niepoprawny confidence, brak eksperymentu weryfikacyjnego albo brak ostrzeżenia powodują odrzucenie odpowiedzi.",
                 "Jeżeli model pominie wyłącznie semantycznie opcjonalne unit, scale lub offset, CRT uzupełnia je jako null. Jeżeli treściwa hipoteza pominie tylko AI confidence, CRT nie wymyśla pewności: zapisuje 0.0 i dopisuje jawne ostrzeżenie o tym fallbacku. Pusty lub semantycznie niekompletny JSON nadal jest odrzucany.",
-                "Jeżeli model zwróci element next_experiments lub warnings jako prosty obiekt tekstowy, np. name + description, CRT może bezpiecznie spłaszczyć istniejące pola tekstowe do jednego stringa. Nie są przy tym dopisywane nowe fakty ani znaczenie fizyczne.",
+                "Jeżeli model zwróci element next_experiments lub warnings jako prosty obiekt tekstowy, np. name + description, CRT może bezpiecznie spłaszczyć istniejące pola tekstowe do jednego stringa przed zastosowaniem guardraili. Nie są przy tym dopisywane nowe fakty ani znaczenie fizyczne.",
                 "Jeżeli model nie potrafi ustalić znaczenia fizycznego, ma zwrócić neutralną hipotezę, np. unknown_bit_state_candidate, jasno po polsku opisać niepewność i zaproponować test rozstrzygający. Nie powinien zwracać pustego obiektu {}.",
                 "Przy odrzuceniu CRT nie zapisuje nowego signal_hypothesis. Komunikat błędu zawiera bounded pole diagnostyczne response_excerpt — krótki, ograniczony fragment odpowiedzi modelu. Dla poprawnego wyniku artefakt zapisuje response_sha256, response_contract_version=2 i response_language=pl-PL, ale nie pełną surową odpowiedź modelu.",
             ),
