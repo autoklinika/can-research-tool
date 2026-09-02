@@ -73,7 +73,7 @@ Nie trafia:
 
 ### Label-blind context / anti-bias
 
-Realny test Qwen3.6 pokazał, że model zakotwiczył się na etykiecie `TEST_EGR` i zaczął dopowiadać semantykę EGR, której evidence nie potwierdzało. Dlatego Signal Hypothesis ma teraz politykę `label-redacted-v1`:
+Realny test Qwen3.6 pokazał, że model zakotwiczył się na etykiecie `TEST_EGR` i zaczął dopowiadać semantykę EGR, której evidence nie potwierdzało. Dlatego Signal Hypothesis ma politykę label-redacted:
 
 - deterministyczne artefakty CRT zachowują oryginalne nazwy i evidence bez zmian,
 - przed requestem do LLM usuwane są nazwy markerów, notatki, etykiety eksperymentu i nazwy sesji,
@@ -98,12 +98,12 @@ GUI zapisuje URL/model/timeout lokalnie w `QSettings`.
 Dla Signal Hypothesis domyślny request jest ograniczony i audytowalny:
 
 - `reasoning_effort = none`,
-- `max_tokens = 768`,
+- `max_tokens = 1536`,
 - `temperature = 0`,
 - `stream = false`,
 - `response_format = json_object`.
 
-Realny pomiar `qwen3.6:35b-hermes64k` pokazał prosty request JSON w ok. 22,9 s. Wcześniejszy pełny request przekraczał 120 s; po wyłączeniu extended reasoning problem timeoutu został usunięty z warstwy requestu.
+Realny pomiar `qwen3.6:35b-hermes64k` pokazał prosty request JSON w ok. 22,9 s. Wcześniejszy pełny request przekraczał 120 s; po wyłączeniu extended reasoning problem timeoutu został usunięty. Limit 768 tokenów okazał się zbyt mały dla pełnego JSON i został zwiększony do 1536. Jeżeli endpoint mimo to kończy odpowiedź z `finish_reason=length`, CRT zgłasza jawny błąd „response truncated”, zamiast traktować ucięty JSON jak prawidłową hipotezę.
 
 ### Ograniczenie endpointu
 
@@ -115,36 +115,70 @@ Stage 1 akceptuje tylko:
 - hosty `.local` / `.lan`,
 - jednoczłonowe nazwy hostów LAN.
 
-Publiczne endpointy AI są odrzucane. Celem jest uniknięcie przypadkowego wysłania artefaktów poza lokalną infrastrukturę.
+Publiczne endpointy AI są odrzucane.
 
 ## Odpowiedź AI — kontrakt v2
 
-Model ma zwrócić JSON z polami:
+Wymagane pola odpowiedzi:
 
 - `name`,
 - `physical_meaning`,
-- `unit`,
-- `scale`,
-- `offset`,
-- `confidence`,
 - `rationale`,
 - `next_experiments`,
 - `warnings`.
 
-`confidence` jest wyłącznie pewnością modelu i **nie jest** score CRT.
+Opcjonalne:
+
+- `unit`,
+- `scale`,
+- `offset`,
+- `confidence`.
 
 Pusty JSON lub semantycznie pusta odpowiedź są odrzucane przed `artifact.write`.
 
-Realny test pokazał również, że Qwen może zwrócić treściwą hipotezę, ale pominąć część pól kontraktu. Dlatego polityka `safe-nonsemantic-v1` dopuszcza wyłącznie bezpieczną naprawę braków, które nie tworzą nowej semantyki:
+Bezpieczna naprawa braków nie tworzących nowej semantyki:
 
 - brak `unit` -> `null`,
 - brak `scale` -> `null`,
 - brak `offset` -> `null`,
-- brak `confidence` przy istniejącej treściwej hipotezie -> `0.0` oraz jawny warning, że model pominął confidence.
+- brak `confidence` przy istniejącej treściwej hipotezie -> `0.0` oraz jawny warning.
 
-Nie są automatycznie uzupełniane `name`, `physical_meaning`, `rationale`, `next_experiments` ani `warnings`. Jeśli ich brakuje lub są puste, wynik jest odrzucany.
+Nie są automatycznie uzupełniane brakujące `name`, `physical_meaning`, `rationale`, `next_experiments` ani `warnings` przed guardrailami. Jeśli semantyczny rdzeń jest niekompletny, wynik jest odrzucany.
 
-Przy odrzuceniu komunikat zawiera bounded `response_excerpt`. Poprawny artefakt zapisuje `response_sha256`, `response_contract_version=2` oraz w `ai.usage` informacje o polityce kontekstu/naprawy odpowiedzi. Pełna surowa odpowiedź modelu nie jest zapisywana.
+Przy odrzuceniu komunikat zawiera bounded `response_excerpt`. Poprawny artefakt zapisuje `response_sha256`, `response_contract_version=2` i `response_language=pl-PL`. Pełna surowa odpowiedź modelu nie jest zapisywana.
+
+## Deterministyczne guardraile epistemiczne
+
+### Brak operator_context
+
+Jeżeli operator nie poda kontekstu semantycznego, zapis jest neutralizowany do:
+
+- `name = unknown_bit_state_candidate`,
+- nieznanego stanu binarnego skorelowanego z target/control,
+- `confidence = 0.0`,
+- deterministic rationale z Target/Control/direction/timing,
+- neutralnych testów przejścia odwrotnego i kontroli,
+- bez domenowych twierdzeń modelu.
+
+### Niepusty operator_context
+
+Kontekst operatora jest traktowany wyłącznie jako wskazówka domenowa, nie dowód semantyki bitu. Przed zapisem CRT deterministycznie wymusza:
+
+- `name = operator_context_correlated_candidate`,
+- opis „kandydat może być związany z obszarem wskazanym przez operatora”,
+- brak przypisania funkcji bitu i znaczenia stanów 0/1,
+- brak roli command/feedback, aktuatora, progu, stanu domyślnego, jednostki, scale i offset,
+- confidence maksymalnie `0.35`,
+- rationale z deterministycznego evidence CRT,
+- stałe ostrzeżenia o różnicy między korelacją i potwierdzoną semantyką.
+
+Realny test pokazał także, że Qwen potrafił pomylić `B0.2` z „bitem 4” i zaproponować nieuzasadnione manipulacje fizyczne. Dlatego `next_experiments` przy `operator_context` nie są już bezpośrednio zapisywane z odpowiedzi modelu. CRT generuje je deterministycznie dla **dokładnego CAN ID / Byte / Bit** oraz obserwowanego direction/timing:
+
+1. powtórzenie tego samego eksperymentu operatora i sprawdzenie tej samej zmiany,
+2. bezpieczne odwrócenie bodźca i sprawdzenie przejścia odwrotnego,
+3. niezależny test kontrolny bez bodźca operatora.
+
+Dzięki temu model nie może zapisać testu dla złego bitu ani dopisać nieuzasadnionego działania fizycznego.
 
 ## Status hipotezy
 
@@ -156,21 +190,9 @@ Każdy artefakt Stage 1 zapisuje:
 
 Nie ma automatycznego potwierdzania ani automatycznej promocji do DBC.
 
-## Guardrails zapisane w artefakcie
-
-Artefakt zawiera jawny kontrakt:
-
-- `source_of_truth = signal_candidates`,
-- `candidate_score_modified = false`,
-- `raw_session_access = false`,
-- `can_tx = false`,
-- `active_diagnostics = false`,
-- `automatic_confirmation = false`,
-- `ai_failure_blocks_crt = false`.
-
 ## Awaria AI
 
-Błąd połączenia, timeout, niepoprawny JSON albo anulowanie:
+Błąd połączenia, timeout, ucięta odpowiedź, niepoprawny JSON albo anulowanie:
 
 - kończy tylko operację Signal Hypothesis,
 - nie modyfikuje Candidate Engine,
@@ -178,77 +200,61 @@ Błąd połączenia, timeout, niepoprawny JSON albo anulowanie:
 - nie blokuje GUI CRT,
 - nie blokuje Signal Discovery / Experiment Diff / Candidate Engine / evidence / eksportów.
 
-GUI wykonuje AI w `QThreadPool`, więc request nie blokuje głównego wątku Qt.
-
-Anulowanie aktywnego HTTP jest best-effort; request zakończy się najpóźniej po skonfigurowanym timeout.
+GUI wykonuje AI w `QThreadPool`.
 
 ## GUI Stage 1
 
-Nowa karta `Signal Hypothesis` w oknie analizy zestawu porównawczego:
+Karta `Signal Hypothesis` umożliwia:
 
-- konfiguracja Local AI URL,
+- konfigurację Local AI URL,
 - model,
 - timeout,
-- wybór zapisanego artefaktu Signal Candidates,
-- tabela kandydatów,
+- wybór artefaktu Signal Candidates,
+- tabelę kandydatów,
 - opcjonalny kontekst operatora,
-- `Zaproponuj hipotezę AI`,
-- `Anuluj`,
-- progress/status,
-- lista zapisanych hipotez,
-- wyświetlenie nazwy, znaczenia, unit/scale/offset, confidence, rationale, next experiments i warnings.
+- uruchomienie/anulowanie AI,
+- podgląd zapisanej suggested hypothesis.
 
-Samo otwarcie karty nie tworzy klienta sieciowego i nie wykonuje żadnego requestu.
+Samo otwarcie karty nie tworzy klienta sieciowego i nie wykonuje requestu.
 
 ## CI
 
-Dedykowany workflow:
+Dedykowany workflow `Signal Hypothesis AI Stage 1 Validation` działa na `windows-latest`. Legacy Ubuntu workflow nie uruchamia się automatycznie.
 
-`Signal Hypothesis AI Stage 1 Validation`
-
-Windows GitHub-hosted. CI **nie łączy się z realnym serwerem AI**. Używa fake local AI i sprawdza m.in.:
+CI nie łączy się z realnym serwerem AI i sprawdza m.in.:
 
 - Extension API / `ai.use`,
 - candidate artifact -> hypothesis,
 - zachowanie score i SHA źródeł,
 - bounded context bez RAW,
-- redakcję `TEST_EGR` / nazw markerów / nazw sesji z machine context,
-- zachowanie jawnego `operator_context`,
-- response contract v2,
-- bezpieczny fallback brakujących unit/scale/offset/confidence,
-- odrzucenie pustego `{}`,
-- request contract: reasoning off + bounded completion + JSON mode,
-- odrzucenie publicznego endpointu,
-- zachowanie przy AI unavailable,
+- label redaction,
+- polski response contract,
+- response truncation,
+- brakujące pola opcjonalne,
+- odrzucenie `{}`,
+- brak kontekstu -> neutralny guardrail,
+- operator_context -> domain-hint-only guardrail,
+- agresywną halucynację `1=otwarcie` / `command` / confidence 0.9,
+- błędny „bit 4” i nieuzasadnione testy fizyczne -> deterministyczne eksperymenty dla dokładnego kandydata,
 - production GUI smoke,
 - Help Center.
 
 ## Manual acceptance
 
-Po zielonym CI test na realnym lokalnym Ollama:
+Testowy kandydat: `0x321 / Byte 0 / Bit 2`, score `1.000`, class `strong`, Target `6/6`, Control `0/4`, direction `0->1`, średnie opóźnienie około `70 ms`.
 
-1. Otwórz zestaw z wcześniej zbudowanym `Signal Candidates`.
-2. Karta `Signal Hypothesis`.
-3. Local AI URL: lokalny endpoint Ollama `/v1`.
-4. Model: `qwen3.6:35b-hermes64k`.
-5. Timeout: 120 s.
-6. Zaznacz `0x321 / Byte0 / Bit2` z testowych wirtualnych logów.
-7. Pierwszy test wykonaj z pustym `Kontekst operatora`.
-8. Oczekiwane:
-   - operacja kończy się bez blokady GUI,
-   - powstaje `signal_hypothesis`,
-   - source candidate nadal ma score `1.000` i class `strong`,
-   - status `suggested / verified=false`,
-   - bez kontekstu operatora AI nie powinno wywnioskować „EGR” tylko z nazwy testu, bo nazwa nie trafia do promptu,
-   - hipoteza powinna opisać nieznany bit skorelowany z targetem i zaproponować test weryfikacyjny.
-9. Następnie można wpisać jawny kontekst operatora i sprawdzić, czy model używa go wyłącznie jako wskazówki, a nie potwierdzenia.
-10. Wyłącz/zablokuj AI endpoint i ponów:
-   - tylko Signal Hypothesis ma pokazać `AI unavailable/error`,
-   - Signal Candidates i pozostałe zakładki nadal działają.
+Zweryfikowano już na realnym lokalnym `qwen3.6:35b-hermes64k`:
+
+- endpoint działa,
+- reasoning off usuwa wcześniejszy problem >120 s,
+- polski output działa,
+- bez kontekstu operatora zapis jest neutralny i nie wymyśla EGR,
+- z kontekstem EGR zapis nie przypisuje już otwarcia/zamknięcia ani funkcji bitu,
+- wykryty podczas realnego testu problem złego „bitu 4” w `next_experiments` został usunięty deterministycznym guardrailem v2 i oczekuje końcowego ponownego testu na Ollamie.
 
 ## Po Stage 1
 
-Najbliższy etap po ręcznej akceptacji:
+Po końcowej ręcznej akceptacji:
 
 - mechanizm operatorowego `verify/reject/edit` dla hipotezy,
 - następnie Draft DBC oparty wyłącznie o hipotezy jawnie zweryfikowane przez operatora.
