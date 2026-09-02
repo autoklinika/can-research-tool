@@ -14,6 +14,10 @@ def _prompt(*, operator_context: str | None) -> dict[str, object]:
         "candidate": {
             "candidate_score": 1.0,
             "strength": "strong",
+            "arbitration_id": 0x321,
+            "arbitration_id_hex": "0x321",
+            "byte_index": 0,
+            "bit_index": 2,
             "best_support": {
                 "target": {
                     "event_count": 6,
@@ -48,8 +52,8 @@ def _overclaiming_model_response() -> str:
                 "Przejście 0->1 po odłączeniu dowodzi, że jest to komenda otwarcia EGR."
             ),
             "next_experiments": [
-                "Powtórz odłączenie EGR i sprawdź powtarzalność przejścia.",
-                "Wykonaj przeciwny stan eksperymentu i sprawdź, czy bit wraca do 0.",
+                "Sprawdź, czy bit 4 wraca do stanu 0 po podłączeniu EGR.",
+                "Odetnij dopływ powietrza i obserwuj ciśnienie w kolektorze.",
             ],
             "warnings": ["Model uważa interpretację za bardzo prawdopodobną."],
         },
@@ -97,11 +101,17 @@ def test_operator_context_is_domain_hint_not_bit_semantics() -> None:
     assert "70.0 ms" in hypothesis["rationale"]
     assert "nie identyfikują funkcji bitu" in hypothesis["rationale"]
 
-    # The useful AI role remains intact: it may propose verification experiments.
-    assert hypothesis["next_experiments"] == [
-        "Powtórz odłączenie EGR i sprawdź powtarzalność przejścia.",
-        "Wykonaj przeciwny stan eksperymentu i sprawdź, czy bit wraca do 0.",
-    ]
+    experiments = hypothesis["next_experiments"]
+    assert len(experiments) == 3
+    assert all("0x321 B0.2" in item for item in experiments)
+    assert "0->1" in experiments[0]
+    assert "70.0 ms" in experiments[0]
+    assert "1→0" in experiments[1]
+    experiment_text = " ".join(experiments).lower()
+    assert "bit 4" not in experiment_text
+    assert "kolektor" not in experiment_text
+    assert "dopływ powietrza" not in experiment_text
+
     assert hypothesis["warnings"] == [
         "Kontekst operatora jest wskazówką semantyczną, a nie dowodem znaczenia sygnału.",
         "CRT nie przypisuje znaczenia stanom 0/1 ani roli komenda/pomiar bez osobnego evidence.",
