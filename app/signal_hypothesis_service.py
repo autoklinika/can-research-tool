@@ -29,6 +29,10 @@ from .local_ai import (
     extract_json_object,
 )
 from .project import CrtProject
+from .signal_hypothesis_guardrail import (
+    OPERATOR_CONTEXT_POLICY,
+    apply_operator_context_guardrail,
+)
 
 
 _CONTEXT_POLICY = "label-redacted-v2-epistemic"
@@ -89,17 +93,17 @@ class _SignalHypothesisAIClient:
         raw_content = completion.content
         repaired = _repair_nonsemantic_response_omissions(raw_content)
         shaped = _repair_structured_text_arrays(repaired)
-        guarded = (
-            _apply_no_context_semantic_guardrail(shaped, prompt_payload)
-            if not semantic_context_available
-            else shaped
-        )
+        if semantic_context_available:
+            guarded = apply_operator_context_guardrail(shaped, prompt_payload)
+        else:
+            guarded = _apply_no_context_semantic_guardrail(shaped, prompt_payload)
 
         usage = dict(completion.usage)
         usage["crt_context_policy"] = _CONTEXT_POLICY
         usage["crt_response_repair_policy"] = _RESPONSE_REPAIR_POLICY
         usage["crt_structured_array_policy"] = _STRUCTURED_ARRAY_POLICY
         usage["crt_no_context_policy"] = _NO_CONTEXT_POLICY
+        usage["crt_operator_context_policy"] = OPERATOR_CONTEXT_POLICY
         usage["crt_semantic_context_available"] = semantic_context_available
         usage["crt_response_repaired"] = guarded != raw_content
         usage["crt_structured_arrays_repaired"] = shaped != repaired
@@ -113,6 +117,7 @@ class _SignalHypothesisAIClient:
             content=guarded,
             latency_ms=completion.latency_ms,
             usage=usage,
+            request_options=completion.request_options,
         )
 
 
@@ -423,7 +428,11 @@ def _mapping_text(value: Mapping[str, Any]) -> str:
                 seen.add(text)
                 parts.append(text)
         elif isinstance(item, list):
-            texts = [str(entry).strip() for entry in item if isinstance(entry, str) and str(entry).strip()]
+            texts = [
+                str(entry).strip()
+                for entry in item
+                if isinstance(entry, str) and str(entry).strip()
+            ]
             if texts:
                 add("; ".join(texts))
 
@@ -517,7 +526,9 @@ def _neutral_rationale(prompt_payload: Mapping[str, Any]) -> str:
 
     mean_delay_ns = timing_map.get("mean_delay_ns")
     if isinstance(mean_delay_ns, (int, float)):
-        facts.append(f"Średnie opóźnienie względem zdarzenia wynosi około {float(mean_delay_ns) / 1_000_000:.1f} ms.")
+        facts.append(
+            f"Średnie opóźnienie względem zdarzenia wynosi około {float(mean_delay_ns) / 1_000_000:.1f} ms."
+        )
 
     facts.append(
         "Dane wspierają korelację i powtarzalność kandydata, ale bez kontekstu semantycznego nie identyfikują funkcji fizycznej."
