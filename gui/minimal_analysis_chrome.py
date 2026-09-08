@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QWidget
 
+from app.help_catalog_signal_plotter import SIGNAL_PLOTTER_HELP_TOPIC as _SIGNAL_PLOTTER_HELP_TOPIC
 from app.signal_plot_service import SignalPlotService
 
 from .session_artifact_selector import CompactArtifactSessionViewWidget
