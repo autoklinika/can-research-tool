@@ -1,0 +1,72 @@
+name: Full Signal Plotter Stage 1 Validation
+
+on:
+  pull_request:
+    paths:
+      - "app/extensions/builtin/signal_plot_series.py"
+      - "app/extensions/builtin/__init__.py"
+      - "app/signal_plot_service.py"
+      - "gui/signal_plotter_view.py"
+      - "gui/minimal_analysis_chrome.py"
+      - "tests/test_signal_plotter.py"
+      - "tests_gui/signal_plotter_smoke.py"
+      - "app/help_catalog_signal_plotter.py"
+      - "docs/reports/FULL_SIGNAL_PLOTTER_STAGE1_PL.md"
+      - ".github/workflows/full-signal-plotter-stage1.yml"
+  workflow_dispatch:
+
+jobs:
+  full-signal-plotter:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GUI and test tooling
+        run: python -m pip install -q -e ".[gui,dev]"
+
+      - name: Compile Full Signal Plotter sources
+        run: >-
+          python -m compileall -q
+          app/extensions/builtin/signal_plot_series.py
+          app/signal_plot_service.py
+          gui/signal_plotter_view.py
+          gui/minimal_analysis_chrome.py
+          tests/test_signal_plotter.py
+          tests_gui/signal_plotter_smoke.py
+
+      - name: Verify full-series core and cursor contract
+        run: >-
+          python -m pytest
+          tests/test_signal_plotter.py
+          tests/test_signal_discovery.py
+          tests/test_extension_api_foundation.py
+          -q --junitxml=full-signal-plotter-junit.xml
+
+      - name: Verify Full Signal Plotter production GUI
+        run: python tests_gui/signal_plotter_smoke.py
+
+      - name: Verify existing Signal Discovery GUI regression
+        run: python tests_gui/signal_discovery_smoke.py
+
+      - name: Verify stored-session chrome regression
+        run: python tests_gui/minimal_analysis_chrome_smoke.py
+
+      - name: Upload Full Signal Plotter diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-signal-plotter-windows
+          path: full-signal-plotter-junit.xml
+          if-no-files-found: warn
+          retention-days: 3
