@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from .domain import Artifact
-from .extensions import CancellationToken, ProgressUpdate
-from .extensions.builtin import SIGNAL_PLOT_SERIES_ARTIFACT_SCHEMA_VERSION, SIGNAL_PLOT_SERIES_PROVIDER_ID
+from .extensions import CancellationToken, ExtensionRegistry, ProgressUpdate
+from .extensions.builtin import register_builtin_extensions
+from .extensions.builtin.signal_plot_series import (
+    SIGNAL_PLOT_SERIES_ARTIFACT_SCHEMA_VERSION,
+    SIGNAL_PLOT_SERIES_PROVIDER_ID,
+    SignalPlotSeriesProvider,
+)
 from .project import CrtProject
 from .session_analysis_service import AnalysisExecutionResult, SessionAnalysisService
 
@@ -30,7 +35,10 @@ class SignalPlotService:
 
     def __init__(self, project: CrtProject) -> None:
         self.project = project
-        self.analysis = SessionAnalysisService(project)
+        registry = ExtensionRegistry(passive_only=True, ai_enabled=False)
+        register_builtin_extensions(registry)
+        registry.register(SignalPlotSeriesProvider())
+        self.analysis = SessionAnalysisService(project, registry=registry)
         self.artifacts = self.analysis.artifacts
 
     def run(
