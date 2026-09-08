@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from bisect import bisect_left
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -91,19 +90,26 @@ def nearest_point_index(
     points: Sequence[Mapping[str, Any]],
     timestamp_ns: int,
 ) -> int:
-    """Return the nearest exact point by timestamp from a sorted full series."""
+    """Return the nearest exact point in O(log n) time and O(1) extra memory."""
 
     if not points:
         raise ValueError("point series is empty")
-    timestamps = [int(point["timestamp_ns"]) for point in points]
     target = int(timestamp_ns)
-    index = bisect_left(timestamps, target)
+    low = 0
+    high = len(points)
+    while low < high:
+        middle = (low + high) // 2
+        if int(points[middle]["timestamp_ns"]) < target:
+            low = middle + 1
+        else:
+            high = middle
+    index = low
     if index <= 0:
         return 0
-    if index >= len(timestamps):
-        return len(timestamps) - 1
-    before = timestamps[index - 1]
-    after = timestamps[index]
+    if index >= len(points):
+        return len(points) - 1
+    before = int(points[index - 1]["timestamp_ns"])
+    after = int(points[index]["timestamp_ns"])
     return index - 1 if target - before <= after - target else index
 
 
@@ -143,16 +149,16 @@ def decimate_for_render(
         chunk = interior[start:end]
         if not chunk:
             continue
-        low = min(chunk, key=lambda item: float(item["value"]))
-        high = max(chunk, key=lambda item: float(item["value"]))
-        if int(low["timestamp_ns"]) <= int(high["timestamp_ns"]):
-            result.append(low)
-            if high is not low:
-                result.append(high)
+        low_point = min(chunk, key=lambda item: float(item["value"]))
+        high_point = max(chunk, key=lambda item: float(item["value"]))
+        if int(low_point["timestamp_ns"]) <= int(high_point["timestamp_ns"]):
+            result.append(low_point)
+            if high_point is not low_point:
+                result.append(high_point)
         else:
-            result.append(high)
-            if high is not low:
-                result.append(low)
+            result.append(high_point)
+            if high_point is not low_point:
+                result.append(low_point)
     result.append(points[-1])
     if len(result) > limit:
         # Deterministic final thinning only of the rendering list; first/last stay exact.
