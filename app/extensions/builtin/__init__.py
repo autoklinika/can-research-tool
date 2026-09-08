@@ -37,6 +37,7 @@ from .signal_discovery import (
     SIGNAL_DISCOVERY_PROVIDER_VERSION,
     SignalDiscoveryActivityProvider,
 )
+from .signal_plot_series import DEFAULT_MAXIMUM_POINTS, MAXIMUM_POINTS_LIMIT
 
 
 def builtin_analysis_providers() -> tuple[
@@ -94,6 +95,8 @@ __all__ = [
     "COMPARISON_STATISTICS_PROVIDER_ID",
     "COMPARISON_STATISTICS_PROVIDER_VERSION",
     "ComparisonStatisticsProvider",
+    "DEFAULT_MAXIMUM_POINTS",
+    "MAXIMUM_POINTS_LIMIT",
     "MESSAGE_SEQUENCE_ALGORITHM_VERSION",
     "MESSAGE_SEQUENCE_ARTIFACT_SCHEMA_VERSION",
     "MESSAGE_SEQUENCE_PROVIDER_ID",
