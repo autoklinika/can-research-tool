@@ -192,6 +192,18 @@ def _single_session_input(context: AnalysisContext):
 
 def _parameters(values: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(values)
+    arbitration_id = values.get("arbitration_id")
+    if isinstance(arbitration_id, str):
+        arbitration_text = arbitration_id.strip()
+        if not arbitration_text:
+            raise ValueError("arbitration_id cannot be empty")
+        # This provider backs a GUI field explicitly labelled CAN ID [hex]. Keep
+        # Signal Discovery's shared parser unchanged, but make digit-only input here
+        # unambiguously hexadecimal: "123" means CAN ID 0x123.
+        if not arbitration_text.lower().startswith("0x"):
+            arbitration_text = "0x" + arbitration_text
+        result["arbitration_id"] = arbitration_text
+
     start_bit = int(values.get("start_bit", 0))
     length = int(values.get("length", 8))
     byte_order = str(values.get("byte_order", "intel")).strip().lower()
