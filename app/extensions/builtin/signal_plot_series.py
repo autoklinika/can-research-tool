@@ -51,8 +51,6 @@ class SignalPlotSeriesProvider:
         points: list[dict[str, Any]] = []
         matching_frame_count = 0
         field_missing_count = 0
-        first_timestamp_ns: int | None = None
-        last_timestamp_ns: int | None = None
         minimum_value: float | None = None
         maximum_value: float | None = None
         minimum_source_row: int | None = None
@@ -87,9 +85,6 @@ class SignalPlotSeriesProvider:
                         "value": value,
                     }
                     points.append(point)
-                    if first_timestamp_ns is None:
-                        first_timestamp_ns = frame.timestamp_ns
-                    last_timestamp_ns = frame.timestamp_ns
                     if minimum_value is None or value < minimum_value:
                         minimum_value = value
                         minimum_source_row = source_row
@@ -107,6 +102,13 @@ class SignalPlotSeriesProvider:
                 )
 
         context.cancellation.raise_if_cancelled()
+        # Stored/imported sessions may contain zero or negative timestamp deltas.
+        # The plot axis and binary cursor search therefore use a deterministic time
+        # ordering while source_row continues to reference the immutable RAW record.
+        points.sort(key=lambda item: (int(item["timestamp_ns"]), int(item["source_row"])))
+        first_timestamp_ns = int(points[0]["timestamp_ns"]) if points else None
+        last_timestamp_ns = int(points[-1]["timestamp_ns"]) if points else None
+
         payload = {
             "schema": "crt.signal_plot_series",
             "schema_version": SIGNAL_PLOT_SERIES_ARTIFACT_SCHEMA_VERSION,
@@ -138,6 +140,7 @@ class SignalPlotSeriesProvider:
             "series_contract": {
                 "complete": True,
                 "sampling": "none",
+                "point_order": "timestamp_ns_then_source_row",
                 "rendering_may_decimate": True,
                 "cursor_selection_uses_full_series": True,
                 "maximum_points_safety_limit": parameters["maximum_points"],
@@ -178,6 +181,7 @@ class SignalPlotSeriesProvider:
                 "point_count": len(points),
                 "series_complete": True,
                 "sampling": "none",
+                "point_order": "timestamp_ns_then_source_row",
             },
         )
         context.progress.report(expected_frames + 1, expected_frames + 1, "zapisano pełną serię sygnału")
