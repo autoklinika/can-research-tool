@@ -37,19 +37,10 @@ from .signal_discovery import (
     SIGNAL_DISCOVERY_PROVIDER_VERSION,
     SignalDiscoveryActivityProvider,
 )
-from .signal_plot_series import (
-    DEFAULT_MAXIMUM_POINTS,
-    MAXIMUM_POINTS_LIMIT,
-    SIGNAL_PLOT_SERIES_ALGORITHM_VERSION,
-    SIGNAL_PLOT_SERIES_ARTIFACT_SCHEMA_VERSION,
-    SIGNAL_PLOT_SERIES_PROVIDER_ID,
-    SIGNAL_PLOT_SERIES_PROVIDER_VERSION,
-    SignalPlotSeriesProvider,
-)
 
 
 def builtin_analysis_providers() -> tuple[
-    SessionStatisticsProvider | SignalDiscoveryActivityProvider | SignalPlotSeriesProvider,
+    SessionStatisticsProvider | SignalDiscoveryActivityProvider,
     ...,
 ]:
     """Return trusted single-session providers without global discovery."""
@@ -57,7 +48,6 @@ def builtin_analysis_providers() -> tuple[
     return (
         SessionStatisticsProvider(),
         SignalDiscoveryActivityProvider(),
-        SignalPlotSeriesProvider(),
     )
 
 
@@ -104,8 +94,6 @@ __all__ = [
     "COMPARISON_STATISTICS_PROVIDER_ID",
     "COMPARISON_STATISTICS_PROVIDER_VERSION",
     "ComparisonStatisticsProvider",
-    "DEFAULT_MAXIMUM_POINTS",
-    "MAXIMUM_POINTS_LIMIT",
     "MESSAGE_SEQUENCE_ALGORITHM_VERSION",
     "MESSAGE_SEQUENCE_ARTIFACT_SCHEMA_VERSION",
     "MESSAGE_SEQUENCE_PROVIDER_ID",
@@ -126,11 +114,6 @@ __all__ = [
     "SIGNAL_DISCOVERY_PROVIDER_ID",
     "SIGNAL_DISCOVERY_PROVIDER_VERSION",
     "SignalDiscoveryActivityProvider",
-    "SIGNAL_PLOT_SERIES_ALGORITHM_VERSION",
-    "SIGNAL_PLOT_SERIES_ARTIFACT_SCHEMA_VERSION",
-    "SIGNAL_PLOT_SERIES_PROVIDER_ID",
-    "SIGNAL_PLOT_SERIES_PROVIDER_VERSION",
-    "SignalPlotSeriesProvider",
     "builtin_analysis_providers",
     "builtin_comparison_providers",
     "register_builtin_comparison_extensions",
