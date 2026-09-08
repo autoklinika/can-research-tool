@@ -48,6 +48,7 @@ def test_full_signal_series_preserves_every_matching_point_and_source_row(tmp_pa
     assert payload["schema"] == "crt.signal_plot_series"
     assert payload["series_contract"]["complete"] is True
     assert payload["series_contract"]["sampling"] == "none"
+    assert payload["series_contract"]["point_order"] == "timestamp_ns_then_source_row"
     assert payload["series_contract"]["cursor_selection_uses_full_series"] is True
     assert payload["summary"]["matching_frame_count"] == 4
     assert payload["summary"]["point_count"] == 4
@@ -55,6 +56,43 @@ def test_full_signal_series_preserves_every_matching_point_and_source_row(tmp_pa
     assert [point["source_row"] for point in payload["points"]] == [1, 2, 4, 5]
     assert [point["raw"] for point in payload["points"]] == [0x10, 0x20, 0x30, 0x40]
     assert [point["value"] for point in payload["points"]] == [7.0, 15.0, 23.0, 31.0]
+    assert _sha256(path) == source_sha
+
+
+def test_full_signal_series_orders_nonmonotonic_timestamps_without_losing_source_rows(tmp_path) -> None:
+    project = CrtProject.create(tmp_path / "project", name="Nonmonotonic plot time")
+    session, path = _write_session(
+        project,
+        (
+            _frame_at(0, 300_000_000, 0x123, b"\x30"),
+            _frame_at(1, 100_000_000, 0x123, b"\x10"),
+            _frame_at(2, 200_000_000, 0x123, b"\x20"),
+        ),
+    )
+    source_sha = _sha256(path)
+    service = SignalPlotService(project)
+    artifact = service.run(
+        session.id,
+        parameters={
+            "channel": 0,
+            "arbitration_id": "123",
+            "is_extended_id": False,
+            "frame_kind": "data",
+            "start_bit": 0,
+            "length": 8,
+            "maximum_points": 100,
+        },
+    ).artifacts[0]
+    payload = service.read_series(artifact)
+
+    assert [point["timestamp_ns"] for point in payload["points"]] == [
+        100_000_000,
+        200_000_000,
+        300_000_000,
+    ]
+    assert [point["source_row"] for point in payload["points"]] == [1, 2, 0]
+    assert [point["raw"] for point in payload["points"]] == [0x10, 0x20, 0x30]
+    assert nearest_point_index(payload["points"], 210_000_000) == 1
     assert _sha256(path) == source_sha
 
 
@@ -151,9 +189,23 @@ def test_render_decimation_preserves_endpoints_and_extrema_without_mutating_sour
 
 
 def _frame(sequence: int, arbitration_id: int, data: bytes) -> CanFrame:
+    return _frame_at(
+        sequence,
+        (sequence + 1) * 100_000_000,
+        arbitration_id,
+        data,
+    )
+
+
+def _frame_at(
+    sequence: int,
+    timestamp_ns: int,
+    arbitration_id: int,
+    data: bytes,
+) -> CanFrame:
     return CanFrame(
         sequence=sequence,
-        timestamp_ns=(sequence + 1) * 100_000_000,
+        timestamp_ns=timestamp_ns,
         arbitration_id=arbitration_id,
         data=data,
         channel=0,
