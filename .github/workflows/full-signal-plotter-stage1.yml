@@ -15,6 +15,10 @@ on:
       - ".github/workflows/full-signal-plotter-stage1.yml"
   workflow_dispatch:
 
+concurrency:
+  group: full-signal-plotter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   full-signal-plotter:
     runs-on: windows-latest
