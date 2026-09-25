@@ -233,3 +233,9 @@ python -m pytest -q
 ```
 
 GitHub Actions uruchamia dodatkowo kompilację modułów oraz headless Qt smoke test tworzący projekt, kafelek znaczników, zakładkę `Live Capture` i zakładkę `Dekodery` z przełączanym plikiem DBC.
+
+Stage M provides a local, versioned session manifest and bounded AI context export:
+`crt-platform-export PROJECT SESSION_ID` (or `python -m app.platform_export_cli`).
+Select deterministic evidence with `--artifact ID` and build a context using
+`--question '...'`. See [Stage M architecture and contracts](docs/STAGE_M_ADR.md)
+for provenance, source immutability, advisory finding semantics and limitations.

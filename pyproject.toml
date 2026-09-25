@@ -17,6 +17,7 @@ dev = ["pytest>=8.3,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
 crt-capture = "app.capture_cli:main"
+crt-platform-export = "app.platform_export_cli:main"
 crt-gui = "gui.main:main"
 
 [tool.hatch.build.targets.wheel]
