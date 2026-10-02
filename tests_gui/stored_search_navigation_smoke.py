@@ -111,19 +111,17 @@ def main() -> None:
 
         search = LogSearchWindow(parent)
         search.set_target_index(view.frame_table, index)
-        search.results.selectionModel().currentChanged.disconnect(
-            search._result_selection_changed
-        )
-        search.results.activated.disconnect(search._activate_index)
+        search.set_builtin_navigation_enabled(False)
         navigator = StoredSearchNavigator(view, cancel_widget=search, parent=parent)
         messages: list[str] = []
         view.output_message.connect(messages.append)
 
         def navigate(current, _previous) -> None:
             position = current.row()
-            if current.isValid() and 0 <= position < len(search._hits):
-                search.position_label.setText(f"{position + 1} / {len(search._hits)}")
-                navigator.navigate_to_source_row(search._hits[position].row)
+            row = search.hit_row(position) if current.isValid() else None
+            if row is not None:
+                search.position_label.setText(f"{position + 1} / {search.hit_count}")
+                navigator.navigate_to_source_row(row)
             else:
                 search.position_label.clear()
                 navigator.cancel()

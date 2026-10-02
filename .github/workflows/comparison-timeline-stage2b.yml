@@ -32,7 +32,7 @@ jobs:
           app/comparison_timeline.py
           app/comparison_timeline_artifacts.py
           gui/comparison_timeline_view.py
-          gui/comparison_visualization_hardened.py
+          gui/comparison_visualization.py
           tests/test_comparison_timeline.py
           tests/test_comparison_timeline_artifacts.py
           tests_gui/comparison_timeline_smoke.py

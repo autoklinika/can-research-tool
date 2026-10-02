@@ -265,7 +265,7 @@ class ComparisonEvidenceCoordinator(QObject):
                 value.session_path,
                 project=request.project,
                 inspector_sink=window.inspector.setPlainText,
-                output_sink=window._append_output,
+                output_sink=window.append_output,
             )
             navigator = getattr(view, "_comparison_evidence_navigator", None)
             if not isinstance(navigator, ComparisonStoredSearchNavigator):
@@ -346,7 +346,7 @@ class ComparisonEvidenceCoordinator(QObject):
 
     def _report(self, message: str) -> None:
         try:
-            self._window._append_output(message)
+            self._window.append_output(message)
         except RuntimeError:
             pass
 

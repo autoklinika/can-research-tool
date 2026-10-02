@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
-import sqlite3
+from . import sqlite_connection as sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4

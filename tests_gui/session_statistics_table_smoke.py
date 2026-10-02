@@ -58,7 +58,7 @@ def main() -> int:
         widget = container.create_session_view(session_path, project=project)
         widget.tabs.setCurrentIndex(widget.analysis_tab_index)
         widget.run_analysis_button.click()
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
 
         assert widget.artifact_table is None
         assert widget.artifact_selector.count() == 1

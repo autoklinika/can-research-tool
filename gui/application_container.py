@@ -19,6 +19,7 @@ from .confirmed_start_live_capture import BoundedLiveCaptureWidget
 from .compact_filter_manager import CompactFilterManagerWidget as FilterManagerWidget
 from .enhanced_session_filter_integration import EnhancedStoredSessionIntegration
 from .import_task import ProjectImportTask
+from .live_filter_integration import LiveFilterIntegration
 from .minimal_analysis_chrome import (
     MinimalAnalysisChromeSessionViewWidget as SessionViewWidget,
 )
@@ -27,9 +28,6 @@ from .project_explorer import ProjectExplorer
 from .project_navigator import ProjectNavigator
 from .project_overview import ProjectOverviewWidget
 from .project_properties_dialog import ProjectPropertiesDialog
-from .raw_frame_grouping import (
-    GroupedFinalStreamingLiveFilterIntegration as StreamingLiveFilterIntegration,
-)
 from .session_management_integration import SessionManagementIntegration
 from .study_area_view import StudyAreaViewWidget
 
@@ -59,7 +57,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .help_center_shell import HelpCenterMainWindow as MainWindow
+        from .main_window import MainWindow
 
         return MainWindow(self)
 
@@ -93,7 +91,7 @@ class ApplicationContainer:
         return BoundedLiveCaptureWidget(
             project,
             controller=controller,
-            filter_integration_factory=StreamingLiveFilterIntegration,
+            filter_integration_factory=LiveFilterIntegration,
         )
 
     def create_session_view(

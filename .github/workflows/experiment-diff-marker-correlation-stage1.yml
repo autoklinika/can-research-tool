@@ -26,7 +26,7 @@ jobs:
           app/experiment_diff_service.py
           app/help_catalog_experiment_diff.py
           gui/experiment_diff_view.py
-          gui/comparison_visualization_stage2d1.py
+          gui/comparison_visualization.py
           tests/test_experiment_marker_correlation.py
           tests_gui/experiment_diff_smoke.py
           tests_gui/help_center_smoke.py

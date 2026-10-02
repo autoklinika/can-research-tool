@@ -47,3 +47,70 @@ def test_desktop_reveal_is_outside_gui_session_management() -> None:
     assert "QDesktopServices" not in integration
     assert "QProcess" not in integration
     assert "def reveal_path(" in desktop
+
+
+def test_main_window_is_not_extended_by_inheritance() -> None:
+    """Window features are controllers, not subclasses stacked on MainWindow."""
+
+    subclasses: list[str] = []
+    main_window_bases: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = [ast.unparse(base) for base in node.bases]
+            if node.name == "MainWindow":
+                main_window_bases = bases
+            elif any(base.endswith("MainWindow") and base != "QMainWindow" for base in bases):
+                subclasses.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}({', '.join(bases)})")
+
+    assert main_window_bases == ["QMainWindow"]
+    assert subclasses == []
+
+
+def test_comparison_dialog_has_a_single_specialisation() -> None:
+    """Analysis tabs are composed into one dialog, not stacked as stage subclasses."""
+
+    dialog_classes: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and any(
+                ast.unparse(base).endswith("ComparisonAnalysisDialog")
+                or ast.unparse(base).endswith("ComparisonVisualizationDialog")
+                for base in node.bases
+            ):
+                dialog_classes.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}")
+
+    assert dialog_classes == [
+        "gui/comparison_visualization.py: ComparisonVisualizationDialog"
+    ]
+
+
+def test_live_filter_integration_is_a_single_class() -> None:
+    """Live filtering, streaming and grouping are one integration, not a subclass chain."""
+
+    subclasses: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and any(
+                ast.unparse(base).endswith("LiveFilterIntegration")
+                for base in node.bases
+            ):
+                subclasses.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}")
+
+    assert subclasses == []
+
+
+def test_gui_does_not_search_foreign_layouts() -> None:
+    """Widgets expose explicit slots instead of being searched for layouts to patch."""
+
+    offenders = [
+        path.relative_to(ROOT).as_posix()
+        for path in sorted((ROOT / "gui").rglob("*.py"))
+        if "_layout_containing" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []

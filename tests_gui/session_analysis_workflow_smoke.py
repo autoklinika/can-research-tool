@@ -84,7 +84,7 @@ def main() -> int:
         assert not widget.run_analysis_button.isEnabled()
         assert widget.cancel_analysis_button.isEnabled()
 
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
         assert widget.analysis_progress.value() == 100
         assert widget.analysis_progress.format() == "Gotowe — 100%"
         assert widget.artifact_selector.count() == 1

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -36,12 +37,14 @@ from .comparison_visualization_model import (
     STATUS_MISSING,
     STATUS_NEW,
     STATUS_ORDER,
+    STATUS_UNCHANGED,
     ComparisonDashboardData,
     ComparisonVisualRow,
     build_dashboard_data,
     format_hz,
     format_integer,
     format_percent,
+    optional_hex_int,
     payload_summary,
 )
 
@@ -68,6 +71,8 @@ _SOURCE_NAMES = {
 
 
 class ComparisonVisualizationWidget(QWidget):
+    """Comparison dashboard with full-result search, filtering and sorting."""
+
     evidence_requested = Signal(str, str)
 
     def __init__(
@@ -82,6 +87,8 @@ class ComparisonVisualizationWidget(QWidget):
         self._ordered_rows: list[ComparisonVisualRow] = []
         self._visible_rows: list[ComparisonVisualRow] = []
         self._page_index = 0
+        self._sort_column: int | None = None
+        self._sort_order = Qt.SortOrder.AscendingOrder
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -136,6 +143,7 @@ class ComparisonVisualizationWidget(QWidget):
         table_title = QLabel("Tabela różnic", table_panel)
         table_title.setObjectName("comparisonSectionTitle")
         table_layout.addWidget(table_title)
+        table_layout.addLayout(self._build_filter_toolbar(table_panel))
 
         self.table = QTableWidget(0, 10, table_panel)
         self.table.setObjectName("comparisonVisualizationDiffTable")
@@ -144,8 +152,8 @@ class ComparisonVisualizationWidget(QWidget):
                 "Sesja",
                 "CAN ID / Klucz",
                 "Status",
-                "Ramki bazowa",
-                "Ramki porównywana",
+                "Ramki bazowe",
+                "Ramki porównywane",
                 "Częstotliwość",
                 "Δ [%]",
                 "Payload",
@@ -161,7 +169,8 @@ class ComparisonVisualizationWidget(QWidget):
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.setSortingEnabled(True)
+        # Sorting covers the full filtered result, not only the visible page.
+        self.table.setSortingEnabled(False)
         self.table.setShowGrid(False)
         self.table.setHorizontalScrollMode(
             QAbstractItemView.ScrollMode.ScrollPerPixel
@@ -179,6 +188,8 @@ class ComparisonVisualizationWidget(QWidget):
             1,
             QHeaderView.ResizeMode.Stretch,
         )
+        self.table.horizontalHeader().setSortIndicatorShown(False)
+        self.table.horizontalHeader().sectionClicked.connect(self._sort_by_column)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.itemDoubleClicked.connect(self._request_selected_evidence)
         table_layout.addWidget(self.table, 1)
@@ -217,7 +228,7 @@ class ComparisonVisualizationWidget(QWidget):
 
         self.details_splitter.addWidget(table_panel)
         self.inspector = ComparisonInspector(self.details_splitter)
-        self.inspector.evidence_requested.connect(self.evidence_requested.emit)
+        self.inspector.evidence_requested.connect(self._request_selected_evidence)
         self.details_splitter.addWidget(self.inspector)
         self.details_splitter.setStretchFactor(0, 1)
         self.details_splitter.setStretchFactor(1, 0)
@@ -233,6 +244,46 @@ class ComparisonVisualizationWidget(QWidget):
     @property
     def data(self) -> ComparisonDashboardData:
         return self._data
+
+    @property
+    def filtered_row_count(self) -> int:
+        return len(self._ordered_rows)
+
+    def _build_filter_toolbar(self, panel: QWidget) -> QHBoxLayout:
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(7)
+        search_label = QLabel("Szukaj:", panel)
+        search_label.setObjectName("comparisonTableFilterLabel")
+        toolbar.addWidget(search_label)
+
+        self.search_edit = QLineEdit(panel)
+        self.search_edit.setObjectName("comparisonTableSearch")
+        self.search_edit.setPlaceholderText(
+            "CAN ID, klucz wiadomości lub nazwa sesji"
+        )
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._filters_changed)
+        toolbar.addWidget(self.search_edit, 1)
+
+        status_label = QLabel("Status:", panel)
+        status_label.setObjectName("comparisonTableFilterLabel")
+        toolbar.addWidget(status_label)
+
+        self.status_filter = QComboBox(panel)
+        self.status_filter.setObjectName("comparisonStatusFilter")
+        self.status_filter.addItem("Wszystkie", "")
+        self.status_filter.addItem(STATUS_NEW, STATUS_NEW)
+        self.status_filter.addItem(STATUS_MISSING, STATUS_MISSING)
+        self.status_filter.addItem(STATUS_CHANGED, STATUS_CHANGED)
+        self.status_filter.addItem(STATUS_UNCHANGED, STATUS_UNCHANGED)
+        self.status_filter.currentIndexChanged.connect(self._filters_changed)
+        toolbar.addWidget(self.status_filter)
+
+        self.clear_filters_button = QPushButton("Wyczyść", panel)
+        self.clear_filters_button.setObjectName("comparisonClearFilters")
+        self.clear_filters_button.clicked.connect(self._clear_filters)
+        toolbar.addWidget(self.clear_filters_button)
+        return toolbar
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
@@ -304,6 +355,18 @@ class ComparisonVisualizationWidget(QWidget):
             QLabel#comparisonPaginationLabel {
                 color: #94a7b8;
             }
+            QLineEdit#comparisonTableSearch {
+                min-height: 28px;
+                padding: 0 9px;
+                border: 1px solid #344654;
+                border-radius: 4px;
+                background: #121920;
+                color: #dce6ef;
+                selection-background-color: #235b87;
+            }
+            QLabel#comparisonTableFilterLabel {
+                color: #94a7b8;
+            }
             """
         )
 
@@ -332,11 +395,17 @@ class ComparisonVisualizationWidget(QWidget):
         self.payload_preview.clear_preview()
 
     def set_payloads(self, payloads: dict[str, dict]) -> None:
-        self._data = build_dashboard_data(self._comparison_name, payloads)
+        self.set_data(build_dashboard_data(self._comparison_name, payloads))
+
+    def set_data(self, data: ComparisonDashboardData) -> None:
+        """Show an already-built dashboard model (GUI thread only)."""
+
+        self._data = data
         self._update_cards()
-        self.heatmap.set_data(self._data.sessions, self._data.rows)
-        self.frequency_panel.set_rows(self._data.rows)
-        self._populate_table()
+        self.heatmap.set_data(data.sessions, data.rows)
+        self.frequency_panel.set_rows(data.rows)
+        self._page_index = 0
+        self._apply_filters_and_sort()
 
     def _update_cards(self) -> None:
         data = self._data
@@ -390,18 +459,57 @@ class ComparisonVisualizationWidget(QWidget):
                 QColor("#ffbf47") if delta >= 0 else QColor("#5da9ff"),
             )
 
-    def _populate_table(self) -> None:
-        self._ordered_rows = sorted(
-            self._data.rows,
-            key=lambda row: (
-                STATUS_ORDER.get(row.status, 99),
-                -row.magnitude,
-                row.session_name.casefold(),
-                row.message_key,
-            ),
-        )
+    def _filters_changed(self, *_args) -> None:
         self._page_index = 0
+        self._apply_filters_and_sort()
+
+    def _clear_filters(self) -> None:
+        self.search_edit.clear()
+        self.status_filter.setCurrentIndex(0)
+        self._page_index = 0
+        self._apply_filters_and_sort()
+
+    def _apply_filters_and_sort(self) -> None:
+        query = self.search_edit.text().strip().casefold()
+        status = str(self.status_filter.currentData() or "")
+        rows = [
+            row
+            for row in self._data.rows
+            if (not status or row.status == status)
+            and (not query or query in _search_text(row))
+        ]
+        if self._sort_column is None:
+            rows.sort(
+                key=lambda row: (
+                    STATUS_ORDER.get(row.status, 99),
+                    -row.magnitude,
+                    row.session_name.casefold(),
+                    row.message_key,
+                )
+            )
+        else:
+            rows.sort(
+                key=lambda row: _column_sort_key(row, self._sort_column or 0),
+                reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
+            )
+        self._ordered_rows = rows
         self._refresh_page()
+
+    def _sort_by_column(self, column: int) -> None:
+        if self._sort_column == column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = column
+            self._sort_order = Qt.SortOrder.AscendingOrder
+        header = self.table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(column, self._sort_order)
+        self._page_index = 0
+        self._apply_filters_and_sort()
 
     def _refresh_page(self) -> None:
         page_size = self._page_size()
@@ -453,7 +561,6 @@ class ComparisonVisualizationWidget(QWidget):
                     item.setFont(item_font)
                 self.table.setItem(row_index, column, item)
         self.table.blockSignals(False)
-        self.table.setSortingEnabled(True)
         self._update_pagination(start, end)
         if self._visible_rows:
             self.table.selectRow(0)
@@ -472,6 +579,11 @@ class ComparisonVisualizationWidget(QWidget):
         self.next_page_button.setEnabled(
             page_count > 0 and self._page_index + 1 < page_count
         )
+        all_count = len(self._data.rows)
+        if total != all_count:
+            self.rows_label.setText(
+                f"{self.rows_label.text()} · wszystkich: {all_count}"
+            )
 
     def _page_size(self) -> int:
         value = self.page_size_combo.currentData()
@@ -506,11 +618,34 @@ class ComparisonVisualizationWidget(QWidget):
             return
         self.inspector.set_row(row)
         self.payload_preview.set_row(row)
+        if row.status == STATUS_MISSING:
+            self.inspector.evidence_button.setText(
+                f"Otwórz dowody w bazie ({row.evidence_count})"
+            )
 
     def _request_selected_evidence(self, *_args) -> None:
         row = self._selected_row()
-        if row is not None and row.evidence_count > 0:
-            self.evidence_requested.emit(row.session_id, row.message_key)
+        if row is None or row.evidence_count <= 0:
+            return
+        self.evidence_requested.emit(
+            self._evidence_session_id(row),
+            row.message_key,
+        )
+
+    def _evidence_session_id(self, row: ComparisonVisualRow) -> str:
+        """Missing keys have their evidence in the baseline session."""
+
+        if row.status != STATUS_MISSING:
+            return row.session_id
+        baseline = next(
+            (
+                str(session.get("id") or "")
+                for session in self._data.sessions
+                if session.get("role") == "base"
+            ),
+            "",
+        )
+        return baseline or row.session_id
 
     def _selected_row(self) -> ComparisonVisualRow | None:
         selected = self.table.selectionModel().selectedRows()
@@ -533,3 +668,51 @@ def _format_delta(value: float | None) -> str:
     if abs(float(value)) < MIN_VISIBLE_FREQUENCY_DELTA:
         return "0,0%"
     return format_percent(value)
+
+
+def _search_text(row: ComparisonVisualRow) -> str:
+    return " ".join(
+        (
+            row.session_name,
+            row.display_key,
+            row.message_key,
+            row.arbitration_id_hex,
+            row.status,
+            row.frame_kind,
+        )
+    ).casefold()
+
+
+def _column_sort_key(row: ComparisonVisualRow, column: int):
+    if column == 0:
+        return row.session_name.casefold()
+    if column == 1:
+        arbitration_id = optional_hex_int(row.arbitration_id_hex)
+        return (
+            row.channel,
+            row.is_extended_id,
+            -1 if arbitration_id is None else arbitration_id,
+            row.frame_kind,
+            row.message_key,
+        )
+    if column == 2:
+        return STATUS_ORDER.get(row.status, 99)
+    if column == 3:
+        return _number(row.baseline_frame_count)
+    if column == 4:
+        return _number(row.current_frame_count)
+    if column == 5:
+        return _number(row.current_frequency_hz)
+    if column == 6:
+        return _number(row.frequency_delta_percent)
+    if column == 7:
+        return row.payload_change_count
+    if column == 8:
+        return row.sequence_change_count
+    if column == 9:
+        return row.evidence_count
+    return row.message_key
+
+
+def _number(value: int | float | None) -> float:
+    return float("-inf") if value is None else float(value)

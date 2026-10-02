@@ -65,6 +65,7 @@ jobs:
           from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QLabel
 
           from app.markers import MarkerPreset
+          from app.project_catalog import ProjectProfile
           from app.project_dbc import import_project_dbc
           from gui.application_container import ApplicationContainer
           from gui.marker_manager import MarkerManagerDialog
@@ -132,10 +133,14 @@ jobs:
               def receive_mode(self) -> str:
                   return "bench"
 
+              def profile(self) -> ProjectProfile:
+                  return ProjectProfile()
+
 
           app = QApplication([])
           with TemporaryDirectory() as temporary:
               PROJECT_ROOT = Path(temporary) / "project"
+              os.environ["CRT_APP_DATA_DIR"] = str(Path(temporary) / "app-data")
               window = ApplicationContainer().create_main_window()
               with patch("gui.application_container.NewProjectDialog", AcceptedProjectDialog):
                   window._new_project()
@@ -151,8 +156,8 @@ jobs:
                   [MarkerPreset.create("EGR odłączony", "F3", area="EGR")]
               )
               window.explorer.refresh()
-              window._open_live_capture()
-              live = window._tab_keys["live-capture"]
+              window.open_live_capture()
+              live = window.navigator.widget("live-capture")
               live._update_marker_tile()
               assert live._live_filter_integration.proxy is live.live_filter_proxy
               assert live.findChild(QCheckBox, "armSessionSaveButton") is None
@@ -173,9 +178,9 @@ jobs:
 
               filter_tab_count = window.tabs.count()
               window.filters_action.trigger()
-              assert window._filter_window is not None
+              assert window.filter_presets.editor_window is not None
               assert window.tabs.count() == filter_tab_count
-              filters = window._filter_window.manager
+              filters = window.filter_presets.editor_window.manager
               filters._add_preset()
               preset = filters.presets[0]
               preset.enabled = False
@@ -194,8 +199,8 @@ jobs:
               dbc_source = Path(temporary) / "egr.dbc"
               dbc_source.write_text(DBC_TEXT, encoding="utf-8")
               import_project_dbc(window.project, dbc_source)
-              window._open_decoders()
-              decoders = window._tab_keys["decoders"]
+              window.open_decoders()
+              decoders = window.navigator.widget("decoders")
               deadline = monotonic() + 5.0
               while decoders.manager is None and monotonic() < deadline:
                   app.processEvents()
@@ -222,14 +227,16 @@ jobs:
               assert window.explorer.tree.model().rowCount() == 1
 
               QThreadPool.globalInstance().waitForDone(5_000)
-              if window._filter_window is not None:
-                  window._filter_window.close()
+              editor_window = window.filter_presets.editor_window
+              if editor_window is not None:
+                  editor_window.close()
               window.navigator.close_all()
               window.close()
               # Drain queued callbacks while the window hierarchy still exists.
               app.processEvents()
-              if window._filter_window is not None:
-                  window._filter_window.deleteLater()
+              editor_window = window.filter_presets.editor_window
+              if editor_window is not None:
+                  editor_window.deleteLater()
               window.deleteLater()
               QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -238,6 +245,7 @@ jobs:
               del marker_dialog
               del filters
               del live
+              del editor_window
               del window
               gc.collect()
           app.quit()

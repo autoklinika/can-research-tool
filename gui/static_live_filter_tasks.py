@@ -7,10 +7,8 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from app.models import CanFrame
 from app.static_frame_adapter import static_frame_record
 
-from .live_filter_integration import (
-    FILTER_WORKER_YIELD_EVERY,
-    FILTER_WORKER_YIELD_SECONDS,
-)
+FILTER_WORKER_YIELD_EVERY = 512
+FILTER_WORKER_YIELD_SECONDS = 0.001
 
 
 class StaticLiveFilterScanSignals(QObject):

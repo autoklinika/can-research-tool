@@ -276,6 +276,18 @@ class LogicalMessageFilterProxy(QSortFilterProxyModel):
             if was_accepted:
                 self._remove_from_summary(message)
 
+    def restart_on_empty_source(self) -> None:
+        """Accept new rows incrementally after the source model was cleared.
+
+        The source is empty, so invalidation is constant-cost; no background
+        scan is needed before the filtered view can be shown.
+        """
+
+        self.filter_scanning = False
+        self.filter_ready = True
+        self._clear_filter_cache(keep_state=True)
+        self.invalidateFilter()
+
     def _clear_filter_cache(self, *, keep_state: bool = False) -> None:
         if not keep_state:
             self.filter_ready = False

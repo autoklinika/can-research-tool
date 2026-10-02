@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from . import help_catalog as _help_catalog
-from .help_catalog import HelpSection, HelpTopic
+from .help_model import HelpSection, HelpTopic
 
 
 EXPERIMENT_DIFF_HELP_TOPIC = HelpTopic(
     id="experiment-diff-marker-correlation",
-    category="Analiza i porównania",
+    category="Porównywanie logów",
     title="Experiment Diff — korelacja zmian z markerami",
     summary=(
         "Jak porównywać powtarzane eksperymenty, znaleźć bity zmieniające się po markerze "
@@ -89,14 +88,6 @@ EXPERIMENT_DIFF_HELP_TOPIC = HelpTopic(
     ),
     related=("signal-discovery", "source-of-truth", "artifacts"),
 )
-
-
-# Help Center Stage 1 still uses one shared catalog. Register the feature-owned
-# topic on import, without changing the base catalog or requiring Experiment Diff
-# to be available for normal CRT operation.
-if not any(topic.id == EXPERIMENT_DIFF_HELP_TOPIC.id for topic in _help_catalog.HELP_TOPICS):
-    _help_catalog.HELP_TOPICS = (*_help_catalog.HELP_TOPICS, EXPERIMENT_DIFF_HELP_TOPIC)
-    _help_catalog._TOPIC_BY_ID[EXPERIMENT_DIFF_HELP_TOPIC.id] = EXPERIMENT_DIFF_HELP_TOPIC
 
 
 __all__ = ["EXPERIMENT_DIFF_HELP_TOPIC"]

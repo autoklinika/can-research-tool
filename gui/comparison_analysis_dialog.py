@@ -100,6 +100,43 @@ _PAYLOAD_CHANGE_HEADERS = (
     "Bieżąca",
 )
 
+_SEQUENCE_REASON_LABELS = {
+    "new_sequence": "Nowa sekwencja",
+    "missing_sequence": "Brakująca sekwencja",
+    "occurrence_increase": "Liczba wystąpień ↑",
+    "occurrence_decrease": "Liczba wystąpień ↓",
+    "share_increase": "Udział ↑",
+    "share_decrease": "Udział ↓",
+    "mean_span_increase": "Czas sekwencji ↑",
+    "mean_span_decrease": "Czas sekwencji ↓",
+}
+_SEQUENCE_SESSION_HEADERS = (
+    "Sesja",
+    "Rola",
+    "Ramki",
+    "Pary raw",
+    "Trójki raw",
+    "Pary zwinięte",
+    "Trójki zwinięte",
+    "Nowe",
+    "Brakujące",
+    "Cykle",
+)
+_SEQUENCE_CHANGE_HEADERS = (
+    "Sesja",
+    "Tryb",
+    "Długość",
+    "Sekwencja",
+    "Zmiana",
+    "Baza: liczba",
+    "Bieżąca: liczba",
+    "Δ liczby [%]",
+    "Baza: udział [%]",
+    "Bieżący: udział [%]",
+    "Baza: czas [ms]",
+    "Bieżący: czas [ms]",
+)
+
 
 class _TaskSignals(QObject):
     progress = Signal(int, int, str)
@@ -165,92 +202,74 @@ class ComparisonAnalysisDialog(QDialog):
 
         self.setWindowTitle(f"Analiza porównawcza — {self.comparison_set.name}")
         self.resize(1180, 780)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(8)
 
-        title = QLabel(f"Zestaw: {self.comparison_set.name}", self)
-        title.setObjectName("comparisonAnalysisTitle")
-        font = title.font()
+        self.title_label = QLabel(f"Zestaw: {self.comparison_set.name}", self)
+        self.title_label.setObjectName("comparisonAnalysisTitle")
+        font = self.title_label.font()
         font.setBold(True)
         font.setPointSize(font.pointSize() + 2)
-        title.setFont(font)
-        root.addWidget(title)
+        self.title_label.setFont(font)
 
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Analiza:", self))
+        self.provider_label = QLabel("Analiza:", self)
         self.provider_combo = QComboBox(self)
         self.provider_combo.setObjectName("comparisonAnalysisProvider")
         self.provider_combo.setMinimumWidth(320)
         for manifest in self.service.available_comparison_analyses():
             self.provider_combo.addItem(manifest.name, manifest.id)
-        controls.addWidget(self.provider_combo)
         self.run_button = QPushButton("Uruchom", self)
         self.run_button.setObjectName("runComparisonAnalysis")
         self.run_button.clicked.connect(self._start_analysis)
-        controls.addWidget(self.run_button)
         self.cancel_button = QPushButton("Anuluj", self)
         self.cancel_button.setObjectName("cancelComparisonAnalysis")
         self.cancel_button.clicked.connect(self._cancel_analysis)
-        controls.addWidget(self.cancel_button)
         self.refresh_button = QPushButton("Odśwież wyniki", self)
         self.refresh_button.setObjectName("refreshComparisonArtifacts")
         self.refresh_button.clicked.connect(self._load_artifacts)
-        controls.addWidget(self.refresh_button)
-        controls.addStretch(1)
-        root.addLayout(controls)
 
         self.progress = QProgressBar(self)
         self.progress.setObjectName("comparisonAnalysisProgress")
         self.progress.setRange(0, 100)
         self.progress.setFormat("Oczekiwanie")
-        root.addWidget(self.progress)
         self.status_label = QLabel(self)
         self.status_label.setObjectName("comparisonAnalysisStatus")
         self.status_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        root.addWidget(self.status_label)
 
-        artifacts = QHBoxLayout()
-        artifacts.addWidget(QLabel("Wynik analizy:", self))
+        self.artifact_label = QLabel("Wynik analizy:", self)
         self.artifact_combo = QComboBox(self)
         self.artifact_combo.setObjectName("comparisonArtifactSelector")
         self.artifact_combo.currentIndexChanged.connect(
             self._show_selected_artifact
         )
-        artifacts.addWidget(self.artifact_combo, 1)
-        root.addLayout(artifacts)
         self.artifact_info = QLabel(self)
         self.artifact_info.setWordWrap(True)
-        root.addWidget(self.artifact_info)
         self.summary_label = QLabel(self)
         self.summary_label.setObjectName("comparisonAnalysisSummary")
         self.summary_label.setWordWrap(True)
-        root.addWidget(self.summary_label)
 
-        splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.results_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.sessions_table = _table(
-            splitter,
+            self.results_splitter,
             "comparisonSessionSummaryTable",
             _STATISTICS_SESSION_HEADERS,
         )
         self.changes_table = _table(
-            splitter,
+            self.results_splitter,
             "comparisonNotableChangesTable",
             _STATISTICS_CHANGE_HEADERS,
         )
-        splitter.addWidget(self.sessions_table)
-        splitter.addWidget(self.changes_table)
-        splitter.setSizes((240, 420))
-        root.addWidget(splitter, 1)
+        self.results_splitter.addWidget(self.sessions_table)
+        self.results_splitter.addWidget(self.changes_table)
+        self.results_splitter.setSizes((240, 420))
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Close,
             parent=self,
         )
         self.buttons.rejected.connect(self.reject)
-        root.addWidget(self.buttons)
+
+        self._build_layout()
 
         enabled = self.provider_combo.count() > 0
         self.provider_combo.setEnabled(enabled)
@@ -262,6 +281,39 @@ class ComparisonAnalysisDialog(QDialog):
             else "Brak zarejestrowanego providera porównawczego."
         )
         self._load_artifacts()
+
+    def _build_layout(self) -> None:
+        """Arrange the dialog's widgets; specialised dialogs override this."""
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(8)
+        root.addWidget(self.title_label)
+        root.addLayout(self._provider_row(include_secondary_buttons=True))
+        root.addWidget(self.progress)
+        root.addWidget(self.status_label)
+        root.addLayout(self._artifact_row())
+        root.addWidget(self.artifact_info)
+        root.addWidget(self.summary_label)
+        root.addWidget(self.results_splitter, 1)
+        root.addWidget(self.buttons)
+
+    def _provider_row(self, *, include_secondary_buttons: bool) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(self.provider_label)
+        row.addWidget(self.provider_combo)
+        row.addWidget(self.run_button)
+        if include_secondary_buttons:
+            row.addWidget(self.cancel_button)
+            row.addWidget(self.refresh_button)
+        row.addStretch(1)
+        return row
+
+    def _artifact_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(self.artifact_label)
+        row.addWidget(self.artifact_combo, 1)
+        return row
 
     @Slot()
     def _start_analysis(self) -> None:
@@ -430,6 +482,8 @@ class ComparisonAnalysisDialog(QDialog):
             self._render_statistics(payload)
         elif schema == "crt.payload_differences":
             self._render_payload_difference(payload)
+        elif schema == "crt.message_sequence_differences":
+            self._render_message_sequences(payload)
         else:
             self.summary_label.setText(
                 "Szczegółowy podgląd nie jest dostępny."
@@ -617,6 +671,108 @@ class ComparisonAnalysisDialog(QDialog):
                     payload_hex,
                     baseline,
                     current,
+                ),
+            )
+
+    def _render_message_sequences(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        _configure_table(
+            self.sessions_table,
+            _SEQUENCE_SESSION_HEADERS,
+        )
+        _configure_table(
+            self.changes_table,
+            _SEQUENCE_CHANGE_HEADERS,
+        )
+        summary = (
+            payload.get("summary")
+            if isinstance(payload.get("summary"), dict)
+            else {}
+        )
+        comparison = (
+            payload.get("comparison_set")
+            if isinstance(payload.get("comparison_set"), dict)
+            else {}
+        )
+        sessions = _dict_list(payload.get("sessions"))
+        changes = _dict_list(payload.get("ranked_changes"))
+        base_id = str(summary.get("baseline_session_id") or "")
+        base_name = _session_name(sessions, base_id)
+        self.summary_label.setText(
+            f"Baza: {base_name or '—'}. "
+            f"Sesje: {summary.get('session_count', '—')}. "
+            f"Unikalne sekwencje: "
+            f"{summary.get('union_sequence_count', '—')}. "
+            f"Zmiany: {summary.get('notable_change_count', '—')}. "
+            f"Macierz kompletna: "
+            f"{'tak' if summary.get('matrix_complete') else 'nie'}. "
+            f"Synchronizacja: "
+            f"{comparison.get('synchronization_mode', '—')}."
+        )
+        self.sessions_table.setRowCount(len(sessions))
+        for row, item in enumerate(sessions):
+            _set_row(
+                self.sessions_table,
+                row,
+                (
+                    item.get("name", "—"),
+                    _role(item),
+                    item.get("observed_frame_count", "—"),
+                    item.get("raw_pair_unique_count", "—"),
+                    item.get("raw_triple_unique_count", "—"),
+                    item.get("collapsed_pair_unique_count", "—"),
+                    item.get("collapsed_triple_unique_count", "—"),
+                    item.get("new_sequence_count", "—"),
+                    item.get("missing_sequence_count", "—"),
+                    item.get("unique_cycle_sequence_count", "—"),
+                ),
+            )
+
+        self.changes_table.setRowCount(len(changes))
+        for row, item in enumerate(changes):
+            baseline = (
+                item.get("baseline")
+                if isinstance(item.get("baseline"), dict)
+                else {}
+            )
+            current = (
+                item.get("current")
+                if isinstance(item.get("current"), dict)
+                else {}
+            )
+            reasons = (
+                item.get("reasons")
+                if isinstance(item.get("reasons"), list)
+                else []
+            )
+            sequence_text = str(item.get("sequence_text") or "—")
+            if item.get("is_cycle"):
+                sequence_text = f"[CYKL] {sequence_text}"
+            elif item.get("is_self_transition"):
+                sequence_text = f"[POWTÓRZENIE] {sequence_text}"
+            _set_row(
+                self.changes_table,
+                row,
+                (
+                    item.get("session_name", "—"),
+                    _mode_label(item.get("mode")),
+                    item.get("sequence_length", "—"),
+                    sequence_text,
+                    ", ".join(
+                        _SEQUENCE_REASON_LABELS.get(
+                            str(reason),
+                            str(reason),
+                        )
+                        for reason in reasons
+                    ),
+                    baseline.get("occurrence_count", "—"),
+                    current.get("occurrence_count", "—"),
+                    _number(item.get("occurrence_delta_percent")),
+                    _number(baseline.get("share_percent")),
+                    _number(current.get("share_percent")),
+                    _milliseconds(baseline.get("mean_span_ns")),
+                    _milliseconds(current.get("mean_span_ns")),
                 ),
             )
 
@@ -828,3 +984,16 @@ def _timestamp(value: str) -> str:
 
 
 __all__ = ["ComparisonAnalysisDialog", "ComparisonAnalysisTask"]
+
+
+def _mode_label(value: object) -> str:
+    return "Surowa" if value == "raw" else "Po zwinięciu"
+
+
+def _milliseconds(value: object) -> object:
+    if value is None:
+        return "—"
+    try:
+        return round(float(value) / 1_000_000.0, 6)
+    except (TypeError, ValueError):
+        return "—"

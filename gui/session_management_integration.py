@@ -196,7 +196,7 @@ class SessionManagementIntegration(QObject):
                 f"Usunięto plików projektu: {len(result.removed_files)}\n"
                 "Oryginalny plik źródłowy poza projektem pozostawiono bez zmian."
             )
-            window._append_output(
+            window.append_output(
                 f"Usunięto importowaną sesję z projektu: {session.name} | "
                 f"pliki={len(result.removed_files)}"
             )
@@ -206,7 +206,7 @@ class SessionManagementIntegration(QObject):
                 f"Usunięto plików: {len(result.removed_files)}\n"
                 f"Lokalizacja: {path.parent}"
             )
-            window._append_output(
+            window.append_output(
                 f"Usunięto sesję Live: {session.name} | "
                 f"pliki={len(result.removed_files)}"
             )

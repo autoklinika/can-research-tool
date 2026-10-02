@@ -230,3 +230,95 @@ def test_listen_only_mode_forces_silent_driver(monkeypatch) -> None:
     assert not hasattr(listener, "send")
 
     listener.close()
+
+
+class FakeIoControl:
+    def __init__(self) -> None:
+        self.timer_scale = 1000
+
+
+class TimedFakeChannel(FakeChannel):
+    """Fake channel exposing CANlib timer controls (µs scale after setup)."""
+
+    def __init__(self, frames=None, timer_now: int = 5_000) -> None:
+        super().__init__(frames)
+        self.iocontrol = FakeIoControl()
+        self.timer_now = timer_now
+        self.timer_scale_at_bus_on = None
+
+    def busOn(self) -> None:  # noqa: N802
+        self.timer_scale_at_bus_on = self.iocontrol.timer_scale
+        super().busOn()
+
+    def readTimer(self) -> int:  # noqa: N802
+        return self.timer_now
+
+
+def _read_all(listener, count: int):
+    assert _wait_until(lambda: listener.prefetched_count == count)
+    return [listener.read(timeout_ms=50) for _ in range(count)]
+
+
+def test_hardware_timestamps_preserve_adapter_deltas(monkeypatch) -> None:
+    api = FakeApi()
+    api.channel = TimedFakeChannel(
+        [
+            _raw_frame(0x100, "01", 5_000),
+            _raw_frame(0x101, "02", 5_200),
+            _raw_frame(0x102, "03", 5_201),
+        ],
+        timer_now=5_000,
+    )
+    monkeypatch.setattr(backend, "canlib", api)
+
+    listener = backend.KvaserPassiveChannel(channel_number=0, bitrate=500_000)
+    listener.open()
+    frames = _read_all(listener, 3)
+    listener.close()
+
+    assert api.channel.timer_scale_at_bus_on == backend.HARDWARE_TIMER_SCALE_US
+    assert listener.timestamp_source == backend.TIMESTAMP_SOURCE_HARDWARE
+    assert listener.timer_resolution_ns == 1_000
+    stamps = [frame.timestamp_ns for frame in frames]
+    assert stamps[1] - stamps[0] == 200_000
+    assert stamps[2] - stamps[1] == 1_000
+    assert [frame.source_timestamp for frame in frames] == [5_000, 5_200, 5_201]
+
+
+def test_missing_timer_controls_fall_back_to_host_time(monkeypatch) -> None:
+    api = FakeApi([_raw_frame(0x100, "01", 7)])
+    monkeypatch.setattr(backend, "canlib", api)
+
+    listener = backend.KvaserPassiveChannel(channel_number=0, bitrate=500_000)
+    listener.open()
+    frames = _read_all(listener, 1)
+    listener.close()
+
+    assert listener.timestamp_source == backend.TIMESTAMP_SOURCE_HOST
+    assert listener.timer_resolution_ns is None
+    assert frames[0].timestamp_ns > 0
+
+
+def test_hardware_timestamp_mapper_unwraps_32_bit_counter() -> None:
+    wrap = 1 << 32
+    mapper = backend.HardwareTimestampMapper(
+        tick_ns=1_000,
+        hw_anchor=wrap - 10,
+        host_anchor_ns=1_000_000_000,
+    )
+
+    before = mapper.to_host_ns(wrap - 5)
+    after = mapper.to_host_ns(3)
+
+    assert before == 1_000_000_000 + 5_000
+    assert after - before == 8_000
+    assert mapper.to_host_ns(4) - after == 1_000
+
+
+def test_hardware_timestamp_mapper_rejects_invalid_tick() -> None:
+    try:
+        backend.HardwareTimestampMapper(tick_ns=0, hw_anchor=0, host_anchor_ns=0)
+    except ValueError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("tick_ns=0 must be rejected")

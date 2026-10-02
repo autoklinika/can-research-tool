@@ -79,7 +79,7 @@ def _run_phase(phase: str) -> None:
         )
 
         window = ApplicationContainer().create_main_window()
-        window._set_project(project)
+        window.set_project(project)
 
         if phase == "tree":
             assert (
@@ -96,7 +96,7 @@ def _run_phase(phase: str) -> None:
                 live_path,
                 project=project,
                 inspector_sink=window.inspector.setPlainText,
-                output_sink=window._append_output,
+                output_sink=window.append_output,
             )
             assert first._message_load_generation == 0
             assert not first._message_loading
@@ -107,7 +107,7 @@ def _run_phase(phase: str) -> None:
                 live_path,
                 project=project,
                 inspector_sink=window.inspector.setPlainText,
-                output_sink=window._append_output,
+                output_sink=window.append_output,
             )
             assert first is second
             assert window.navigator.widget(ProjectNavigator.session_key(live_path)) is first

@@ -18,9 +18,7 @@ from app.session_stream import SessionStreamWriter
 from gui.comparison_sets_analysis_view import (
     configure_comparison_analysis_window,
 )
-from gui.message_sequence_analysis_dialog import (
-    MessageSequenceComparisonAnalysisDialog,
-)
+from gui.comparison_analysis_dialog import ComparisonAnalysisDialog
 
 
 def main() -> None:
@@ -44,7 +42,7 @@ def main() -> None:
             base_session_id=before.id,
         )
 
-        dialog = MessageSequenceComparisonAnalysisDialog(
+        dialog = ComparisonAnalysisDialog(
             project,
             comparison.id,
         )
@@ -86,7 +84,7 @@ def main() -> None:
 
 def _wait_for_analysis(
     app: QApplication,
-    dialog: MessageSequenceComparisonAnalysisDialog,
+    dialog: ComparisonAnalysisDialog,
 ) -> None:
     deadline = monotonic() + 15.0
     while dialog._task is not None:

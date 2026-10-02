@@ -48,7 +48,7 @@ def main() -> None:
 
         generated_name = dialog.project_name()
         assert generated_name == "MAN — TGX — 2021 — MD1CE101 — 0281039999"
-        window._create_project_from_dialog(dialog)
+        window.create_project_from_dialog(dialog)
         app.processEvents()
 
         project = window.project
@@ -70,7 +70,7 @@ def main() -> None:
         properties.hardware_version_edit.setText("HW-REV-C")
         properties.fault_description_edit.setPlainText("EGR actuator bench validation")
         properties.tags_edit.setText("Euro 6, EGR, validated")
-        window._apply_project_properties_from_dialog(properties)
+        window.project_properties.apply_from_dialog(properties)
         app.processEvents()
 
         updated_profile = load_project_profile(project.root)
@@ -122,7 +122,7 @@ def main() -> None:
         properties.close()
         picker.close()
         dialog.close()
-        window._close_project_tabs()
+        window.close_project_tabs()
         window.close()
         window.deleteLater()
         assert QThreadPool.globalInstance().waitForDone(5_000)

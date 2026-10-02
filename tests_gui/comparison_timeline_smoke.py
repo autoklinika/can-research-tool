@@ -23,7 +23,7 @@ from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
 from gui.application_container import ApplicationContainer
 from gui.comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
-from gui.comparison_visualization_hardened import ComparisonVisualizationDialog
+from gui.comparison_visualization import ComparisonVisualizationDialog
 from gui.project_navigator import ProjectNavigator
 
 
@@ -60,8 +60,8 @@ def main() -> None:
 
         window = ApplicationContainer().create_main_window()
         window.show()
-        window._set_project(project)
-        window._open_comparison_sets(comparison.id)
+        window.set_project(project)
+        window.comparison_sets.open(comparison.id)
         app.processEvents()
 
         comparison_view = window.navigator.widget("comparison-sets")

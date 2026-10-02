@@ -6,7 +6,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from .engineering_theme import ENGINEERING_IDE_QSS, apply_engineering_theme
+from .engineering_theme import apply_engineering_theme
 
 
 THEME_SETTINGS_KEY = "ui/colorTheme"

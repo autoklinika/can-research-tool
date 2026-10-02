@@ -134,3 +134,25 @@ def test_required_program_functions_have_topics() -> None:
         "shortcuts",
     }
     assert required.issubset({topic.id for topic in HELP_TOPICS})
+
+
+def test_feature_topics_are_part_of_catalog_without_import_side_effects() -> None:
+    from app.help_catalog_experiment_diff import EXPERIMENT_DIFF_HELP_TOPIC
+    from app.help_catalog_signal_candidates import SIGNAL_CANDIDATES_HELP_TOPIC
+
+    feature_topics = (
+        SIGNAL_DISCOVERY_HELP_TOPIC,
+        EXPERIMENT_DIFF_HELP_TOPIC,
+        SIGNAL_CANDIDATES_HELP_TOPIC,
+    )
+    grouped_ids = {
+        topic.id
+        for _category, topics in help_topics_by_category()
+        for topic in topics
+    }
+    for topic in feature_topics:
+        assert topic in HELP_TOPICS
+        assert help_topic(topic.id) is topic
+        # A category outside HELP_CATEGORY_ORDER would hide the article in the tree.
+        assert topic.category in HELP_CATEGORY_ORDER
+        assert topic.id in grouped_ids

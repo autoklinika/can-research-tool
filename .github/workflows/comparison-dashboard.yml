@@ -28,9 +28,9 @@ jobs:
           gui/comparison_evidence_navigation.py
           gui/comparison_evidence_stored_navigation.py
           gui/comparison_sets_analysis_view.py
-          gui/comparison_sets_shell.py
+          gui/comparison_sets_controller.py
           gui/comparison_visualization_charts.py
-          gui/comparison_visualization_hardened.py
+          gui/comparison_visualization.py
           gui/comparison_visualization_model.py
           tests/test_comparison_evidence.py
           tests_gui/comparison_visualization_hardened_smoke.py

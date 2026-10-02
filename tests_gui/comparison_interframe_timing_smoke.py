@@ -14,7 +14,7 @@ from app.comparison_sets import ComparisonSetStore
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
-from gui.comparison_visualization_stage2c1 import (
+from gui.comparison_visualization import (
     ComparisonVisualizationDialog,
 )
 

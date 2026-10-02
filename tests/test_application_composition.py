@@ -34,7 +34,7 @@ def test_container_constructs_capture_and_stored_session_controllers() -> None:
     assert "controller = self._live_controller_factory()" in source
     assert "return BoundedLiveCaptureWidget(" in source
     assert "controller=controller" in source
-    assert "filter_integration_factory=StreamingLiveFilterIntegration" in source
+    assert "filter_integration_factory=LiveFilterIntegration" in source
     assert "controller = self._stored_controller_factory(" in source
     assert "session_widget_factory=self.create_session_view" in source
 

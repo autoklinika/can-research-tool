@@ -23,7 +23,7 @@ class FakeLiveController:
 
     @property
     def is_active(self) -> bool:
-        # Exercise the real StreamingLiveFilterIntegration path used while Capture runs.
+        # Exercise the streaming LiveFilterIntegration path used while Capture runs.
         return True
 
 

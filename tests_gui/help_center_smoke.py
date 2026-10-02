@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from gui.application_container import ApplicationContainer
-from gui.help_center_shell import HelpCenterMainWindow
+from gui.main_window import MainWindow
 from gui.help_center_view import HelpCenterWidget
 
 
@@ -19,7 +19,7 @@ def main() -> None:
     QSettings().clear()
 
     window = ApplicationContainer().create_main_window()
-    assert isinstance(window, HelpCenterMainWindow)
+    assert isinstance(window, MainWindow)
     window.show()
     _drain(app)
 

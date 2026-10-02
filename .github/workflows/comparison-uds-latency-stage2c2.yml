@@ -31,7 +31,7 @@ jobs:
           python -m compileall -q
           app/comparison_uds_latency.py
           gui/comparison_uds_latency_view.py
-          gui/comparison_visualization_stage2c2.py
+          gui/comparison_visualization.py
           gui/comparison_sets_analysis_view.py
           tests/test_comparison_uds_latency.py
           tests_gui/comparison_uds_latency_smoke.py

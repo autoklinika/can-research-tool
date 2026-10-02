@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import QObject, QSettings, Qt
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
-from app.filters import FilterCompiler, ProjectFilterRepository
+from app.filters import ProjectFilterRepository
+from app.static_filter_engine import StaticFilterCompiler
 
 from .filter_manager import FilterManagerWidget
 from .filter_shortcut_support import check_filter_shortcuts
-from .main_window import MainWindow
 from .window_fullscreen import enable_full_screen
+
+if TYPE_CHECKING:
+    from .main_window import MainWindow
 
 
 class FilterManagerWindow(QMainWindow):
@@ -103,32 +108,37 @@ class FilterManagerWindow(QMainWindow):
         super().closeEvent(event)
 
 
-class WindowedFilterMainWindow(MainWindow):
-    """Main CRT window with a non-modal filter editor and preset shortcuts."""
+class FilterPresetController(QObject):
+    """Own the non-modal filter editor window and global preset shortcuts."""
 
-    def __init__(self, services) -> None:
-        self._filter_window: FilterManagerWindow | None = None
-        self._preset_shortcuts: list[QShortcut] = []
+    def __init__(self, window: MainWindow) -> None:
+        super().__init__(window)
+        self._window = window
+        self._editor_window: FilterManagerWindow | None = None
+        self._shortcuts: list[QShortcut] = []
         self._shortcut_issue_signature: tuple[str, ...] = ()
-        super().__init__(services)
 
-    def _build_actions(self) -> None:
-        super()._build_actions()
-        self.filters_action.setShortcut("Ctrl+D")
-        self.filters_action.setShortcutContext(Qt.ApplicationShortcut)
-        self.filters_action.setToolTip("Otwórz globalne filtry w osobnym oknie (Ctrl+D)")
+    @property
+    def editor_window(self) -> FilterManagerWindow | None:
+        return self._editor_window
 
-    def _open_filters(self) -> None:
-        if self.project is None:
+    @property
+    def shortcuts(self) -> tuple[QShortcut, ...]:
+        return tuple(self._shortcuts)
+
+    def open_editor(self) -> None:
+        main = self._window
+        project = main.project
+        if project is None:
             QMessageBox.information(
-                self,
+                main,
                 "CRT",
                 "Najpierw otwórz lub utwórz projekt.",
             )
             return
 
-        project_root = Path(self.project.root)
-        window = self._filter_window
+        project_root = Path(project.root)
+        window = self._editor_window
         if window is not None and window.project_root == project_root:
             if window.isMinimized():
                 window.showNormal()
@@ -138,73 +148,60 @@ class WindowedFilterMainWindow(MainWindow):
             window.activateWindow()
             return
 
-        if not self._dispose_filter_window():
+        if not self.close_editor():
             return
-        manager = self.services.create_filter_manager(self.project)
-        manager.output_message.connect(self._append_output)
-        manager.changed.connect(self.explorer.refresh)
-        manager.changed.connect(self._reload_filter_shortcuts)
+        manager = main.services.create_filter_manager(project)
+        manager.output_message.connect(main.append_output)
+        manager.changed.connect(main.explorer.refresh)
+        manager.changed.connect(self.reload_shortcuts)
         window = FilterManagerWindow(
             manager,
-            project_name=self.project.manifest.name,
+            project_name=project.manifest.name,
             project_root=project_root,
-            parent=self,
+            parent=main,
         )
-        self._filter_window = window
+        self._editor_window = window
         window.show()
         window.raise_()
         window.activateWindow()
 
-    def _set_project(self, project) -> None:
-        if self._has_active_capture():
-            super()._set_project(project)
-            return
+    def close_editor(self) -> bool:
+        """Close the editor; return False when the user keeps pending edits."""
 
-        previous = self.project
-        changing_project = (
-            previous is not None
-            and Path(previous.root).resolve() != Path(project.root).resolve()
-        )
-        if changing_project and not self._dispose_filter_window():
-            return
-
-        super()._set_project(project)
-        if self.project is not previous:
-            self._reload_filter_shortcuts()
-
-    def _dispose_filter_window(self) -> bool:
-        window = self._filter_window
+        window = self._editor_window
         if window is None:
             return True
         if not window.close():
             return False
-        self._filter_window = None
+        self._editor_window = None
         window.deleteLater()
         return True
 
-    def _clear_filter_shortcuts(self) -> None:
-        for shortcut in self._preset_shortcuts:
+    def clear_shortcuts(self) -> None:
+        for shortcut in self._shortcuts:
             shortcut.setEnabled(False)
             shortcut.deleteLater()
-        self._preset_shortcuts.clear()
+        self._shortcuts.clear()
 
-    def _reload_filter_shortcuts(self) -> None:
-        self._clear_filter_shortcuts()
-        if self.project is None:
+    def reload_shortcuts(self) -> None:
+        self.clear_shortcuts()
+        main = self._window
+        project = main.project
+        if project is None:
             return
 
-        repository = ProjectFilterRepository(self.project.database_path)
+        repository = ProjectFilterRepository(project.database_path)
         presets = repository.list_presets()
         check = check_filter_shortcuts(
             presets,
-            project=self.project,
-            action_root=self,
+            project=project,
+            action_root=main,
         )
         signature = check.messages
         if signature != self._shortcut_issue_signature:
             self._shortcut_issue_signature = signature
             for message in signature:
-                self._append_output(f"Skrót filtra pominięty: {message}")
+                main.append_output(f"Skrót filtra pominięty: {message}")
 
         for preset in presets:
             canonical = check.canonical_by_id.get(preset.id)
@@ -212,81 +209,72 @@ class WindowedFilterMainWindow(MainWindow):
                 continue
             shortcut = QShortcut(
                 QKeySequence.fromString(canonical, QKeySequence.PortableText),
-                self,
+                main,
             )
             shortcut.setContext(Qt.ApplicationShortcut)
             shortcut.setAutoRepeat(False)
             shortcut.activated.connect(
-                lambda preset_id=preset.id: self._toggle_filter_preset(preset_id)
+                lambda preset_id=preset.id: self.toggle_preset(preset_id)
             )
-            self._preset_shortcuts.append(shortcut)
+            self._shortcuts.append(shortcut)
 
-    def _toggle_filter_preset(self, preset_id: str) -> None:
-        if self.project is None:
+    def toggle_preset(self, preset_id: str) -> None:
+        main = self._window
+        project = main.project
+        if project is None:
             return
 
-        window = self._filter_window
+        window = self._editor_window
         if window is not None and window.has_pending_changes:
-            self._append_output(
+            main.append_output(
                 "Nie przełączono presetu skrótem: najpierw zastosuj albo odrzuć zmiany w edytorze filtrów."
             )
             window.raise_()
             window.activateWindow()
             return
 
-        repository = ProjectFilterRepository(self.project.database_path)
+        repository = ProjectFilterRepository(project.database_path)
         presets = repository.list_presets()
         selected = next((preset for preset in presets if preset.id == preset_id), None)
         if selected is None:
-            self._reload_filter_shortcuts()
+            self.reload_shortcuts()
             return
 
         target_enabled = not selected.enabled
         if target_enabled:
-            issues = FilterCompiler().validate(selected)
+            issues = StaticFilterCompiler().validate(selected)
             if issues:
                 message = (
                     f"Nie można aktywować filtra „{selected.name}” skrótem: "
                     f"{issues[0].path}: {issues[0].message}"
                 )
-                self._append_output(message)
-                QMessageBox.warning(self, "Nieprawidłowy filtr", message)
+                main.append_output(message)
+                QMessageBox.warning(main, "Nieprawidłowy filtr", message)
                 return
 
         selected.enabled = target_enabled
         check = check_filter_shortcuts(
             presets,
-            project=self.project,
-            action_root=self,
+            project=project,
+            action_root=main,
         )
         if check.messages:
             message = "\n".join(check.messages[:10])
-            self._append_output(f"Nie przełączono presetu: {message}")
-            QMessageBox.warning(self, "Konflikt skrótów filtrów", message)
+            main.append_output(f"Nie przełączono presetu: {message}")
+            QMessageBox.warning(main, "Konflikt skrótów filtrów", message)
             return
 
         try:
             repository.save_presets(presets)
         except Exception as exc:
-            QMessageBox.critical(self, "Nie można przełączyć filtra", str(exc))
+            QMessageBox.critical(main, "Nie można przełączyć filtra", str(exc))
             return
 
         state = "WŁĄCZONY" if selected.enabled else "WYŁĄCZONY"
-        self._append_output(
+        main.append_output(
             f"Filtr „{selected.name}”: {state} (skrót {selected.shortcut})"
         )
-        self.explorer.refresh()
-        if window is not None and hasattr(window.manager, "reload_from_repository"):
+        main.explorer.refresh()
+        if window is not None:
             window.manager.reload_from_repository()
-        self._reload_filter_shortcuts()
-
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        if self._has_active_capture():
-            super().closeEvent(event)
-            return
-        if not self._dispose_filter_window():
-            event.ignore()
-            return
-        super().closeEvent(event)
-        if event.isAccepted():
-            self._clear_filter_shortcuts()
+        self.reload_shortcuts()

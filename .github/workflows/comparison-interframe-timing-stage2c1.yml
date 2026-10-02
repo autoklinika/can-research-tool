@@ -31,7 +31,7 @@ jobs:
           python -m compileall -q
           app/comparison_interframe_timing.py
           gui/comparison_interframe_timing_view.py
-          gui/comparison_visualization_stage2c1.py
+          gui/comparison_visualization.py
           gui/comparison_sets_analysis_view.py
           tests/test_comparison_interframe_timing.py
           tests_gui/comparison_interframe_timing_smoke.py

@@ -51,6 +51,11 @@ Nowa klasa `EngineeringShellMainWindow` dziedziczy po dotychczasowym
 `StaticFilterWindowMainWindow`. Istniejące moduły są osadzane w nowej powłoce
 bez przenoszenia ich logiki do warstwy GUI.
 
+> Aktualizacja: łańcuch dziedziczenia okien (`EngineeringShellMainWindow` i
+> kolejne warstwy aż do `HelpCenterMainWindow`) został zastąpiony jedną klasą
+> `gui/main_window.py::MainWindow` z jawnymi kontrolerami funkcji. Aktualny
+> opis: `docs/APPLICATION_DEPENDENCIES_PL.md`.
+
 ## Walidacja
 
 Nowy smoke test `tests_gui/engineering_shell_smoke.py` sprawdza:

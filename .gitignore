@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# CRT GUI startup diagnostics
+crt_gui_startup.log

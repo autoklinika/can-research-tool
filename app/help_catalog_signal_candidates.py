@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from . import help_catalog as _help_catalog
-from .help_catalog import HelpSection, HelpTopic
+from .help_model import HelpSection, HelpTopic
 
 
 SIGNAL_CANDIDATES_HELP_TOPIC = HelpTopic(
     id="signal-candidate-engine",
-    category="Analiza i porównania",
+    category="Porównywanie logów",
     title="Signal Candidate Engine — ranking kandydatów sygnałów",
     summary=(
         "Jak CRT scala deterministyczne wyniki Experiment Diff z opcjonalną walidacją "
@@ -90,11 +89,6 @@ SIGNAL_CANDIDATES_HELP_TOPIC = HelpTopic(
         "artifacts",
     ),
 )
-
-
-if not any(topic.id == SIGNAL_CANDIDATES_HELP_TOPIC.id for topic in _help_catalog.HELP_TOPICS):
-    _help_catalog.HELP_TOPICS = (*_help_catalog.HELP_TOPICS, SIGNAL_CANDIDATES_HELP_TOPIC)
-    _help_catalog._TOPIC_BY_ID[SIGNAL_CANDIDATES_HELP_TOPIC.id] = SIGNAL_CANDIDATES_HELP_TOPIC
 
 
 __all__ = ["SIGNAL_CANDIDATES_HELP_TOPIC"]

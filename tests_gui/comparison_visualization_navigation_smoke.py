@@ -214,10 +214,10 @@ def _coordinator_smoke(app: QApplication) -> None:
 
         window = ApplicationContainer().create_main_window()
         window.show()
-        window._set_project(project)
+        window.set_project(project)
         app.processEvents()
         probe = _RequestProbe()
-        window._open_comparison_evidence(
+        window.comparison_sets.open_evidence(
             session.id,
             "0:STD:200:data",
             probe,

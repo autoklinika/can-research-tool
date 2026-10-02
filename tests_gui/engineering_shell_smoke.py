@@ -4,12 +4,14 @@ import gc
 import time
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QEvent, QSettings, QThreadPool, Qt
+from PySide6.QtCore import QEvent, QSettings, QThreadPool
 from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import (
     QApplication,
     QTableView,
+    QDockWidget,
     QTableWidget,
+    QToolBar,
     QToolButton,
     QWidget,
 )
@@ -18,9 +20,9 @@ from app.project import CrtProject
 from gui.application_container import ApplicationContainer
 import gui.async_dbc_manager as async_dbc_manager
 from gui.async_dbc_manager import AsyncDbcManagerWidget
-from gui.engineering_shell import EngineeringShellMainWindow
 from gui.engineering_theme import apply_engineering_theme
 from gui.logical_message_model import LogicalMessageTableModel
+from gui.main_window import MainWindow
 from gui.project_explorer import ROLE_NODE_TYPE
 
 
@@ -53,15 +55,17 @@ def main() -> None:
         )
 
         window = ApplicationContainer().create_main_window()
-        assert isinstance(window, EngineeringShellMainWindow)
-        window._set_project(project)
+        assert isinstance(window, MainWindow)
+        window.set_project(project)
         window.show()
         app.processEvents()
 
         assert window.objectName() == "engineeringMainWindow"
         assert window.primary_toolbar.objectName() == "primaryToolBar"
-        assert window.activity_bar.objectName() == "activityBar"
-        assert window.activity_bar.isHidden()
+        # The shell is built in its final form: no hidden legacy activity bar or Output dock.
+        assert window.findChild(QToolBar, "activityBar") is None
+        assert window.findChild(QDockWidget, "outputDock") is None
+        assert not hasattr(window, "toggle_output_action")
         assert window.tabs.objectName() == "workspaceTabs"
 
         menu_names = [action.text() for action in window.menuBar().actions()]
@@ -97,14 +101,6 @@ def main() -> None:
         )
         assert "Ctrl+Shift+B" in window.toggle_explorer_action.toolTip()
         assert window.toggle_inspector_action.shortcut().toString() == "Ctrl+Shift+I"
-        assert window.toggle_output_action.shortcut().toString() == ""
-        assert window.toggle_output_action.isVisible() is False
-        assert window.toggle_output_action.isEnabled() is False
-        assert window.output_dock.isHidden()
-        assert (
-            window.dockWidgetArea(window.output_dock)
-            == Qt.DockWidgetArea.NoDockWidgetArea
-        )
 
         # Main tools are opt-in and the View action mirrors their real visibility.
         assert window.primary_toolbar.isHidden()
@@ -181,7 +177,7 @@ def main() -> None:
         async_dbc_manager.list_project_dbc = slow_list_project_dbc
         try:
             started = time.monotonic()
-            window._open_decoders()
+            window.open_decoders()
             elapsed = time.monotonic() - started
             assert elapsed < 0.2
             decoder_workspace = window.navigator.widget("decoders")
@@ -232,20 +228,16 @@ def main() -> None:
         window.toggle_primary_toolbar_action.trigger()
         app.processEvents()
         assert not window.primary_toolbar.isHidden()
-        window._reset_workspace_layout()
-        assert window.output_dock.isHidden()
-        assert (
-            window.dockWidgetArea(window.output_dock)
-            == Qt.DockWidgetArea.NoDockWidgetArea
-        )
+        window.reset_workspace_layout()
+        assert window.findChild(QDockWidget, "outputDock") is None
         assert not window.explorer_dock.isHidden()
         assert window.inspector_dock.isHidden()
         assert not window.toggle_inspector_action.isChecked()
         assert window.primary_toolbar.isHidden()
         assert not window.toggle_primary_toolbar_action.isChecked()
-        assert window.activity_bar.isHidden()
+        assert window.findChild(QToolBar, "activityBar") is None
 
-        window._close_project_tabs()
+        window.close_project_tabs()
         window.close()
         window.deleteLater()
         assert QThreadPool.globalInstance().waitForDone(5_000)

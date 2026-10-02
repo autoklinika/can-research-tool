@@ -114,6 +114,18 @@ class LiveCaptureWidget(QWidget):
     def is_capturing(self) -> bool:
         return self._controller.is_active
 
+    @property
+    def save_integration(self) -> LiveSaveIntegration:
+        """Deferred Live log save integration owned by this view."""
+
+        return self._live_save_integration
+
+    @property
+    def finalized_session_path(self) -> Path | None:
+        """Durable session path of the last finalized capture, if any."""
+
+        return self._finalized_session_path
+
     def shutdown(self) -> None:
         if self._controller.is_active:
             self._controller.stop()
@@ -192,6 +204,10 @@ class LiveCaptureWidget(QWidget):
         root.addWidget(connection_group)
 
         view_controls = QHBoxLayout()
+        # Reserved places for controls owned by the Live filter integration.
+        self.view_mode_controls = QHBoxLayout()
+        self.view_mode_controls.setContentsMargins(0, 0, 0, 0)
+        view_controls.addLayout(self.view_mode_controls)
         self.pause_view = QCheckBox("Pauza widoku")
         self.pause_view.setToolTip(
             "Zatrzymuje tabele ramek i wiadomości, ale nie odbiór ani zapis sesji."
@@ -200,6 +216,9 @@ class LiveCaptureWidget(QWidget):
         self.auto_scroll = QCheckBox("Auto-scroll")
         self.auto_scroll.setChecked(True)
         view_controls.addWidget(self.auto_scroll)
+        self.filter_controls = QHBoxLayout()
+        self.filter_controls.setContentsMargins(0, 0, 0, 0)
+        view_controls.addLayout(self.filter_controls)
         view_controls.addWidget(
             QLabel(
                 f"Bufory GUI: {self.LIVE_CAPACITY:,} ramek / "

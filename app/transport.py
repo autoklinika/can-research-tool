@@ -32,6 +32,12 @@ class _J1939Session:
     errors: list[str] = field(default_factory=list)
 
 
+def _j1939_kind_for_destination(destination: int) -> TransportKind:
+    """Best guess for frames without a session: global destination means BAM."""
+
+    return TransportKind.J1939_BAM if destination == 0xFF else TransportKind.J1939_RTS_CTS
+
+
 class J1939TpReassembler:
     """Reassemble J1939 TP BAM and RTS/CTS payloads.
 
@@ -151,7 +157,7 @@ class J1939TpReassembler:
                     sequence=0,
                     first_timestamp_ns=frame.timestamp_ns,
                     last_timestamp_ns=frame.timestamp_ns,
-                    transport=TransportKind.J1939_BAM,
+                    transport=_j1939_kind_for_destination(destination),
                     payload=bytes(frame.data[1:]),
                     frame_sequences=(frame.sequence,),
                     arbitration_id=frame.arbitration_id,
@@ -236,7 +242,7 @@ class J1939TpReassembler:
             sequence=0,
             first_timestamp_ns=frame.timestamp_ns,
             last_timestamp_ns=frame.timestamp_ns,
-            transport=TransportKind.J1939_BAM,
+            transport=_j1939_kind_for_destination(destination),
             payload=bytes(frame.data),
             frame_sequences=(frame.sequence,),
             arbitration_id=frame.arbitration_id,
@@ -491,8 +497,51 @@ class IsoTpReassembler:
         return None, None, "normal-11bit"
 
 
-class TransportPipeline:
-    """Run independent transport plugins with a RAW fallback."""
+def raw_transport_message(frame: CanFrame) -> TransportMessage:
+    """Wrap one frame that no reassembler claimed as a RAW logical message."""
+
+    source = destination = pgn = None
+    metadata: dict[str, object] = {}
+    if frame.is_extended_id:
+        identifier = decode_j1939_identifier(frame.arbitration_id)
+        source = identifier.source_address
+        destination = identifier.destination_address
+        pgn = identifier.pgn
+        metadata["j1939_identifier_candidate"] = {
+            "priority": identifier.priority,
+            "pdu_format": identifier.pdu_format,
+            "pdu_specific": identifier.pdu_specific,
+            "pgn": identifier.pgn,
+        }
+
+    return TransportMessage(
+        sequence=0,
+        first_timestamp_ns=frame.timestamp_ns,
+        last_timestamp_ns=frame.timestamp_ns,
+        transport=TransportKind.RAW,
+        payload=bytes(frame.data),
+        frame_sequences=(frame.sequence,),
+        arbitration_id=frame.arbitration_id,
+        is_extended_id=frame.is_extended_id,
+        source_address=source,
+        destination_address=destination,
+        pgn=pgn,
+        complete=not frame.is_error_frame,
+        error="CAN error frame" if frame.is_error_frame else "",
+        metadata=metadata,
+    )
+
+
+def _sort_messages(messages: Iterable[TransportMessage]) -> list[TransportMessage]:
+    return sorted(messages, key=lambda item: (item.first_timestamp_ns, item.sequence))
+
+
+class StreamingTransportPipeline:
+    """Incremental transport pipeline used by live capture and stored sessions.
+
+    Reassembler state remains alive between calls to ``feed``. Nothing is
+    flushed until ``flush`` is called when the input ends.
+    """
 
     def __init__(self, reassemblers: Iterable[TransportReassembler] | None = None) -> None:
         self._reassemblers = list(
@@ -502,23 +551,24 @@ class TransportPipeline:
         )
         self._next_sequence = 0
 
-    def process(self, frames: Iterable[CanFrame]) -> list[TransportMessage]:
+    def feed(self, frame: CanFrame) -> list[TransportMessage]:
+        for reassembler in self._reassemblers:
+            if not reassembler.accepts(frame):
+                continue
+            return self._assign_sequences(reassembler.feed(frame))
+        return [self._assign_sequence(raw_transport_message(frame))]
+
+    def feed_many(self, frames: Iterable[CanFrame]) -> list[TransportMessage]:
         messages: list[TransportMessage] = []
         for frame in frames:
-            handled = False
-            for reassembler in self._reassemblers:
-                if not reassembler.accepts(frame):
-                    continue
-                handled = True
-                messages.extend(self._assign_sequences(reassembler.feed(frame)))
-                break
-            if not handled:
-                messages.append(self._assign_sequence(self._raw_message(frame)))
+            messages.extend(self.feed(frame))
+        return messages
 
+    def flush(self) -> list[TransportMessage]:
+        messages: list[TransportMessage] = []
         for reassembler in self._reassemblers:
             messages.extend(self._assign_sequences(reassembler.flush()))
-
-        return sorted(messages, key=lambda item: (item.first_timestamp_ns, item.sequence))
+        return _sort_messages(messages)
 
     def _assign_sequences(
         self,
@@ -531,35 +581,14 @@ class TransportPipeline:
         self._next_sequence += 1
         return assigned
 
-    @staticmethod
-    def _raw_message(frame: CanFrame) -> TransportMessage:
-        source = destination = pgn = None
-        metadata: dict[str, object] = {}
-        if frame.is_extended_id:
-            identifier = decode_j1939_identifier(frame.arbitration_id)
-            source = identifier.source_address
-            destination = identifier.destination_address
-            pgn = identifier.pgn
-            metadata["j1939_identifier_candidate"] = {
-                "priority": identifier.priority,
-                "pdu_format": identifier.pdu_format,
-                "pdu_specific": identifier.pdu_specific,
-                "pgn": identifier.pgn,
-            }
 
-        return TransportMessage(
-            sequence=0,
-            first_timestamp_ns=frame.timestamp_ns,
-            last_timestamp_ns=frame.timestamp_ns,
-            transport=TransportKind.RAW,
-            payload=bytes(frame.data),
-            frame_sequences=(frame.sequence,),
-            arbitration_id=frame.arbitration_id,
-            is_extended_id=frame.is_extended_id,
-            source_address=source,
-            destination_address=destination,
-            pgn=pgn,
-            complete=not frame.is_error_frame,
-            error="CAN error frame" if frame.is_error_frame else "",
-            metadata=metadata,
-        )
+class TransportPipeline:
+    """Batch wrapper: feed a complete capture, flush, return time-ordered messages."""
+
+    def __init__(self, reassemblers: Iterable[TransportReassembler] | None = None) -> None:
+        self._stream = StreamingTransportPipeline(reassemblers)
+
+    def process(self, frames: Iterable[CanFrame]) -> list[TransportMessage]:
+        messages = self._stream.feed_many(frames)
+        messages.extend(self._stream.flush())
+        return _sort_messages(messages)

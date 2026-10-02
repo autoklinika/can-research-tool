@@ -13,7 +13,7 @@ from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
-from gui.final_streaming_filter_integration import FinalStreamingLiveFilterIntegration
+from gui.live_filter_integration import LiveFilterIntegration
 from gui.live_capture import LiveCaptureWidget
 
 
@@ -95,7 +95,7 @@ def main() -> None:
 
         widget = LiveCaptureWidget(
             project,
-            filter_integration_factory=FinalStreamingLiveFilterIntegration,
+            filter_integration_factory=LiveFilterIntegration,
         )
         widget.frame_model.append_frames(frames)
         widget.apply_live_filters.setChecked(True)
