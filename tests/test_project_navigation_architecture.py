@@ -63,7 +63,7 @@ def test_main_window_is_not_extended_by_inheritance() -> None:
             if node.name == "MainWindow":
                 main_window_bases = bases
             elif any(base.endswith("MainWindow") and base != "QMainWindow" for base in bases):
-                subclasses.append(f"{path.relative_to(ROOT)}: {node.name}({', '.join(bases)})")
+                subclasses.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}({', '.join(bases)})")
 
     assert main_window_bases == ["QMainWindow"]
     assert subclasses == []
@@ -81,7 +81,7 @@ def test_comparison_dialog_has_a_single_specialisation() -> None:
                 or ast.unparse(base).endswith("ComparisonVisualizationDialog")
                 for base in node.bases
             ):
-                dialog_classes.append(f"{path.relative_to(ROOT)}: {node.name}")
+                dialog_classes.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}")
 
     assert dialog_classes == [
         "gui/comparison_visualization.py: ComparisonVisualizationDialog"
@@ -99,7 +99,7 @@ def test_live_filter_integration_is_a_single_class() -> None:
                 ast.unparse(base).endswith("LiveFilterIntegration")
                 for base in node.bases
             ):
-                subclasses.append(f"{path.relative_to(ROOT)}: {node.name}")
+                subclasses.append(f"{path.relative_to(ROOT).as_posix()}: {node.name}")
 
     assert subclasses == []
 
@@ -108,7 +108,7 @@ def test_gui_does_not_search_foreign_layouts() -> None:
     """Widgets expose explicit slots instead of being searched for layouts to patch."""
 
     offenders = [
-        str(path.relative_to(ROOT))
+        path.relative_to(ROOT).as_posix()
         for path in sorted((ROOT / "gui").rglob("*.py"))
         if "_layout_containing" in path.read_text(encoding="utf-8")
     ]
