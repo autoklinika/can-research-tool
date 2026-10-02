@@ -53,7 +53,7 @@ def main() -> int:
         view.post_spin.setValue(50.0)
         view.run_button.click()
         assert view._task is not None
-        _wait_until(app, lambda: view._task is None, timeout_s=20.0)
+        _wait_until(app, lambda view=view: view._task is None, timeout_s=20.0)
 
         assert view.progress.value() == 100
         assert view.table.rowCount() == 1

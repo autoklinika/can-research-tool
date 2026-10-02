@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import traceback
 from pathlib import Path
 
@@ -18,7 +17,11 @@ def _prepare_desktop_qt_platform() -> None:
 
 def _write_startup_failure() -> None:
     log_path = Path(__file__).resolve().with_name("crt_gui_startup.log")
-    log_path.write_text(traceback.format_exc(), encoding="utf-8")
+    try:
+        log_path.write_text(traceback.format_exc(), encoding="utf-8")
+    except OSError:
+        # Never mask the original startup exception with a logging failure.
+        pass
 
 
 _prepare_desktop_qt_platform()

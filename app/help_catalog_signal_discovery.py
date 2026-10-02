@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .help_catalog import HelpSection, HelpTopic
+from .help_model import HelpSection, HelpTopic
 
 
 SIGNAL_DISCOVERY_HELP_TOPIC = HelpTopic(

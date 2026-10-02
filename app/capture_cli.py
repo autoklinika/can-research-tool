@@ -132,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=mode,
         ) as channel:
             print("Kanał otwarty. Rejestracja rozpoczęta...")
+            session.metadata["timestamp_source"] = channel.timestamp_source
+            session.metadata["timer_resolution_ns"] = channel.timer_resolution_ns
 
             while deadline is None or monotonic() < deadline:
                 frame = channel.read(timeout_ms=100)

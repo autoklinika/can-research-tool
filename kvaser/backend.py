@@ -68,6 +68,56 @@ DRIVER_READ_TIMEOUT_MS = 1
 READER_START_TIMEOUT_S = 5.0
 READER_STOP_TIMEOUT_S = 2.0
 
+#: Requested CANlib timer resolution in microseconds (CANlib default is 1000 µs).
+HARDWARE_TIMER_SCALE_US = 1
+#: CANlib reports frame timestamps as an unsigned 32-bit counter on most drivers.
+_TIMER_WRAP = 1 << 32
+
+TIMESTAMP_SOURCE_HARDWARE = "kvaser-hardware"
+TIMESTAMP_SOURCE_HOST = "host-receive"
+
+
+class HardwareTimestampMapper:
+    """Map Kvaser timer ticks into the ``perf_counter_ns`` time domain.
+
+    Capture services, markers and the GUI all measure time relative to a
+    ``perf_counter_ns()`` origin. Instead of stamping frames with the moment the
+    Python reader thread happened to pull them from the driver (which adds OS
+    scheduling and GIL jitter, and collapses bursts onto nearly identical
+    times), CRT uses the adapter's own receive timestamp and shifts it into the
+    host clock domain with one anchor pair taken right after ``busOn``.
+
+    Inter-frame deltas are therefore exactly the hardware deltas. The absolute
+    offset to host-side events (markers) is accurate to the anchor uncertainty
+    plus the relative drift of both clocks (typically tens of ppm).
+    """
+
+    __slots__ = ("_tick_ns", "_hw_anchor", "_host_anchor_ns", "_last_raw", "_wraps")
+
+    def __init__(self, *, tick_ns: int, hw_anchor: int, host_anchor_ns: int) -> None:
+        if tick_ns <= 0:
+            raise ValueError("tick_ns must be greater than zero")
+        self._tick_ns = int(tick_ns)
+        self._hw_anchor = int(hw_anchor)
+        self._host_anchor_ns = int(host_anchor_ns)
+        self._last_raw = int(hw_anchor) % _TIMER_WRAP
+        self._wraps = 0
+
+    @property
+    def tick_ns(self) -> int:
+        return self._tick_ns
+
+    def to_host_ns(self, raw_timestamp: int) -> int:
+        raw = int(raw_timestamp)
+        if raw < _TIMER_WRAP:
+            # Unwrap a 32-bit counter. A large backwards jump means overflow;
+            # small backwards steps (should not happen) are kept as-is.
+            if raw < self._last_raw and self._last_raw - raw > _TIMER_WRAP // 2:
+                self._wraps += 1
+            self._last_raw = raw
+            raw += self._wraps * _TIMER_WRAP
+        return max(0, self._host_anchor_ns + (raw - self._hw_anchor) * self._tick_ns)
+
 
 def _require_canlib() -> Any:
     if canlib is None:
@@ -106,6 +156,12 @@ class KvaserPassiveChannel:
     executes ``read(timeout=1)``, and finally switches the bus off and closes the
     handle. No other application thread touches the CANlib channel object.
 
+    Frame ``timestamp_ns`` values come from the adapter's hardware receive
+    timestamp (mapped into the ``perf_counter_ns`` domain, see
+    :class:`HardwareTimestampMapper`). When the driver does not expose the timer
+    controls, CRT falls back to the host receive time and reports this through
+    :attr:`timestamp_source`.
+
     Received frames are copied into an unbounded in-process queue. Disk writes,
     transport reassembly, protocol decoding, filtering and GUI updates consume
     that queue later and therefore cannot delay hardware reads.
@@ -136,6 +192,20 @@ class KvaserPassiveChannel:
         self._sequence = 0
         self._received_count = 0
         self._delivered_count = 0
+        self._timestamp_source = TIMESTAMP_SOURCE_HOST
+        self._timer_resolution_ns: int | None = None
+
+    @property
+    def timestamp_source(self) -> str:
+        """``kvaser-hardware`` or ``host-receive`` for the current/last capture."""
+
+        return self._timestamp_source
+
+    @property
+    def timer_resolution_ns(self) -> int | None:
+        """Hardware timer tick in nanoseconds, or ``None`` for host timestamps."""
+
+        return self._timer_resolution_ns
 
     @property
     def is_open(self) -> bool:
@@ -188,6 +258,8 @@ class KvaserPassiveChannel:
         self._sequence = 0
         self._received_count = 0
         self._delivered_count = 0
+        self._timestamp_source = TIMESTAMP_SOURCE_HOST
+        self._timer_resolution_ns = None
 
         thread = Thread(
             target=self._receive_loop,
@@ -238,6 +310,7 @@ class KvaserPassiveChannel:
     def _receive_loop(self, bitrate_value: Any) -> None:
         api = _require_canlib()
         channel: Any | None = None
+        mapper: HardwareTimestampMapper | None = None
 
         try:
             # Keep the full CANlib handle lifecycle in this one producer thread,
@@ -250,7 +323,12 @@ class KvaserPassiveChannel:
             )
             channel.setBusOutputControl(driver)
             channel.setBusParams(bitrate_value)
+            tick_ns = _configure_timer_scale(channel)
             channel.busOn()
+            mapper = _anchor_hardware_clock(channel, tick_ns)
+            if mapper is not None:
+                self._timestamp_source = TIMESTAMP_SOURCE_HARDWARE
+                self._timer_resolution_ns = mapper.tick_ns
 
             self._channel_active = True
             self._reader_ready.set()
@@ -261,10 +339,17 @@ class KvaserPassiveChannel:
                 except api.CanNoMsg:
                     continue
 
+                received_ns = perf_counter_ns()
                 flags = frame.flags
+                timestamp_ns = received_ns
+                if mapper is not None:
+                    try:
+                        timestamp_ns = mapper.to_host_ns(frame.timestamp)
+                    except (TypeError, ValueError):
+                        timestamp_ns = received_ns
                 captured = CanFrame(
                     sequence=self._sequence,
-                    timestamp_ns=perf_counter_ns(),
+                    timestamp_ns=timestamp_ns,
                     arbitration_id=int(frame.id),
                     data=bytes(frame.data[: frame.dlc]),
                     channel=self.channel_number,
@@ -322,3 +407,35 @@ class KvaserPassiveChannel:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.close()
+
+
+def _configure_timer_scale(channel: Any) -> int | None:
+    """Request microsecond hardware timestamps; return the tick in ns or ``None``."""
+
+    try:
+        iocontrol = channel.iocontrol
+        iocontrol.timer_scale = HARDWARE_TIMER_SCALE_US
+        scale_us = int(iocontrol.timer_scale)
+    except Exception:
+        return None
+    if scale_us <= 0:
+        return None
+    return scale_us * 1000
+
+
+def _anchor_hardware_clock(channel: Any, tick_ns: int | None) -> HardwareTimestampMapper | None:
+    """Pair the adapter timer with ``perf_counter_ns`` right after bus-on."""
+
+    if tick_ns is None:
+        return None
+    try:
+        before = perf_counter_ns()
+        hw_now = int(channel.readTimer())
+        after = perf_counter_ns()
+    except Exception:
+        return None
+    return HardwareTimestampMapper(
+        tick_ns=tick_ns,
+        hw_anchor=hw_now,
+        host_anchor_ns=(before + after) // 2,
+    )

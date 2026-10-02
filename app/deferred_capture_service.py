@@ -101,6 +101,8 @@ class DeferredLogicalCaptureService(CaptureService):
                 mode=KvaserReceiveMode(config.mode),
             ) as channel:
                 started = monotonic()
+                timestamp_source = str(getattr(channel, "timestamp_source", "unknown"))
+                timer_resolution_ns = getattr(channel, "timer_resolution_ns", None)
                 with self._lock:
                     self._state = CaptureState.RUNNING
                     self._started_monotonic = started
@@ -150,6 +152,8 @@ class DeferredLogicalCaptureService(CaptureService):
             elapsed = monotonic() - started
             final_metadata = {
                 "actual_duration_s": round(elapsed, 6),
+                "timestamp_source": timestamp_source,
+                "timer_resolution_ns": timer_resolution_ns,
                 "frame_count": local_frame_count,
                 "logical_message_count": 0,
                 "logical_analysis_deferred": True,

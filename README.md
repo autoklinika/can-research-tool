@@ -9,6 +9,9 @@ CRT to niezależne środowisko do **reverse engineeringu komunikacji CAN**. Nie 
 - dwa tryby elektryczne:
   - `BENCH` — kontroler wystawia ACK; właściwy dla pojedynczego ECU na stole,
   - `LISTEN_ONLY` — sprzętowy `SILENT`, bez TX i bez ACK; dla kompletnej aktywnej sieci,
+- znaczniki czasu ramek ze sprzętowego zegara Kvasera (rozdzielczość 1 µs), przeniesione do
+  domeny czasu hosta; gdy driver nie udostępnia timera, CRT używa czasu odbioru na hoście
+  i zapisuje to w metadanych sesji (`timestamp_source`),
 - strumieniowy zapis pełnej sesji i ograniczony bufor GUI,
 - import sesji CRT oraz dotychczasowych logów Kvaser CSV,
 - rekonstrukcja J1939 TP i ISO-TP,

@@ -85,7 +85,7 @@ def main() -> int:
         assert not discovery.run_button.isEnabled()
         assert discovery.cancel_button.isEnabled()
 
-        _wait_until(app, lambda: discovery._task is None, timeout_s=10.0)
+        _wait_until(app, lambda discovery=discovery: discovery._task is None, timeout_s=10.0)
         assert discovery.progress.value() == 100
         assert discovery.activity_table.rowCount() == 2
         assert "ramki: 3" in discovery.summary_label.text()

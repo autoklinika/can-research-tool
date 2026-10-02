@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
+from . import sqlite_connection as sqlite3
 from enum import StrEnum
 from pathlib import Path
 

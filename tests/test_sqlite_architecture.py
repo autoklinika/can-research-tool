@@ -32,3 +32,22 @@ def test_sqlite_policy_is_declared_without_package_monkey_patch(tmp_path) -> Non
         connection.execute("SELECT 1").fetchone()
     with pytest.raises(sqlite3.ProgrammingError):
         search_connection.execute("SELECT 1")
+
+
+def test_filter_and_dbc_repositories_close_connections(tmp_path) -> None:
+    from app import project_dbc
+    from app.filter_preferences import ProjectFilterPreferences
+    from app.filters import ProjectFilterRepository
+
+    project = CrtProject.create(tmp_path / "project", name="SQLite closing")
+    connections = [
+        ProjectFilterRepository(project.database_path)._connect(),
+        ProjectFilterPreferences(project.database_path)._connect(),
+        project_dbc._connect(project),
+    ]
+    for connection in connections:
+        assert isinstance(connection, ClosingSqliteConnection)
+        with connection as active:
+            active.execute("SELECT 1").fetchone()
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from .project import CrtProject, SessionRecord
 from .project_search_index import ProjectSearchIndex
@@ -83,6 +84,12 @@ def remove_session(
 
     removed: list[Path] = []
     missing: list[Path] = []
+    # Files are first *moved* into a per-removal staging folder. A rename is
+    # reversible, so a failure on any artifact (for example a file locked by
+    # another program on Windows) restores the already-moved files and rolls
+    # the database back. Only after the commit are staged files deleted.
+    staged: list[tuple[Path, Path]] = []
+    staging_dir = project.root / ".crt" / "trash" / f"{session.id}-{uuid4().hex}"
     connection = sqlite3.connect(project.database_path, timeout=30.0)
     connection.execute("PRAGMA foreign_keys = ON")
     try:
@@ -91,18 +98,32 @@ def remove_session(
         if cursor.rowcount != 1:
             raise KeyError(f"nie znaleziono sesji: {session.id}")
 
-        for path in artifacts:
+        for index, path in enumerate(artifacts):
             if path.exists() or path.is_symlink():
-                path.unlink()
+                staging_dir.mkdir(parents=True, exist_ok=True)
+                target = staging_dir / f"{index:02d}-{path.name}"
+                path.rename(target)
+                staged.append((path, target))
                 removed.append(path)
             else:
                 missing.append(path)
         connection.commit()
     except Exception:
         connection.rollback()
+        _restore_staged(staged)
+        _remove_empty_dir(staging_dir)
         raise
     finally:
         connection.close()
+
+    for _original, target in staged:
+        try:
+            target.unlink()
+        except OSError:
+            # The session is already gone from the project; a leftover file in
+            # .crt/trash is harmless and can be removed manually.
+            pass
+    _remove_empty_dir(staging_dir)
 
     try:
         ProjectSearchIndex(project).remove_session(session.id)
@@ -116,6 +137,22 @@ def remove_session(
         removed_files=tuple(removed),
         missing_files=tuple(missing),
     )
+
+
+def _restore_staged(staged: list[tuple[Path, Path]]) -> None:
+    for original, target in reversed(staged):
+        try:
+            target.rename(original)
+        except OSError:
+            pass
+
+
+def _remove_empty_dir(path: Path) -> None:
+    try:
+        path.rmdir()
+        path.parent.rmdir()
+    except OSError:
+        pass
 
 
 def _session_by_id(project: CrtProject, session_id: str) -> SessionRecord | None:

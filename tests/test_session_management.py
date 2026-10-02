@@ -168,3 +168,38 @@ def test_missing_live_sidecars_are_reported_but_do_not_block_removal(tmp_path: P
     assert result.removed_files == (primary,)
     assert len(result.missing_files) == 4
     assert project.list_sessions() == []
+
+
+def test_failed_file_removal_restores_files_and_keeps_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project = _project(tmp_path)
+    artifacts = _write_standard_artifacts(project.live_sessions_dir, "locked_test")
+    session = project.register_session(
+        artifacts[0],
+        name="Locked test",
+        source="kvaser-live-stream",
+        status="ready",
+    )
+
+    original_rename = Path.rename
+    calls = {"count": 0}
+
+    def flaky_rename(self: Path, target):
+        calls["count"] += 1
+        if calls["count"] == 3:
+            raise PermissionError("file is locked")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky_rename)
+    try:
+        remove_session(project, session.id, delete_files=True)
+    except PermissionError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("expected PermissionError")
+
+    assert [item.id for item in project.list_sessions()] == [session.id]
+    assert all(path.exists() for path in artifacts)
+    assert not (project.root / ".crt" / "trash").exists()

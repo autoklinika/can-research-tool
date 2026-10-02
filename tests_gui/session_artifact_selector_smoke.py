@@ -61,13 +61,13 @@ def main() -> int:
         assert not widget.artifact_selector.isEnabled()
 
         widget.run_analysis_button.click()
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
         first_artifact_id = str(widget.artifact_selector.currentData())
         assert first_artifact_id
         assert widget.artifact_selector.count() == 1
 
         widget.run_analysis_button.click()
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
         second_artifact_id = str(widget.artifact_selector.currentData())
         assert second_artifact_id
         assert second_artifact_id != first_artifact_id

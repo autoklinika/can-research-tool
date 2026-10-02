@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any
 
 from .message_models import DecodedMessage
 from .models import CanFrame

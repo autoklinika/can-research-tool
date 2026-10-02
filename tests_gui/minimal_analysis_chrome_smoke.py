@@ -67,7 +67,7 @@ def main() -> int:
         assert widget._analysis_task is not None
         assert not widget.analysis_progress.isHidden()
         assert not widget.analysis_status.isHidden()
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
 
         assert widget.analysis_progress.isHidden()
         assert widget.analysis_status.isHidden()
@@ -79,7 +79,7 @@ def main() -> int:
         assert widget._analysis_task is not None
         assert not widget.analysis_progress.isHidden()
         assert not widget.analysis_status.isHidden()
-        _wait_until(app, lambda: widget._analysis_task is None, timeout_s=10.0)
+        _wait_until(app, lambda widget=widget: widget._analysis_task is None, timeout_s=10.0)
 
         assert widget.analysis_progress.isHidden()
         assert widget.analysis_status.isHidden()

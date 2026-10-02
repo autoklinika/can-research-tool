@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Slot
 
-# Import registers feature-owned articles in the legacy shared Help catalog.
-from app.help_catalog_experiment_diff import EXPERIMENT_DIFF_HELP_TOPIC as _EXPERIMENT_DIFF_HELP_TOPIC
-from app.help_catalog_signal_candidates import SIGNAL_CANDIDATES_HELP_TOPIC as _SIGNAL_CANDIDATES_HELP_TOPIC
-
 from .comparison_uds_transaction_explorer_source_view import (
     PreferredSourceUdsTransactionExplorerView,
 )

@@ -2,29 +2,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
 from html import escape
 
-
-@dataclass(frozen=True, slots=True)
-class HelpSection:
-    title: str
-    paragraphs: tuple[str, ...] = ()
-    bullets: tuple[str, ...] = ()
-    steps: tuple[str, ...] = ()
-    note: str = ""
-    warning: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class HelpTopic:
-    id: str
-    category: str
-    title: str
-    summary: str
-    keywords: tuple[str, ...]
-    sections: tuple[HelpSection, ...]
-    related: tuple[str, ...] = ()
+from .help_catalog_experiment_diff import EXPERIMENT_DIFF_HELP_TOPIC
+from .help_catalog_signal_candidates import SIGNAL_CANDIDATES_HELP_TOPIC
+from .help_catalog_signal_discovery import SIGNAL_DISCOVERY_HELP_TOPIC
+from .help_model import HelpSection, HelpTopic
 
 
 HELP_CATEGORY_ORDER = (
@@ -80,7 +63,7 @@ def T(
     )
 
 
-HELP_TOPICS: tuple[HelpTopic, ...] = (
+_CORE_HELP_TOPICS: tuple[HelpTopic, ...] = (
     T(
         "start",
         "Pierwsze kroki",
@@ -1160,7 +1143,19 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
 )
 
 
+# Feature-owned articles live in their own modules and are composed here
+# explicitly, so the catalog is complete regardless of import order.
+_FEATURE_HELP_TOPICS: tuple[HelpTopic, ...] = (
+    SIGNAL_DISCOVERY_HELP_TOPIC,
+    EXPERIMENT_DIFF_HELP_TOPIC,
+    SIGNAL_CANDIDATES_HELP_TOPIC,
+)
+
+HELP_TOPICS: tuple[HelpTopic, ...] = (*_CORE_HELP_TOPICS, *_FEATURE_HELP_TOPICS)
+
 _TOPIC_BY_ID = {topic.id: topic for topic in HELP_TOPICS}
+if len(_TOPIC_BY_ID) != len(HELP_TOPICS):  # pragma: no cover - catalog authoring error
+    raise RuntimeError("duplicate help topic id in HELP_TOPICS")
 
 
 def help_topic(topic_id: str) -> HelpTopic:

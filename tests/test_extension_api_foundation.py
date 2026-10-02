@@ -10,7 +10,6 @@ from app.domain import (
     ArtifactSource,
     EvidenceReference,
     FindingStatus,
-    FrameReference,
 )
 from app.extensions import (
     AnalysisContext,

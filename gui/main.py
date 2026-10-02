@@ -18,16 +18,43 @@ _WORKSPACE_KEYS = (
     "ui/engineeringShellGeometry",
     "ui/engineeringShellState",
 )
-_STARTUP_LOG = Path(__file__).resolve().parent.parent / "crt_gui_startup.log"
+_STARTUP_LOG_NAME = "crt_gui_startup.log"
+
+
+def _startup_log_path() -> Path:
+    """Prefer the checkout root (developer workflow); fall back to a user folder.
+
+    When CRT is installed into a read-only location (for example site-packages),
+    the package parent is not writable, so the log goes to the per-user
+    application data folder instead.
+    """
+
+    checkout_root = Path(__file__).resolve().parent.parent
+    if os.access(checkout_root, os.W_OK):
+        return checkout_root / _STARTUP_LOG_NAME
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "CAN Research Tool" / _STARTUP_LOG_NAME
+
+
+_STARTUP_LOG = _startup_log_path()
 
 
 def _checkpoint(message: str) -> None:
-    """Persist startup progress even when Qt terminates the process natively."""
+    """Persist startup progress even when Qt terminates the process natively.
 
-    with _STARTUP_LOG.open("a", encoding="utf-8") as handle:
-        handle.write(message + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    Diagnostics must never prevent the application from starting, so I/O
+    errors are swallowed.
+    """
+
+    try:
+        _STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _STARTUP_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(message + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        pass
 
 
 def _prepare_startup_settings() -> QSettings:
@@ -63,7 +90,11 @@ def _cleanup_live_temp(settings: QSettings) -> None:
 
 
 def main() -> int:
-    _STARTUP_LOG.write_text("CRT startup\n", encoding="utf-8")
+    try:
+        _STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        _STARTUP_LOG.write_text("CRT startup\n", encoding="utf-8")
+    except OSError:
+        pass
     _checkpoint("01 before QApplication")
     app = QApplication.instance() or QApplication(sys.argv)
     _checkpoint("02 QApplication ready")
