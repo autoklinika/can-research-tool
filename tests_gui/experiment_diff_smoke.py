@@ -18,7 +18,7 @@ from app.markers import CaptureMarker, MarkerPreset
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
-from gui.comparison_visualization_stage2d1 import ComparisonVisualizationDialog
+from gui.comparison_visualization import ComparisonVisualizationDialog
 from gui.experiment_diff_view import ExperimentDiffView
 
 

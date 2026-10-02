@@ -14,7 +14,7 @@ from app.comparison_sets import ComparisonSetStore
 from app.models import CanFrame, CaptureSession
 from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
-from gui.comparison_visualization_stage2c2 import ComparisonVisualizationDialog
+from gui.comparison_visualization import ComparisonVisualizationDialog
 
 REQUEST_ID = 0x18DA30F9
 RESPONSE_ID = 0x18DAF930

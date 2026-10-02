@@ -35,9 +35,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.comparison_uds_explorer_source import (
+    PreferredUdsLatencySource,
+    load_preferred_uds_latency_source,
+)
 from app.comparison_uds_latency import (
     ComparisonUdsLatencyService,
-    StoredUdsLatency,
     UdsLatencyCancelled,
     UdsLatencyResult,
 )
@@ -85,7 +88,10 @@ class _ExplorerLoadTask(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
-            stored = self.service.load_latest_compatible(
+            # A newer artifact without retained transactions must not hide
+            # an older one that has them.
+            selected = load_preferred_uds_latency_source(
+                self.service,
                 self.comparison_set,
                 should_cancel=lambda: self.cancellation.is_cancelled,
             )
@@ -95,7 +101,7 @@ class _ExplorerLoadTask(QRunnable):
         except Exception as exc:  # pragma: no cover - surfaced in GUI
             self.signals.failed.emit(self.generation, str(exc))
         else:
-            self.signals.completed.emit(self.generation, stored)
+            self.signals.completed.emit(self.generation, selected)
         finally:
             self.signals.finished.emit(self.generation)
 
@@ -605,7 +611,7 @@ class ComparisonUdsTransactionExplorerView(QWidget):
         self._tasks[generation] = task
         self._set_running(True)
         self.status_label.setText(
-            "Wczytuję trwały artefakt Stage 2C2…"
+            "Szukam najnowszego artefaktu Stage 2C2 z transakcjami…"
         )
         QThreadPool.globalInstance().start(task)
 
@@ -768,16 +774,14 @@ class ComparisonUdsTransactionExplorerView(QWidget):
     ) -> None:
         if generation != self._generation:
             return
-        if isinstance(value, StoredUdsLatency):
-            self.set_source_result(
-                value.result,
-                value.artifact.id,
+        if not isinstance(value, PreferredUdsLatencySource):
+            self._task_failed(
+                generation,
+                "Nieobsługiwany wynik wyboru artefaktu UDS.",
             )
-            self.status_label.setText(
-                self.status_label.text()
-                + " Wczytano bez ponownego skanowania surowych sesji."
-            )
-        elif value is None:
+            return
+        stored = value.stored
+        if stored is None:
             self._source_result = None
             self._source_artifact_id = ""
             self._explorer_result = None
@@ -786,11 +790,32 @@ class ComparisonUdsTransactionExplorerView(QWidget):
                 "Nie znaleziono zgodnego artefaktu Stage 2C2. "
                 "Uruchom najpierw kartę Latencja UDS."
             )
-        else:
-            self._task_failed(
-                generation,
-                "Nieobsługiwany wynik eksploratora.",
+            return
+
+        self.set_source_result(stored.result, stored.artifact.id)
+        configuration = stored.result.configuration
+        request_count = sum(
+            session.request_count for session in stored.result.sessions
+        )
+        message = self.status_label.text()
+        message += (
+            " Wczytano bez ponownego skanowania surowych sesji. "
+            f"Klucze: {configuration.request_message_key} → "
+            f"{configuration.response_message_key}; "
+            f"żądania: {request_count}."
+        )
+        if value.skipped_newer_empty_artifacts:
+            count = value.skipped_newer_empty_artifacts
+            message += (
+                f" Pominięto {count} nowszy"
+                + (" pusty artefakt." if count == 1 else "ch pustych artefaktów.")
             )
+        elif value.evidence_count == 0:
+            message += (
+                " Żaden zgodny artefakt Stage 2C2 nie zawiera zachowanych "
+                "transakcji; sprawdź klucze w karcie Latencja UDS."
+            )
+        self.status_label.setText(message)
 
     @Slot(int, str)
     def _task_failed(
@@ -948,6 +973,8 @@ class ComparisonUdsTransactionExplorerView(QWidget):
         )
 
     def _populate_result(self) -> None:
+        # Drop the Qt selection before the rows behind it are replaced.
+        self.transaction_table.clearSelection()
         result = self._explorer_result
         if result is None:
             self._clear_result()
@@ -1037,6 +1064,7 @@ class ComparisonUdsTransactionExplorerView(QWidget):
         self._update_buttons()
 
     def _clear_result(self) -> None:
+        self.transaction_table.clearSelection()
         self.chart.set_distributions(())
         self.group_table.setRowCount(0)
         self.comparison_table.setRowCount(0)

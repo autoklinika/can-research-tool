@@ -23,7 +23,7 @@ from app.project import CrtProject
 from app.session_stream import SessionStreamWriter
 from gui.application_container import ApplicationContainer
 from gui.comparison_sets_analysis_view import AnalysisEnabledComparisonSetsView
-from gui.comparison_visualization_hardened import ComparisonVisualizationDialog
+from gui.comparison_visualization import ComparisonVisualizationDialog
 from gui.project_navigator import ProjectNavigator
 
 

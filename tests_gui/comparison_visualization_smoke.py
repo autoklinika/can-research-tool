@@ -117,9 +117,20 @@ def _dialog_smoke(app: QApplication) -> None:
         dialog.show()
         app.processEvents()
 
-        assert dialog.result_tabs.count() == 2
-        assert dialog.result_tabs.tabText(0) == "Przegląd graficzny"
-        assert dialog.result_tabs.tabText(1) == "Dane artefaktu"
+        tab_names = [
+            dialog.result_tabs.tabText(index)
+            for index in range(dialog.result_tabs.count())
+        ]
+        assert tab_names == [
+            "Przegląd graficzny",
+            "Oś czasu",
+            "Timing i jitter",
+            "Latencja UDS",
+            "Transakcje UDS",
+            "Experiment Diff",
+            "Signal Candidates",
+            "Dane artefaktu",
+        ]
         assert dialog.run_all_button.isEnabled()
         assert dialog.artifact_combo.count() == 0
 
@@ -151,7 +162,11 @@ def _wait_for_batch(
     dialog: ComparisonVisualizationDialog,
 ) -> None:
     deadline = monotonic() + 30.0
-    while dialog._task is not None or dialog._batch_total > 0:
+    while (
+        dialog._task is not None
+        or dialog._batch_total > 0
+        or bool(dialog._dashboard_tasks)
+    ):
         QThreadPool.globalInstance().waitForDone(50)
         app.sendPostedEvents()
         app.processEvents()

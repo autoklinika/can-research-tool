@@ -67,3 +67,22 @@ def test_main_window_is_not_extended_by_inheritance() -> None:
 
     assert main_window_bases == ["QMainWindow"]
     assert subclasses == []
+
+
+def test_comparison_dialog_has_a_single_specialisation() -> None:
+    """Analysis tabs are composed into one dialog, not stacked as stage subclasses."""
+
+    dialog_classes: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and any(
+                ast.unparse(base).endswith("ComparisonAnalysisDialog")
+                or ast.unparse(base).endswith("ComparisonVisualizationDialog")
+                for base in node.bases
+            ):
+                dialog_classes.append(f"{path.relative_to(ROOT)}: {node.name}")
+
+    assert dialog_classes == [
+        "gui/comparison_visualization.py: ComparisonVisualizationDialog"
+    ]

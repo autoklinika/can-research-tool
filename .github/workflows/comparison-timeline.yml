@@ -34,7 +34,7 @@ jobs:
           gui/comparison_evidence_navigation.py
           gui/comparison_sets_analysis_view.py
           gui/comparison_sets_controller.py
-          gui/comparison_visualization_hardened.py
+          gui/comparison_visualization.py
           tests/test_comparison_timeline.py
           tests_gui/comparison_timeline_smoke.py
       - name: Verify comparison timeline core
