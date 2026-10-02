@@ -14,7 +14,7 @@ from app.logical_records import LogicalMessageRecord
 from app.models import CanFrame
 from app.project import CrtProject
 from gui.live_capture import LiveCaptureWidget
-from gui.streaming_live_filter_integration import StreamingLiveFilterIntegration
+from gui.live_filter_integration import LiveFilterIntegration
 
 
 class _ActiveController:
@@ -195,7 +195,7 @@ def main() -> None:
         active_widget = LiveCaptureWidget(
             project,
             controller=_ActiveController(),
-            filter_integration_factory=StreamingLiveFilterIntegration,
+            filter_integration_factory=LiveFilterIntegration,
         )
         active_widget.frame_model.append_frames(frames)
         active_widget.message_model.append_messages([_logical_message(1)])

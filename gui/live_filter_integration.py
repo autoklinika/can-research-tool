@@ -1,32 +1,41 @@
 from __future__ import annotations
 
 from collections import deque
-from time import sleep
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
     QAbstractTableModel,
     QModelIndex,
     QObject,
-    QRunnable,
     QThreadPool,
     QTimer,
     Qt,
-    Signal,
-    Slot,
 )
-from PySide6.QtWidgets import QCheckBox, QLayout
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QRadioButton,
+    QWidget,
+)
 
-from app.filters import CanFrameRecord, ProjectFilterRepository
-from app.live_filters import ActiveFilterSet
+from app.filter_preferences import ProjectFilterPreferences
+from app.filters import ProjectFilterRepository
 from app.models import CanFrame
+from app.static_active_filters import StaticCombinedActiveFilterSet
 
+from .grouped_frame_model import GroupedFrameTableModel
 from .logical_filter_integration import (
     LogicalFilterScanResult,
     LogicalFilterScanTask,
     LogicalMessageFilterProxy,
 )
 from .logical_message_model import format_logical_message_inspector
+from .static_live_filter_tasks import (
+    StaticLiveFilterScanTask,
+    StaticLiveIncrementalFilterTask,
+)
 
 if TYPE_CHECKING:
     from .live_capture import LiveCaptureWidget
@@ -34,84 +43,9 @@ if TYPE_CHECKING:
 
 LIVE_FRAME_CAPACITY = 250_000
 LIVE_MESSAGE_CAPACITY = 100_000
-FILTER_WORKER_YIELD_EVERY = 512
-FILTER_WORKER_YIELD_SECONDS = 0.001
 INCREMENTAL_FILTER_BATCH_SIZE = 4_096
 INCREMENTAL_FILTER_DELAY_MS = 10
-
-
-class LiveFilterScanSignals(QObject):
-    completed = Signal(int, object, int)
-    failed = Signal(int, str)
-
-
-class LiveFilterScanTask(QRunnable):
-    """Evaluate an immutable Live-buffer snapshot outside the Qt GUI thread."""
-
-    def __init__(
-        self,
-        generation: int,
-        frames: tuple[CanFrame, ...],
-        filter_set: ActiveFilterSet,
-    ) -> None:
-        super().__init__()
-        self.generation = generation
-        self.frames = frames
-        self.filter_set = filter_set
-        self.signals = LiveFilterScanSignals()
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            accepted: list[CanFrame] = []
-            evaluated_through = -1
-            for index, frame in enumerate(self.frames, start=1):
-                if self.filter_set.decide(_frame_record(frame)).visible:
-                    accepted.append(frame)
-                evaluated_through = max(evaluated_through, frame.sequence)
-                if index % FILTER_WORKER_YIELD_EVERY == 0:
-                    sleep(FILTER_WORKER_YIELD_SECONDS)
-            self.signals.completed.emit(
-                self.generation,
-                accepted,
-                evaluated_through,
-            )
-        except Exception as exc:
-            self.signals.failed.emit(self.generation, str(exc))
-
-
-class LiveIncrementalFilterSignals(QObject):
-    completed = Signal(int, object)
-    failed = Signal(int, str)
-
-
-class LiveIncrementalFilterTask(QRunnable):
-    """Filter one bounded batch of newly arrived frames outside the GUI thread."""
-
-    def __init__(
-        self,
-        generation: int,
-        frames: tuple[CanFrame, ...],
-        filter_set: ActiveFilterSet,
-    ) -> None:
-        super().__init__()
-        self.generation = generation
-        self.frames = frames
-        self.filter_set = filter_set
-        self.signals = LiveIncrementalFilterSignals()
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            accepted: list[CanFrame] = []
-            for index, frame in enumerate(self.frames, start=1):
-                if self.filter_set.decide(_frame_record(frame)).visible:
-                    accepted.append(frame)
-                if index % FILTER_WORKER_YIELD_EVERY == 0:
-                    sleep(FILTER_WORKER_YIELD_SECONDS)
-            self.signals.completed.emit(self.generation, accepted)
-        except Exception as exc:
-            self.signals.failed.emit(self.generation, str(exc))
+STREAM_FILTER_VIEW_CAPACITY = 5_000
 
 
 class LiveFrameFilterProxy(QAbstractTableModel):
@@ -126,7 +60,8 @@ class LiveFrameFilterProxy(QAbstractTableModel):
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
         self.widget = widget
-        self.filter_set = ActiveFilterSet((), scope="live")
+        self._preferences = ProjectFilterPreferences(widget.project.database_path)
+        self.filter_set = StaticCombinedActiveFilterSet((), scope="live")
         self.filter_enabled = False
         self.filter_ready = False
         self.filter_scanning = False
@@ -139,8 +74,17 @@ class LiveFrameFilterProxy(QAbstractTableModel):
         return self.widget.frame_model
 
     def reload_project_filters(self) -> bool:
+        """Re-read Live presets and the project's include combination mode.
+
+        Returns True when the effective filter set changed.
+        """
+
         repository = ProjectFilterRepository(self.widget.project.database_path)
-        candidate = ActiveFilterSet(repository.list_presets(), scope="live")
+        candidate = StaticCombinedActiveFilterSet(
+            repository.list_presets(),
+            scope="live",
+            combination_mode=self._preferences.combination_mode(),
+        )
         if candidate.signature == self._signature:
             return False
         self.filter_set = candidate
@@ -223,20 +167,36 @@ class LiveFrameFilterProxy(QAbstractTableModel):
         self.filter_ready = True
         self.endResetModel()
 
+    def restart_on_empty_source(self) -> None:
+        """Show an empty, ready filtered view that grows from new frames only."""
+
+        self.beginResetModel()
+        self.filter_scanning = False
+        self.filter_ready = True
+        self._frames.clear()
+        self.endResetModel()
+
     def append_accepted_frames(self, frames: tuple[CanFrame, ...]) -> None:
         if not frames or not self.filter_enabled or not self.filter_ready:
             return
         overflow = max(0, len(self._frames) + len(frames) - LIVE_FRAME_CAPACITY)
         if overflow:
             trim_chunk = max(1, LIVE_FRAME_CAPACITY // 10)
-            remove_count = min(len(self._frames), max(overflow, trim_chunk))
-            self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
-            del self._frames[:remove_count]
-            self.endRemoveRows()
+            self._remove_front(min(len(self._frames), max(overflow, trim_chunk)))
         first_row = len(self._frames)
         self.beginInsertRows(QModelIndex(), first_row, first_row + len(frames) - 1)
         self._frames.extend(frames)
         self.endInsertRows()
+
+    def trim_to(self, capacity: int) -> bool:
+        """Drop the oldest accepted frames above ``capacity`` in 10% chunks."""
+
+        overflow = len(self._frames) - capacity
+        if overflow <= 0:
+            return False
+        trim_chunk = max(1, capacity // 10)
+        self._remove_front(min(len(self._frames), max(overflow, trim_chunk)))
+        return True
 
     def prune_before(self, first_sequence: int) -> None:
         if not self._frames:
@@ -246,26 +206,40 @@ class LiveFrameFilterProxy(QAbstractTableModel):
             if int(frame.sequence) >= first_sequence:
                 break
             remove_count += 1
-        if not remove_count:
+        self._remove_front(remove_count)
+
+    def _remove_front(self, count: int) -> None:
+        if count <= 0:
             return
-        self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
-        del self._frames[:remove_count]
+        self.beginRemoveRows(QModelIndex(), 0, count - 1)
+        del self._frames[:count]
         self.endRemoveRows()
 
 
 class LiveFilterIntegration(QObject):
-    """Compose one opt-in filter control into raw and logical Live views."""
+    """Opt-in project filters and List/Grouped presentation for Live views.
+
+    While capture is stopped, the full GUI buffer is re-filtered in background
+    workers. While capture is running, enabling or changing filters resets only
+    the presentation models and the filtered view grows from that moment on;
+    the sequence cursors owned by ``LiveCaptureWidget``, ``CaptureService``, its
+    bounded buffers and the persistent session writers are not touched.
+    """
 
     def __init__(self, widget: LiveCaptureWidget) -> None:
         super().__init__(widget)
         self.widget = widget
         self._frame_generation = 0
         self._message_generation = 0
-        self._frame_tasks: list[LiveFilterScanTask] = []
-        self._incremental_tasks: list[LiveIncrementalFilterTask] = []
+        self._frame_tasks: list[StaticLiveFilterScanTask] = []
+        self._incremental_tasks: list[StaticLiveIncrementalFilterTask] = []
         self._message_tasks: list[LogicalFilterScanTask] = []
         self._pending_frames: deque[CanFrame] = deque(maxlen=LIVE_FRAME_CAPACITY)
         self._incremental_running_generation: int | None = None
+        self._stream_reset_in_progress = False
+        self._streaming_filter_view = False
+        self._grouped_view_enabled = False
+        self._frame_display_filtered = False
 
         self.proxy = LiveFrameFilterProxy(widget)
         widget.live_filter_proxy = self.proxy
@@ -285,6 +259,15 @@ class LiveFilterIntegration(QObject):
         widget.message_model.modelReset.connect(self._source_message_model_reset)
         widget.message_model.rowsRemoved.connect(self._prune_message_filter_cache)
 
+        self.raw_grouped_model = GroupedFrameTableModel(widget)
+        self.filtered_grouped_model = GroupedFrameTableModel(widget)
+        widget.grouped_frame_model = self.raw_grouped_model
+        widget.live_grouped_filter_model = self.filtered_grouped_model
+        widget.frame_model.modelReset.connect(self._rebuild_raw_grouped_model)
+        widget.frame_model.rowsInserted.connect(self._raw_rows_inserted)
+        self.proxy.modelReset.connect(self._rebuild_filtered_grouped_model)
+        self.proxy.rowsInserted.connect(self._filtered_rows_inserted)
+
         self.checkbox = QCheckBox("Zastosuj filtry")
         self.checkbox.setObjectName("applyLiveFilters")
         self.checkbox.setChecked(False)
@@ -294,11 +277,14 @@ class LiveFilterIntegration(QObject):
         )
         self.checkbox.toggled.connect(self._set_filter_application)
         widget.apply_live_filters = self.checkbox
-        controls = _find_layout_containing(widget.layout(), widget.auto_scroll)
-        if controls is not None:
-            controls.insertWidget(2, self.checkbox)
-        else:
-            widget.layout().insertWidget(1, self.checkbox)
+
+        self.active_filter_label = QLabel()
+        self.active_filter_label.setObjectName("activeLiveFilterNames")
+        widget.active_live_filter_label = self.active_filter_label
+
+        widget.filter_controls.addWidget(self.checkbox)
+        widget.filter_controls.addWidget(self.active_filter_label)
+        widget.view_mode_controls.addWidget(self._build_view_mode_controls())
 
         self._reload_timer = QTimer(widget)
         self._reload_timer.setInterval(750)
@@ -309,16 +295,22 @@ class LiveFilterIntegration(QObject):
         self._incremental_timer.setSingleShot(True)
         self._incremental_timer.setInterval(INCREMENTAL_FILTER_DELAY_MS)
         self._incremental_timer.timeout.connect(self._start_incremental_scan)
+
+        self._rebuild_raw_grouped_model()
+        self._rebuild_filtered_grouped_model()
         self._reload_and_update()
+
+    # ------------------------------------------------------------ public API
 
     def selected_frame(self) -> CanFrame | None:
         rows = self.widget.frame_table.selectionModel().selectedRows()
         if not rows:
             return None
-        row = rows[0].row()
-        if self.widget.frame_table.model() is self.proxy:
-            return self.proxy.frame_at(row)
-        return self.widget.frame_model.frame_at(row)
+        model = self.widget.frame_table.model()
+        frame_at = getattr(model, "frame_at", None)
+        if callable(frame_at):
+            return frame_at(rows[0].row())
+        return self.widget.frame_model.frame_at(rows[0].row())
 
     def update_status(
         self,
@@ -327,18 +319,20 @@ class LiveFilterIntegration(QObject):
     ) -> None:
         self._update_live_counts(total_received, logical_total)
 
-    def _message_selected(self) -> None:
-        rows = self.widget.message_table.selectionModel().selectedRows()
-        if not rows:
-            return
-        if self.widget.message_table.model() is self.message_proxy:
-            message = self.message_proxy.message_at(rows[0].row())
-        else:
-            message = self.widget.message_model.message_at(rows[0].row())
-        if message is not None:
-            self.widget.inspector_text.emit(format_logical_message_inspector(message))
+    # ---------------------------------------------------- filter application
 
     def _set_filter_application(self, checked: bool) -> None:
+        if self.widget.is_capturing:
+            self._apply_streaming_filters(checked)
+        else:
+            self._streaming_filter_view = False
+            self._apply_buffered_filters(checked)
+        self._update_filter_control()
+        self._update_live_counts()
+
+    def _apply_buffered_filters(self, checked: bool) -> None:
+        """Stopped capture: re-filter the whole retained GUI buffer in the background."""
+
         if not checked:
             # Detach filtered presentation models before clearing their state.
             self._set_frame_display_model(False)
@@ -362,20 +356,58 @@ class LiveFilterIntegration(QObject):
         else:
             self._frame_generation += 1
             self._message_generation += 1
-            self._pending_frames.clear()
-            self._incremental_running_generation = None
-            self._incremental_timer.stop()
+            self._stop_incremental_filtering()
             if checked and not self.proxy.filter_set.active_count:
                 self.checkbox.setChecked(False)
             self.widget.output_message.emit(
                 "Filtry Live wyłączone — pokazuję pełne bufory ramek i wiadomości"
             )
-        self._update_filter_control()
-        self._update_live_counts()
+
+    def _apply_streaming_filters(self, checked: bool) -> None:
+        """Active capture: the filtered view starts empty and follows new traffic."""
+
+        if not checked:
+            self._set_frame_display_model(False)
+            self._set_message_display_model(False)
+
+        applied = bool(checked and self.proxy.filter_set.active_count)
+        self.proxy.set_filter_enabled(
+            applied and self.proxy.filter_set.affects_raw_visibility
+        )
+        self.message_proxy.set_filter_enabled(
+            applied and self.proxy.filter_set.affects_visibility
+        )
+        self._streaming_filter_view = applied
+        self._reset_streaming_presentation()
+
+        if applied:
+            names = ", ".join(self.proxy.filter_set.active_names)
+            self.widget.output_message.emit(
+                f"Filtry Live włączone od bieżącego momentu: {names}"
+            )
+        elif checked:
+            self.widget.output_message.emit(
+                "Filtry Live oczekują — brak aktywnych presetów; "
+                "pierwszy ponownie aktywowany preset zostanie zastosowany automatycznie"
+            )
+        else:
+            self.widget.output_message.emit(
+                "Filtry Live wyłączone — widok od bieżącego momentu pokazuje wszystkie ramki"
+            )
 
     def _reload_and_update(self) -> None:
         changed = self.proxy.reload_project_filters()
         logical_changed = self.message_proxy.set_filter_set(self.proxy.filter_set)
+
+        if not self.widget.is_capturing:
+            self._reload_stopped_view(changed, logical_changed)
+        else:
+            self._reload_streaming_view(changed, logical_changed)
+
+        self._update_filter_control()
+        self._update_live_counts()
+
+    def _reload_stopped_view(self, changed: bool, logical_changed: bool) -> None:
         if self.proxy.filter_set.active_count == 0:
             if self.checkbox.isChecked():
                 self.checkbox.blockSignals(True)
@@ -387,26 +419,86 @@ class LiveFilterIntegration(QObject):
             self._set_message_display_model(False)
             self.proxy.set_filter_enabled(False)
             self.message_proxy.set_filter_enabled(False)
-            self._pending_frames.clear()
-            self._incremental_running_generation = None
-            self._incremental_timer.stop()
-        elif (changed or logical_changed) and self.checkbox.isChecked():
-            self._set_frame_display_model(False)
-            self._set_message_display_model(False)
-            self.proxy.set_filter_enabled(self.proxy.filter_set.affects_raw_visibility)
-            self.message_proxy.set_filter_enabled(self.proxy.filter_set.affects_visibility)
-            if self.proxy.filter_enabled:
-                self._schedule_frame_scan()
-            else:
-                self._pending_frames.clear()
-                self._incremental_running_generation = None
-                self._incremental_timer.stop()
-            if self.message_proxy.filter_enabled:
-                self._schedule_message_scan()
-        self._update_filter_control()
-        self._update_live_counts()
+            self._stop_incremental_filtering()
+            return
+
+        if not (changed or logical_changed) or not self.checkbox.isChecked():
+            return
+        self._set_frame_display_model(False)
+        self._set_message_display_model(False)
+        self.proxy.set_filter_enabled(self.proxy.filter_set.affects_raw_visibility)
+        self.message_proxy.set_filter_enabled(self.proxy.filter_set.affects_visibility)
+        if self.proxy.filter_enabled:
+            self._schedule_frame_scan()
+        else:
+            self._stop_incremental_filtering()
+        if self.message_proxy.filter_enabled:
+            self._schedule_message_scan()
+
+    def _reload_streaming_view(self, changed: bool, logical_changed: bool) -> None:
+        if self.proxy.filter_set.active_count == 0:
+            was_filtering = bool(
+                self.proxy.filter_enabled
+                or self.message_proxy.filter_enabled
+                or self._streaming_filter_view
+            )
+            self.proxy.set_filter_enabled(False)
+            self.message_proxy.set_filter_enabled(False)
+            if self.checkbox.isChecked() and (
+                changed or logical_changed or was_filtering
+            ):
+                self._streaming_filter_view = False
+                self._reset_streaming_presentation()
+                self.widget.output_message.emit(
+                    "Brak aktywnych presetów Live — pokazuję pełny strumień; "
+                    "filtrowanie wznowi się automatycznie po aktywacji presetu"
+                )
+            return
+
+        if not (changed or logical_changed) or not self.checkbox.isChecked():
+            return
+        self.proxy.set_filter_enabled(self.proxy.filter_set.affects_raw_visibility)
+        self.message_proxy.set_filter_enabled(self.proxy.filter_set.affects_visibility)
+        self._streaming_filter_view = True
+        self._reset_streaming_presentation()
+        self.widget.output_message.emit(
+            "Zmieniono filtry Live — nowy widok obowiązuje od bieżącego momentu"
+        )
+
+    def _reset_streaming_presentation(self) -> None:
+        """Reset only presentation models and preserve capture tail cursors."""
+
+        self._frame_generation += 1
+        self._message_generation += 1
+        self._stop_incremental_filtering()
+        self._set_frame_display_model(False)
+        self._set_message_display_model(False)
+
+        self._stream_reset_in_progress = True
+        try:
+            self.widget.frame_model.clear()
+            self.widget.message_model.clear()
+        finally:
+            self._stream_reset_in_progress = False
+
+        if self.proxy.filter_enabled:
+            self.proxy.restart_on_empty_source()
+            self._set_frame_display_model(True)
+
+        if self.message_proxy.filter_enabled:
+            self.message_proxy.restart_on_empty_source()
+            self._set_message_display_model(True)
+
+    def _stop_incremental_filtering(self) -> None:
+        self._pending_frames.clear()
+        self._incremental_running_generation = None
+        self._incremental_timer.stop()
+
+    # ------------------------------------------------------- source updates
 
     def _source_frame_model_reset(self) -> None:
+        if self._stream_reset_in_progress:
+            return
         if self.proxy.filter_enabled:
             self._set_frame_display_model(False)
             self._schedule_frame_scan()
@@ -431,8 +523,12 @@ class LiveFilterIntegration(QObject):
             self._schedule_incremental_scan()
 
     def _source_message_model_reset(self) -> None:
+        if self._stream_reset_in_progress:
+            return
         if self.message_proxy.filter_enabled:
             self._schedule_message_scan()
+
+    # ------------------------------------------------------- background scans
 
     def _schedule_frame_scan(self) -> None:
         if not self.proxy.filter_enabled:
@@ -440,9 +536,7 @@ class LiveFilterIntegration(QObject):
         self._frame_generation += 1
         generation = self._frame_generation
         frames = self.widget.frame_model.snapshot_frames()
-        self._pending_frames.clear()
-        self._incremental_running_generation = None
-        self._incremental_timer.stop()
+        self._stop_incremental_filtering()
         self._set_frame_display_model(False)
         self.proxy.begin_background_scan()
         if not frames:
@@ -451,7 +545,7 @@ class LiveFilterIntegration(QObject):
             self._update_filter_control()
             self._update_live_counts()
             return
-        task = LiveFilterScanTask(generation, frames, self.proxy.filter_set)
+        task = StaticLiveFilterScanTask(generation, frames, self.proxy.filter_set)
         self._frame_tasks.append(task)
         self._frame_tasks = self._frame_tasks[-3:]
         task.signals.completed.connect(self._frame_scan_completed)
@@ -510,7 +604,11 @@ class LiveFilterIntegration(QObject):
         batch_size = min(INCREMENTAL_FILTER_BATCH_SIZE, len(self._pending_frames))
         frames = tuple(self._pending_frames.popleft() for _ in range(batch_size))
         generation = self._frame_generation
-        task = LiveIncrementalFilterTask(generation, frames, self.proxy.filter_set)
+        task = StaticLiveIncrementalFilterTask(
+            generation,
+            frames,
+            self.proxy.filter_set,
+        )
         self._incremental_running_generation = generation
         self._incremental_tasks.append(task)
         self._incremental_tasks = self._incremental_tasks[-3:]
@@ -545,6 +643,16 @@ class LiveFilterIntegration(QObject):
         self._incremental_tasks = self._incremental_tasks[-2:]
         self._update_live_counts()
         self._schedule_incremental_scan()
+
+        # The streaming view only keeps a short tail of accepted frames.
+        if (
+            self._streaming_filter_view
+            and generation == self._frame_generation
+            and self.proxy.filter_enabled
+            and self.proxy.filter_ready
+            and self.proxy.trim_to(STREAM_FILTER_VIEW_CAPACITY)
+        ):
+            self._update_live_counts()
 
     def _incremental_scan_failed(self, generation: int, error: str) -> None:
         if generation != self._frame_generation:
@@ -606,9 +714,7 @@ class LiveFilterIntegration(QObject):
         self._set_message_display_model(False)
         self.proxy.set_filter_enabled(False)
         self.message_proxy.set_filter_enabled(False)
-        self._pending_frames.clear()
-        self._incremental_running_generation = None
-        self._incremental_timer.stop()
+        self._stop_incremental_filtering()
         self.widget.output_message.emit(message)
         self._update_filter_control()
         self._update_live_counts()
@@ -627,14 +733,21 @@ class LiveFilterIntegration(QObject):
     def _prune_message_filter_cache(self, *_args: object) -> None:
         self.message_proxy.prune_source_cache_if_needed(LIVE_MESSAGE_CAPACITY * 2)
 
+    # ------------------------------------------------------- table bindings
+
     def _set_frame_display_model(self, filtered: bool) -> None:
-        target = self.proxy if filtered else self.widget.frame_model
-        if self.widget.frame_table.model() is target:
+        self._frame_display_filtered = bool(filtered)
+        if self._grouped_view_enabled:
+            target = (
+                self.filtered_grouped_model if filtered else self.raw_grouped_model
+            )
+        else:
+            target = self.proxy if filtered else self.widget.frame_model
+        table = self.widget.frame_table
+        if table.model() is target:
             return
-        self.widget.frame_table.setModel(target)
-        self.widget.frame_table.selectionModel().selectionChanged.connect(
-            self.widget._frame_selected
-        )
+        table.setModel(target)
+        table.selectionModel().selectionChanged.connect(self.widget._frame_selected)
 
     def _set_message_display_model(self, filtered: bool) -> None:
         target = self.message_proxy if filtered else self.widget.message_model
@@ -644,12 +757,114 @@ class LiveFilterIntegration(QObject):
         callback = self._message_selected if filtered else self.widget._message_selected
         self.widget.message_table.selectionModel().selectionChanged.connect(callback)
 
+    def _synchronize_display_models(self) -> None:
+        """Keep table bindings consistent with the counters shown to the user."""
+
+        self._set_frame_display_model(
+            self.proxy.filter_enabled and self.proxy.filter_ready
+        )
+        self._set_message_display_model(
+            self.message_proxy.filter_enabled and self.message_proxy.filter_ready
+        )
+
+    def _message_selected(self) -> None:
+        rows = self.widget.message_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        if self.widget.message_table.model() is self.message_proxy:
+            message = self.message_proxy.message_at(rows[0].row())
+        else:
+            message = self.widget.message_model.message_at(rows[0].row())
+        if message is not None:
+            self.widget.inspector_text.emit(format_logical_message_inspector(message))
+
+    # ------------------------------------------------------- grouped by ID
+
+    def _build_view_mode_controls(self) -> QWidget:
+        controls = QWidget(self.widget)
+        controls.setObjectName("rawFrameViewControls")
+        row = QHBoxLayout(controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(QLabel("Widok:"))
+
+        list_button = QRadioButton("Lista")
+        list_button.setObjectName("rawFrameListView")
+        list_button.setToolTip(
+            "Każda odebrana ramka CAN jest wyświetlana jako osobny wiersz."
+        )
+        grouped_button = QRadioButton("Grupuj po ID")
+        grouped_button.setObjectName("rawFrameGroupedView")
+        grouped_button.setToolTip(
+            "Jeden stabilny wiersz dla każdego kanału, formatu STD/EXT i CAN ID. "
+            "Nowsza ramka aktualizuje czas, sekwencję, DLC, dane oraz flagi."
+        )
+
+        button_group = QButtonGroup(controls)
+        button_group.setExclusive(True)
+        button_group.addButton(list_button)
+        button_group.addButton(grouped_button)
+        list_button.setChecked(True)
+        grouped_button.toggled.connect(self._set_grouped_view_enabled)
+
+        row.addWidget(list_button)
+        row.addWidget(grouped_button)
+
+        self.widget.raw_frame_view_controls = controls
+        self.widget.raw_frame_view_group = button_group
+        self.widget.raw_frame_list_view = list_button
+        self.widget.raw_frame_grouped_view = grouped_button
+        return controls
+
+    def _set_grouped_view_enabled(self, enabled: bool) -> None:
+        self._grouped_view_enabled = bool(enabled)
+        self._set_frame_display_model(self._frame_display_filtered)
+        self._update_live_counts()
+
+    def _rebuild_raw_grouped_model(self) -> None:
+        self.raw_grouped_model.replace_frames(
+            self.widget.frame_model.snapshot_frames()
+        )
+
+    def _raw_rows_inserted(self, _parent, first: int, last: int) -> None:
+        self.raw_grouped_model.append_frames(
+            _frames_from_model(self.widget.frame_model, first, last)
+        )
+
+    def _rebuild_filtered_grouped_model(self) -> None:
+        if not self.proxy.filter_enabled or not self.proxy.filter_ready:
+            self.filtered_grouped_model.clear()
+            return
+        self.filtered_grouped_model.replace_frames(
+            _frames_from_model(self.proxy, 0, self.proxy.rowCount() - 1)
+        )
+
+    def _filtered_rows_inserted(self, _parent, first: int, last: int) -> None:
+        if not self.proxy.filter_enabled or not self.proxy.filter_ready:
+            return
+        self.filtered_grouped_model.append_frames(
+            _frames_from_model(self.proxy, first, last)
+        )
+
+    # ---------------------------------------------------------- indicators
+
     def _update_filter_control(self) -> None:
-        count = self.proxy.filter_set.active_count
-        self.checkbox.setEnabled(count > 0)
+        filter_set = self.proxy.filter_set
+        count = filter_set.active_count
+        names = ", ".join(filter_set.active_names)
+        checked = self.checkbox.isChecked()
+        capturing = self.widget.is_capturing
+
         self.checkbox.setText(f"Zastosuj filtry ({count})" if count else "Zastosuj filtry")
-        if count:
-            names = ", ".join(self.proxy.filter_set.active_names)
+        # While capturing, keep a checked control enabled without presets: the
+        # user's intent is preserved and they can still cancel it explicitly.
+        self.checkbox.setEnabled(count > 0 or (capturing and checked))
+        if count and capturing and checked:
+            tooltip = (
+                f"Filtry Live: WŁĄCZONE. Aktywne presety: {names}. "
+                "Widok działa strumieniowo od momentu aktywacji; pełny zapis sesji trwa nadal."
+            )
+        elif count:
             scanning = (
                 self.proxy.filter_scanning
                 or self.message_proxy.filter_scanning
@@ -658,30 +873,39 @@ class LiveFilterIntegration(QObject):
             if scanning:
                 state = "PRZELICZANIE"
             else:
-                state = "WŁĄCZONE" if self.checkbox.isChecked() else "WYŁĄCZONE"
-            self.checkbox.setToolTip(
+                state = "WŁĄCZONE" if checked else "WYŁĄCZONE"
+            tooltip = (
                 f"Filtry Live: {state}. Aktywne presety: {names}. "
                 "Pełne przeliczenie ramek i wiadomości odbywa się poza wątkiem GUI."
             )
+        elif capturing and checked:
+            tooltip = (
+                "Filtry Live: OCZEKIWANIE. Brak aktywnych presetów. "
+                "Pierwszy aktywowany preset zostanie zastosowany automatycznie."
+            )
         else:
-            self.checkbox.setToolTip("Brak aktywnych presetów przeznaczonych dla Live Capture.")
+            tooltip = "Brak aktywnych presetów przeznaczonych dla Live Capture."
+        self.checkbox.setToolTip(tooltip)
+
+        mode = filter_set.combination_mode.value.upper()
+        if checked and names:
+            text = f"Filtry: {names} | Include: {mode}"
+        elif checked:
+            text = f"Filtry: oczekiwanie na preset | Include: {mode}"
+        elif names:
+            text = f"{names} | zastosowanie Live: WYŁĄCZONE | Include: {mode}"
+        else:
+            text = f"Filtry: brak aktywnych presetów | Include: {mode}"
+        self.active_filter_label.setText(text)
 
     def _update_live_counts(
         self,
         total_received: int | None = None,
         logical_total: int | None = None,
     ) -> None:
-        retained = self.widget.frame_model.frame_count
-        visible = (
-            self.proxy.rowCount()
-            if self.proxy.filter_enabled and self.proxy.filter_ready
-            else retained
-        )
-        frame_suffix = " (przeliczanie)" if self.proxy.filter_scanning else ""
-        self.widget.visible_label.setText(
-            (f"Widoczne: {visible:,} / bufor {retained:,}{frame_suffix}").replace(",", " ")
-        )
+        self._synchronize_display_models()
 
+        retained = self.widget.frame_model.frame_count
         if total_received is None or logical_total is None:
             try:
                 status = self.widget._controller.status()
@@ -696,10 +920,40 @@ class LiveFilterIntegration(QObject):
                     else self.widget.message_model.message_count
                 )
 
-        self.widget.data_tabs.setTabText(
-            self.widget.raw_tab_index,
-            f"Surowe ramki ({visible:,}/{total_received:,})".replace(",", " "),
-        )
+        if self._grouped_view_enabled:
+            grouped = (
+                self.filtered_grouped_model
+                if self._frame_display_filtered
+                else self.raw_grouped_model
+            )
+            visible_groups = grouped.rowCount()
+            suffix = " (przeliczanie filtrów)" if self.proxy.filter_scanning else ""
+            self.widget.visible_label.setText(
+                (
+                    f"Widoczne ID: {visible_groups:,} / bufor {retained:,}{suffix}"
+                ).replace(",", " ")
+            )
+            self.widget.data_tabs.setTabText(
+                self.widget.raw_tab_index,
+                (
+                    f"Surowe ramki — grupy ID "
+                    f"({visible_groups:,}/{total_received:,})"
+                ).replace(",", " "),
+            )
+        else:
+            visible = (
+                self.proxy.rowCount()
+                if self.proxy.filter_enabled and self.proxy.filter_ready
+                else retained
+            )
+            frame_suffix = " (przeliczanie)" if self.proxy.filter_scanning else ""
+            self.widget.visible_label.setText(
+                (f"Widoczne: {visible:,} / bufor {retained:,}{frame_suffix}").replace(",", " ")
+            )
+            self.widget.data_tabs.setTabText(
+                self.widget.raw_tab_index,
+                f"Surowe ramki ({visible:,}/{total_received:,})".replace(",", " "),
+            )
 
         message_retained = self.widget.message_model.message_count
         message_visible = (
@@ -721,6 +975,20 @@ class LiveFilterIntegration(QObject):
                 else f"Wiadomości logiczne ({logical_total:,})"
             ).replace(",", " "),
         )
+
+
+def _frames_from_model(model, first: int, last: int) -> tuple[CanFrame, ...]:
+    if first < 0 or last < first:
+        return ()
+    frame_at = getattr(model, "frame_at", None)
+    if not callable(frame_at):
+        return ()
+    frames: list[CanFrame] = []
+    for row in range(first, last + 1):
+        frame = frame_at(row)
+        if isinstance(frame, CanFrame):
+            frames.append(frame)
+    return tuple(frames)
 
 
 def _frame_data(frame: CanFrame, column: int, role: int):
@@ -754,27 +1022,4 @@ def _frame_data(frame: CanFrame, column: int, role: int):
         if frame.source_flags:
             flags.append(f"0x{frame.source_flags:X}")
         return ", ".join(flags)
-    return None
-
-
-def _frame_record(frame: CanFrame) -> CanFrameRecord:
-    return CanFrameRecord(
-        can_id=int(frame.arbitration_id),
-        extended=bool(frame.is_extended_id),
-        dlc=int(frame.dlc),
-        relative_time_us=int(frame.timestamp_ns // 1_000),
-        channel=int(frame.channel),
-    )
-
-
-def _find_layout_containing(layout: QLayout | None, target: object) -> QLayout | None:
-    if layout is None:
-        return None
-    for index in range(layout.count()):
-        item = layout.itemAt(index)
-        if item.widget() is target:
-            return layout
-        found = _find_layout_containing(item.layout(), target)
-        if found is not None:
-            return found
     return None

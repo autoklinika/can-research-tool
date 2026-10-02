@@ -10,8 +10,7 @@ from app.models import CanFrame
 from app.project import CrtProject
 from gui.grouped_frame_model import GroupedFrameTableModel
 from gui.live_capture import LiveCaptureWidget
-from gui.live_filter_integration import _find_layout_containing
-from gui.raw_frame_grouping import GroupedFinalStreamingLiveFilterIntegration
+from gui.live_filter_integration import LiveFilterIntegration
 
 
 def _frame(
@@ -69,16 +68,17 @@ def main() -> None:
         project = CrtProject.create(f"{temporary}/project", name="Raw grouping")
         widget = LiveCaptureWidget(
             project,
-            filter_integration_factory=GroupedFinalStreamingLiveFilterIntegration,
+            filter_integration_factory=LiveFilterIntegration,
         )
         integration = widget._live_filter_integration
 
-        view_controls = _find_layout_containing(widget.layout(), widget.pause_view)
-        assert view_controls is not None
-        controls_index = view_controls.indexOf(widget.raw_frame_view_controls)
-        pause_index = view_controls.indexOf(widget.pause_view)
-        assert controls_index >= 0
-        assert controls_index < pause_index
+        # The view switch sits in the reserved slot left of "Pauza widoku".
+        assert widget.view_mode_controls.indexOf(widget.raw_frame_view_controls) >= 0
+        view_row = widget.view_mode_controls.parent()
+        assert view_row is not None
+        assert view_row.indexOf(widget.view_mode_controls) < view_row.indexOf(
+            widget.pause_view
+        )
         raw_page = widget.data_tabs.widget(widget.raw_tab_index)
         assert raw_page.layout().indexOf(widget.raw_frame_view_controls) == -1
 

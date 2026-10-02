@@ -86,3 +86,31 @@ def test_comparison_dialog_has_a_single_specialisation() -> None:
     assert dialog_classes == [
         "gui/comparison_visualization.py: ComparisonVisualizationDialog"
     ]
+
+
+def test_live_filter_integration_is_a_single_class() -> None:
+    """Live filtering, streaming and grouping are one integration, not a subclass chain."""
+
+    subclasses: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and any(
+                ast.unparse(base).endswith("LiveFilterIntegration")
+                for base in node.bases
+            ):
+                subclasses.append(f"{path.relative_to(ROOT)}: {node.name}")
+
+    assert subclasses == []
+
+
+def test_gui_does_not_search_foreign_layouts() -> None:
+    """Widgets expose explicit slots instead of being searched for layouts to patch."""
+
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in sorted((ROOT / "gui").rglob("*.py"))
+        if "_layout_containing" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []
