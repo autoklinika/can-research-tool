@@ -10,7 +10,8 @@ from app.filter_preferences import FilterCombinationMode, ProjectFilterPreferenc
 from app.filters import FilterMode, FilterPreset, ProjectFilterRepository
 from app.project import CrtProject
 from gui.application_container import ApplicationContainer
-from gui.filter_manager_window import FilterManagerWindow, WindowedFilterMainWindow
+from gui.filter_manager_window import FilterManagerWindow
+from gui.main_window import MainWindow
 
 
 def _preset(name: str, shortcut: str, *, enabled: bool) -> FilterPreset:
@@ -51,23 +52,22 @@ def main() -> None:
         repository.save_presets([inactive, active])
 
         window = ApplicationContainer().create_main_window()
-        assert isinstance(window, WindowedFilterMainWindow)
-        window._set_project(project)
+        assert isinstance(window, MainWindow)
+        window.set_project(project)
 
         assert window.filters_action.shortcut().toString() == "Ctrl+D"
-        assert window.activity_bar.isHidden()
         primary_actions = window.primary_toolbar.actions()
         assert primary_actions.index(window.decoders_action) < primary_actions.index(
             window.filters_action
         )
-        registered = {shortcut.key().toString() for shortcut in window._preset_shortcuts}
+        registered = {shortcut.key().toString() for shortcut in window.filter_presets.shortcuts}
         assert registered == {"F8", "F9"}
 
         tab_count = window.tabs.count()
-        window._open_filters()
+        window.filter_presets.open_editor()
         app.processEvents()
 
-        filter_window = window._filter_window
+        filter_window = window.filter_presets.editor_window
         assert isinstance(filter_window, FilterManagerWindow)
         assert filter_window.isWindow()
         assert filter_window.isVisible()
@@ -94,7 +94,7 @@ def main() -> None:
         )
 
         # A shortcut must not persist or bypass the editor's dirty working copy.
-        window._toggle_filter_preset(inactive.id)
+        window.filter_presets.toggle_preset(inactive.id)
         saved = {preset.id: preset for preset in repository.list_presets()}
         assert saved[inactive.id].enabled is False
 
@@ -107,7 +107,7 @@ def main() -> None:
         )
 
         # An inactive preset keeps its shortcut registered and can be enabled globally.
-        window._toggle_filter_preset(inactive.id)
+        window.filter_presets.toggle_preset(inactive.id)
         saved = {preset.id: preset for preset in repository.list_presets()}
         assert saved[inactive.id].enabled is True
 
@@ -129,14 +129,14 @@ def main() -> None:
         # Reopening from the primary action/shortcut activates the same top-level window.
         window.filters_action.trigger()
         app.processEvents()
-        assert window._filter_window is filter_window
+        assert window.filter_presets.editor_window is filter_window
 
         filter_window.close()
         app.processEvents()
         assert not filter_window.isVisible()
         window.filters_action.trigger()
         app.processEvents()
-        assert window._filter_window is filter_window
+        assert window.filter_presets.editor_window is filter_window
         assert filter_window.isVisible()
 
         window.close()

@@ -23,8 +23,8 @@ def main() -> None:
     with TemporaryDirectory() as temporary:
         project = CrtProject.create(Path(temporary) / "project", name="Deferred save")
         window = ApplicationContainer().create_main_window()
-        window._set_project(project)
-        window._open_live_capture()
+        window.set_project(project)
+        window.open_live_capture()
         app.processEvents()
 
         live = window.navigator.widget("live-capture")
@@ -86,9 +86,9 @@ def main() -> None:
         integration._request_log_name = lambda: "EGR próba 01"
         live._analysis_session_path = paths.session
 
-        window._sync_save_log_action()
+        window.live_log.sync()
         assert window.save_log_action.isEnabled()
-        window._save_pending_live_log()
+        window.live_log.save_pending()
         app.processEvents()
 
         saved = project.live_sessions_dir / "EGR_pr_ba_01.crt.jsonl"

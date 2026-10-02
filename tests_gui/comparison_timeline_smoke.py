@@ -60,8 +60,8 @@ def main() -> None:
 
         window = ApplicationContainer().create_main_window()
         window.show()
-        window._set_project(project)
-        window._open_comparison_sets(comparison.id)
+        window.set_project(project)
+        window.comparison_sets.open(comparison.id)
         app.processEvents()
 
         comparison_view = window.navigator.widget("comparison-sets")

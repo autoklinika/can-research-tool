@@ -59,7 +59,7 @@ class ApplicationContainer:
         self._reveal_path_fn = reveal_path_fn
 
     def create_main_window(self) -> MainWindow:
-        from .help_center_shell import HelpCenterMainWindow as MainWindow
+        from .main_window import MainWindow
 
         return MainWindow(self)
 

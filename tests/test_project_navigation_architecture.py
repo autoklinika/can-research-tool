@@ -47,3 +47,23 @@ def test_desktop_reveal_is_outside_gui_session_management() -> None:
     assert "QDesktopServices" not in integration
     assert "QProcess" not in integration
     assert "def reveal_path(" in desktop
+
+
+def test_main_window_is_not_extended_by_inheritance() -> None:
+    """Window features are controllers, not subclasses stacked on MainWindow."""
+
+    subclasses: list[str] = []
+    main_window_bases: list[str] = []
+    for path in sorted((ROOT / "gui").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = [ast.unparse(base) for base in node.bases]
+            if node.name == "MainWindow":
+                main_window_bases = bases
+            elif any(base.endswith("MainWindow") and base != "QMainWindow" for base in bases):
+                subclasses.append(f"{path.relative_to(ROOT)}: {node.name}({', '.join(bases)})")
+
+    assert main_window_bases == ["QMainWindow"]
+    assert subclasses == []

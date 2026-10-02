@@ -31,7 +31,7 @@ jobs:
           python -m compileall -q
           app/help_catalog.py
           gui/help_center_view.py
-          gui/help_center_shell.py
+          gui/help_center_controller.py
           gui/application_container.py
           tests/test_help_catalog.py
           tests_gui/help_center_smoke.py

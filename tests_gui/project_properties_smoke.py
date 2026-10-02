@@ -48,7 +48,7 @@ def main() -> None:
             original_id = project.manifest.id
 
             window = ApplicationContainer().create_main_window()
-            window._set_project(project)
+            window.set_project(project)
             window.show()
             app.processEvents()
 
@@ -156,7 +156,7 @@ def main() -> None:
                 lambda *_args, **_kwargs: QMessageBox.StandardButton.Ok
             )
             try:
-                window._apply_project_properties_from_dialog(failing_dialog)
+                window.project_properties.apply_from_dialog(failing_dialog)
             finally:
                 project._write_manifest = original_write_manifest
                 QMessageBox.critical = original_critical
@@ -177,7 +177,7 @@ def main() -> None:
 
             if window is not None:
                 window.navigator.widgets.pop("live-capture", None)
-                window._close_project_tabs()
+                window.close_project_tabs()
                 window.close()
                 window.deleteLater()
 

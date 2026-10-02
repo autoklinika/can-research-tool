@@ -35,9 +35,9 @@ def main() -> None:
     app.processEvents()
     assert not window.isFullScreen()
 
-    window._open_log_search()
+    window.log_search.open()
     app.processEvents()
-    search_window = window._log_search_window
+    search_window = window.log_search.search_window
     assert search_window is not None
     assert search_window.full_screen_action.shortcut().toString() == "F11"
     search_window.full_screen_action.trigger()

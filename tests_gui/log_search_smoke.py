@@ -44,7 +44,7 @@ def main() -> None:
     app.processEvents()
     search = window.findChild(LogSearchWindow, "logSearchWindow")
     assert search is not None
-    assert search._target_table is table
+    assert search.target_table is table
 
     search.query_edit.setText("18DAF900")
     search.start_search()

@@ -114,6 +114,18 @@ class LiveCaptureWidget(QWidget):
     def is_capturing(self) -> bool:
         return self._controller.is_active
 
+    @property
+    def save_integration(self) -> LiveSaveIntegration:
+        """Deferred Live log save integration owned by this view."""
+
+        return self._live_save_integration
+
+    @property
+    def finalized_session_path(self) -> Path | None:
+        """Durable session path of the last finalized capture, if any."""
+
+        return self._finalized_session_path
+
     def shutdown(self) -> None:
         if self._controller.is_active:
             self._controller.stop()

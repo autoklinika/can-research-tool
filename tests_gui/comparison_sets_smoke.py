@@ -45,7 +45,7 @@ def main() -> None:
         }
 
         window = ApplicationContainer().create_main_window()
-        window._set_project(project)
+        window.set_project(project)
         app.processEvents()
 
         assert window.compare_action.isEnabled()
@@ -162,7 +162,7 @@ def main() -> None:
                 == source_hashes[session.id]
             )
 
-        window._close_project_tabs()
+        window.close_project_tabs()
         window.close()
         window.deleteLater()
         assert QThreadPool.globalInstance().waitForDone(5_000)

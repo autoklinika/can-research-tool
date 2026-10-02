@@ -146,6 +146,7 @@ class LogSearchWindow(QMainWindow):
         self._event_filter_installed = False
         self._field_checkboxes: dict[str, QCheckBox] = {}
         self._pending_search = False
+        self._builtin_navigation_enabled = True
 
         root_widget = QWidget(self)
         root = QVBoxLayout(root_widget)
@@ -248,6 +249,26 @@ class LogSearchWindow(QMainWindow):
         logic_index = self.logic_combo.findData(saved_logic)
         if logic_index >= 0:
             self.logic_combo.setCurrentIndex(logic_index)
+
+    @property
+    def target_table(self) -> QTableView | None:
+        return self._target_table
+
+    @property
+    def hit_count(self) -> int:
+        return len(self._hits)
+
+    def hit_row(self, position: int) -> int | None:
+        """Source-model row of the result at ``position``, if it exists."""
+
+        if not 0 <= position < len(self._hits):
+            return None
+        return self._hits[position].row
+
+    def set_builtin_navigation_enabled(self, enabled: bool) -> None:
+        """Let an external navigator own result selection and activation."""
+
+        self._builtin_navigation_enabled = bool(enabled)
 
     def set_target_table(self, table: QTableView | None) -> None:
         """Compatibility fallback used by older smoke tests and callers."""
@@ -411,9 +432,12 @@ class LogSearchWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _activate_index(self, index: QModelIndex) -> None:
-        self._navigate_to_hit(index.row())
+        if self._builtin_navigation_enabled:
+            self._navigate_to_hit(index.row())
 
     def _result_selection_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
+        if not self._builtin_navigation_enabled:
+            return
         position = current.row()
         if 0 <= position < len(self._hits):
             self.position_label.setText(f"{position + 1} / {len(self._hits)}")
@@ -484,4 +508,8 @@ class LogSearchWindow(QMainWindow):
     def __del__(self) -> None:
         app = QApplication.instance()
         if app is not None and self._event_filter_installed:
-            app.removeEventFilter(self)
+            try:
+                app.removeEventFilter(self)
+            except RuntimeError:
+                # The C++ window was already destroyed together with its parent.
+                pass
